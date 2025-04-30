@@ -49,8 +49,32 @@ func main() {
 	// Report routes
 	r.HandleFunc("/reports/ynab-splits", handlers.GetYNABSplits).Methods("GET", "POST")
 
-	// Serve static files
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("dist")))
+	// Create a file server for static files
+	fileServer := http.FileServer(http.Dir("dist"))
+
+	// Special handler for SPA routes - serve index.html for any unknown routes
+	r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Serve API 404 errors as-is
+		if r.URL.Path == "/reports/ynab-splits" ||
+			r.URL.Path == "/transactions" ||
+			r.URL.Path == "/categories" ||
+			r.URL.Path == "/users" {
+			http.NotFound(w, r)
+			return
+		}
+
+		// For other routes, serve the SPA's index.html
+		log.Printf("Serving index.html for route: %s", r.URL.Path)
+		http.ServeFile(w, r, "dist/index.html")
+	})
+
+	// Serve static assets directly
+	r.PathPrefix("/assets/").Handler(fileServer)
+
+	// Handle root explicitly to serve index.html
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "dist/index.html")
+	})
 
 	// Apply middleware
 	handler := middleware.EnableCORS(r)
