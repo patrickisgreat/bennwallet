@@ -1,0 +1,6 @@
+{
+  "watch": ["backend/**/*.go"],
+  "ext": "go",
+  "ignore": ["backend/tmp/*"],
+  "exec": "go run backend/main.go"
+} 

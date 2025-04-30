@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "name": "Groceries",
+    "description": "Food and household items"
+  },
+  {
+    "id": 2,
+    "name": "Dining Out",
+    "description": "Restaurants and takeout"
+  },
+  {
+    "id": 3,
+    "name": "Transportation",
+    "description": "Gas, public transit, car maintenance"
+  },
+  {
+    "id": 4,
+    "name": "Utilities",
+    "description": "Electricity, water, internet, etc."
+  },
+  {
+    "id": 5,
+    "name": "Rent/Mortgage",
+    "description": "Housing payments"
+  },
+  {
+    "id": 6,
+    "name": "Entertainment",
+    "description": "Movies, games, subscriptions"
+  },
+  {
+    "id": 7,
+    "name": "Shopping",
+    "description": "Clothing, household items"
+  },
+  {
+    "id": 8,
+    "name": "Healthcare",
+    "description": "Medical expenses, prescriptions"
+  },
+  {
+    "id": 9,
+    "name": "Personal Care",
+    "description": "Haircuts, toiletries"
+  },
+  {
+    "id": 10,
+    "name": "Gifts",
+    "description": "Birthdays, holidays, etc."
+  }
+] 
