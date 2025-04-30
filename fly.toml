@@ -1,35 +1,53 @@
-app = "bennwallet"
-primary_region = "sjc" # Silicon Valley
+############################################
+# Fly.io configuration for “bennwallet”
+############################################
+app            = "bennwallet"
+primary_region = "sjc"                 # Silicon Valley
 
+# ─────────────────────────────────────────
+# How we build the image
+# ─────────────────────────────────────────
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "Dockerfile"            # uses the multi-stage Dockerfile in repo root
 
+# ─────────────────────────────────────────
+# Environment variables visible at runtime
+# ─────────────────────────────────────────
 [env]
-  PORT = "8080"
+  PORT = "8080"                        # server listens on :8080
 
+# ─────────────────────────────────────────
+# Main HTTP service
+# ─────────────────────────────────────────
 [http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = true
-  auto_start_machines = true
-  min_machines_running = 1
-  processes = ["app"]
+  internal_port        = 8080          # matches the PORT above
+  force_https          = true
+  auto_start_machines  = true          # wake VMs on first request
+  auto_stop_machines   = true          # suspend when idle
+  min_machines_running = 1             # keep one “warm” instance to avoid 429 loops
+  processes            = ["app"]       # default process group
 
-  [[http_service.checks]]
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "10s"
-    method = "GET"
-    path = "/health"
-    protocol = "http"
+  [[http_service.checks]]              # simple health-check at /health
+    method        = "GET"
+    path          = "/health"
+    protocol      = "http"
+    interval      = "30s"
+    timeout       = "5s"
+    grace_period  = "10s"
 
+# ─────────────────────────────────────────
+# CDN-served static assets (built by Vite)
+# ─────────────────────────────────────────
 [[statics]]
-  guest_path = "/dist"
+  guest_path = "/app/dist"             # copied here in the final image stage
   url_prefix = "/"
 
+# ─────────────────────────────────────────
+# Persistent SQLite volume
+# ─────────────────────────────────────────
 [[mounts]]
-  source = "bennwallet_data"
-  destination = "/data"
+  source      = "bennwallet_data"      # volume name (create with `fly volumes create …`)
+  destination = "/data"                # path your code expects
 
-[mounts.options]
-  size = "1" # GB 
+  [mounts.options]
+    size = "1"                         # GB
