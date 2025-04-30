@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:coverage": "vitest run --coverage --silent --no-watch",
-    "test:ci": "vitest run --coverage --silent --no-watch --reporter verbose --bail 1",
+    "test:ci": "vitest run --coverage --silent --no-watch --reporter verbose",
     "test:watch": "vitest watch"
   },
   "dependencies": {
