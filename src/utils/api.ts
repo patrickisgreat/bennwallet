@@ -139,15 +139,15 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
     const userId = localStorage.getItem('userId');
     if (!userId) {
       console.warn('No userId found in localStorage - user may not be fully authenticated yet');
-      // Return empty array instead of throwing error
       return [];
     }
     
-    // Format dates to ensure they're in the expected format (YYYY-MM-DD)
+    // Format dates to ensure they're in the expected format for SQLite (YYYY-MM-DD)
     const formatDate = (dateStr?: string) => {
       if (!dateStr) return undefined;
       try {
         const date = new Date(dateStr);
+        // Simple YYYY-MM-DD format that matches our SQLite dates
         return date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
       } catch (e) {
         console.warn('Invalid date format:', dateStr);
@@ -155,78 +155,42 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       }
     };
     
-    // Manually construct the request with the userId included
-    const requestData = {
-      userId,
+    // Send request to the API
+    const requestBody = {
       startDate: formatDate(filter.startDate),
       endDate: formatDate(filter.endDate),
-      // Only include non-empty fields
-      ...(filter.category && { category: filter.category }),
-      ...(filter.payTo && { payTo: filter.payTo }),
-      ...(filter.enteredBy && { enteredBy: filter.enteredBy })
+      category: filter.category || null,
+      payTo: filter.payTo || null,
+      enteredBy: filter.enteredBy || null
     };
     
-    console.log('Formatted request data for YNAB splits:', requestData);
+    console.log('Sending POST request with body:', requestBody);
     
-    // Try to get data from the API
-    try {
-      // Now request the report - use GET instead of POST to match backend API
-      const response = await api.get('/reports/ynab-splits', { params: requestData });
-      console.log('Raw response from API:', response);
-      
-      if (!response.data) {
-        console.log('API returned null or undefined');
-        // Fall back to mock data
-        return getMockSplitsData(filter);
+    // Use POST method with explicit headers and body
+    const response = await api.post('/reports/ynab-splits', requestBody, {
+      headers: {
+        'Content-Type': 'application/json'
       }
-      
-      // Ensure we're returning an array
-      return Array.isArray(response.data) ? response.data : [];
-    } catch (error: any) {
-      console.error('Error fetching YNAB splits from API:', error);
-      if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
-        console.error('Response data:', error.response.data);
-        console.error('Response status:', error.response.status);
-        console.error('Response headers:', error.response.headers);
-      }
-      
-      // Fallback to mock data
-      console.log('Falling back to mock data for YNAB splits');
-      return getMockSplitsData(filter);
+    });
+    console.log('Raw response from API:', response);
+    
+    if (!response.data) {
+      console.log('API returned null or undefined');
+      return [];
     }
+    
+    // Ensure we're returning an array
+    return Array.isArray(response.data) ? response.data : [];
   } catch (error: any) {
-    console.error('Unexpected error in fetchYNABSplits:', error);
-    return getMockSplitsData(filter);
+    console.error('Error fetching YNAB splits from API:', error);
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      // that falls out of the range of 2xx
+      console.error('Response data:', error.response.data);
+      console.error('Response status:', error.response.status);
+      console.error('Response headers:', error.response.headers);
+    }
+    
+    throw error; // Propagate error to caller
   }
-}
-
-// Generate mock data for demo/fallback purposes
-function getMockSplitsData(filter: ReportFilter): CategoryTotal[] {
-  console.log('Generating mock YNAB splits data with filter:', filter);
-  
-  // Generate categories based on filter
-  const categories = [
-    'Groceries', 
-    'Dining Out', 
-    'Entertainment', 
-    'Utilities', 
-    'Transportation',
-    'Housing',
-    'Personal Care',
-    'Health & Medical'
-  ];
-  
-  // Filter categories if a specific one was requested
-  const filteredCategories = filter.category 
-    ? categories.filter(c => c === filter.category)
-    : categories;
-  
-  // Generate random totals
-  return filteredCategories.map(category => {
-    // Generate random values between 20 and 300
-    const total = Math.floor(Math.random() * 280) + 20;
-    return { category, total };
-  });
 } 

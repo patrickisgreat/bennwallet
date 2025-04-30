@@ -47,7 +47,7 @@ func main() {
 	r.HandleFunc("/users/{username}", handlers.GetUserByUsername).Methods("GET")
 
 	// Report routes
-	r.HandleFunc("/reports/ynab-splits", handlers.GetYNABSplits).Methods("GET")
+	r.HandleFunc("/reports/ynab-splits", handlers.GetYNABSplits).Methods("GET", "POST")
 
 	// Serve static files
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("dist")))

@@ -8,13 +8,12 @@ function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [isDemoData, setIsDemoData] = useState(false);
   const [filter, setFilter] = useState<ReportFilter>({
-    startDate: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0], // First day of current year
-    endDate: new Date().toISOString().split('T')[0], // Today
-    payTo: '',
-    enteredBy: '',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
     category: '',
+    payTo: '',
+    enteredBy: ''
   });
   const [total, setTotal] = useState(0);
 
@@ -69,7 +68,7 @@ function ReportsPage() {
     try {
       console.log('Sending filter to YNAB splits API:', filter);
       
-      // Make sure dates are formatted correctly and filter is complete
+      // Make sure filter is properly formatted
       const filterToSend = {
         startDate: filter.startDate,
         endDate: filter.endDate,
@@ -78,15 +77,8 @@ function ReportsPage() {
         enteredBy: filter.enteredBy || undefined,
       };
       
-      // Track original data length to detect if mock data was used
-      const originalSplitsLength = splits.length;
-      
       const data = await fetchYNABSplits(filterToSend);
       console.log('Received YNAB splits data:', data);
-      
-      // Check if this is likely mock data (if error was previously shown and now we have data)
-      const isMockData = error !== null && data.length > 0;
-      setIsDemoData(isMockData);
       
       if (Array.isArray(data) && data.length) {
         setSplits(data);
@@ -135,12 +127,6 @@ function ReportsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-4">YNAB Category Splits</h1>
-      
-      {isDemoData && (
-        <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded mb-4">
-          Note: Showing demo data because the API is currently unavailable.
-        </div>
-      )}
       
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
