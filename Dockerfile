@@ -20,7 +20,23 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -o /usr/local/bin/bennwallet .
 
 ###############################################################################
-# 2) Final runtime image — tiny but has libsqlite3
+# 2) Build the React frontend with Vite
+###############################################################################
+FROM node:20-alpine AS frontend
+WORKDIR /app
+
+# install JS deps with layer caching
+COPY package*.json ./
+RUN npm ci
+
+# copy the rest of the frontend
+COPY vite.config.* ./
+COPY tsconfig.* ./
+COPY src/ ./src/
+RUN npm run build
+
+###############################################################################
+# 3) Final runtime image — tiny but has libsqlite3
 ###############################################################################
 FROM debian:bookworm-slim
 
@@ -36,6 +52,7 @@ RUN mkdir -p /data
 
 COPY --from=build /usr/local/bin/bennwallet ./bennwallet
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=frontend /app/dist ./dist
 
 EXPOSE 8080
 ENV PORT=8080
