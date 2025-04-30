@@ -1,0 +1,36 @@
+app = "bennwallet"
+primary_region = "sjc" # Silicon Valley
+
+[build]
+  builder = "paketobuildpacks/builder:base"
+  buildpacks = ["gcr.io/paketo-buildpacks/go"]
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+
+[[statics]]
+  guest_path = "/dist"
+  url_prefix = "/"
+
+[[mounts]]
+  source = "bennwallet_data"
+  destination = "/data"
+
+[mounts.options]
+  size = "1" # GB 
