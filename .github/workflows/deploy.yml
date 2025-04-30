@@ -87,9 +87,23 @@ jobs:
           npm install
           npm ci --prefer-offline --no-audit
 
+      - name: Check test environment
+        run: |
+          ls -la src/test/
+          node --version
+          npm --version
+          npx vitest --version
+
+      - name: Run simple test
+        timeout-minutes: 2
+        run: npx vitest run src/test/sample.test.ts --no-watch
+
       - name: Run tests with coverage
-        timeout-minutes: 5
-        run: npm run test:coverage
+        timeout-minutes: 3
+        run: npm run test:ci
+        env:
+          DEBUG: "vitest:*"
+          VITEST_MAX_THREADS: 1
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
