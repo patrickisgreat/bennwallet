@@ -1,54 +1,138 @@
-# React + TypeScript + Vite
+# BennWallet
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A personal finance application for tracking shared expenses and generating YNAB-compatible reports.
 
-Currently, two official plugins are available:
+## Overview
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+BennWallet is a full-stack web application designed to help couples or roommates track their shared expenses, categorize transactions, and generate insightful reports. The application features:
 
-## Expanding the ESLint configuration
+- User authentication and account management
+- Transaction tracking and categorization
+- Filtering and reporting capabilities
+- YNAB (You Need A Budget) integration for financial data analysis
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Technologies
 
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+### Frontend
+- React (with TypeScript)
+- Vite for fast development and optimized builds
+- React Router for SPA navigation
+- Tailwind CSS for styling
+
+### Backend
+- Go (Golang)
+- Gorilla Mux for routing
+- SQLite for database
+- JWT for authentication
+
+## Project Structure
+
+```
+bennwallet/
+├── backend/               # Go backend code
+│   ├── database/          # Database connection and models
+│   ├── handlers/          # API endpoint handlers
+│   ├── middleware/        # Request/response middleware
+│   ├── models/            # Data models
+│   ├── utils/             # Helper functions
+│   └── main.go            # Entry point for the backend
+├── src/                   # React frontend code
+│   ├── components/        # Reusable React components
+│   ├── context/           # React context providers
+│   ├── pages/             # Page components
+│   ├── utils/             # Helper functions
+│   └── App.tsx            # Main application component
+├── public/                # Static assets
+└── dist/                  # Production build output
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Getting Started
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Prerequisites
+- Go 1.16+
+- Node.js 16+
+- npm or yarn
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
+### Development Setup
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/bennwallet.git
+   cd bennwallet
+   ```
+
+2. Install frontend dependencies:
+   ```
+   npm install
+   ```
+
+3. Build the backend:
+   ```
+   cd backend
+   go build
+   ```
+
+4. Run the backend server:
+   ```
+   ./bennwallet
+   ```
+
+5. In a separate terminal, start the frontend development server:
+   ```
+   npm run dev
+   ```
+
+6. Open your browser and navigate to `http://localhost:5173`
+
+### Building for Production
+
+1. Build the frontend:
+   ```
+   npm run build
+   ```
+
+2. Build the backend:
+   ```
+   cd backend
+   go build
+   ```
+
+3. Run the production server:
+   ```
+   ./bennwallet
+   ```
+
+## Features
+
+### User Management
+- User registration and login
+- Password reset functionality
+- Profile management
+
+### Transactions
+- Add, edit, and delete transactions
+- Categorize transactions
+- Mark transactions as paid/unpaid
+- Filter transactions by date, category, or person
+
+### Reports
+- Generate YNAB-compatible reports
+- View spending by category
+- Filter reports by date range and other criteria
+
+## Deployment
+
+The application is configured for deployment to Fly.io. The `fly.toml` file contains the necessary configuration.
+
+To deploy:
 ```
+fly deploy
+```
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Contributors
+
+- Patrick Bennette - Initial work
