@@ -34,6 +34,9 @@ COPY vite.config.* ./
 COPY tsconfig.* ./
 COPY index.html ./
 COPY src/ ./src/
+COPY public/ ./public/
+COPY tailwind.config.* ./
+COPY postcss.config.* ./
 RUN npm run build
 
 ###############################################################################
