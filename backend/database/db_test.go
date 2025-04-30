@@ -1,23 +1,26 @@
 package database
 
 import (
+	"database/sql"
 	"os"
 	"testing"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestMain(m *testing.M) {
-	// Setup
-	err := InitDB()
+	// Use in-memory database for tests
+	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		panic(err)
 	}
+	DB = db
 
 	// Run tests
 	code := m.Run()
 
 	// Cleanup
 	DB.Close()
-	os.Remove("./transactions.db")
 
 	os.Exit(code)
 }
