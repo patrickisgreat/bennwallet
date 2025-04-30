@@ -1,31 +1,42 @@
-# ─── Go backend build stage ───────────────────────────────────────────
+###############################################################################
+# 1) Build stage — CGO enabled, Debian tool-chain
+###############################################################################
 FROM golang:1.24-bullseye AS build
+
 WORKDIR /src/backend
 
-# speed-up: set a CDN mirror first, fall back to direct Git fetches
-RUN go env -w GOPROXY=https://goproxy.io,direct
-
-# copy go.mod/sum so we can cache the download layer
+# deps first for cache hits
 COPY backend/go.* ./
-
-# 1) download modules into a cached mount
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      gcc libc6-dev make ca-certificates && \
+    go env -w GOPROXY=https://goproxy.io,direct && \
     go mod download
 
-# 2) copy the rest of the source
 COPY backend .
 
-# 3) compile, again using the cache mounts
+# compile with CGO (default CGO_ENABLED=1 on Debian images)
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -a -o /go/bin/bennwallet .
+    go build -o /usr/local/bin/bennwallet .
 
-# ─── tiny runtime stage (scratch or alpine) ───────────────────────────
-FROM scratch
+###############################################################################
+# 2) Final runtime image — tiny but has libsqlite3
+###############################################################################
+FROM debian:bookworm-slim
+
 WORKDIR /app
-COPY --from=build /usr/share/ca-certificates /usr/share/ca-certificates
+
+# runtime deps: libsqlite3 & CA bundle
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libsqlite3-0 ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# mountpoint for the Fly volume
+RUN mkdir -p /data
+
+COPY --from=build /usr/local/bin/bennwallet ./bennwallet
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /go/bin/bennwallet .
+
 EXPOSE 8080
+ENV PORT=8080
 CMD ["./bennwallet"]
