@@ -1,0 +1,13 @@
+# back end (we already copy it in the Go stage)
+backend/
+
+# things we never need in the container
+.git/
+.gitignore
+Dockerfile
+fly.toml
+dist/
+node_modules/
+
+# OS / IDE debris
+*.DS_Store
