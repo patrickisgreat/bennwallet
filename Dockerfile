@@ -1,43 +1,31 @@
-# ──────────────────────────────────────────
-# 1) Build the Go backend
-# ──────────────────────────────────────────
-FROM golang:1.24 AS backend
+# ─── Go backend build stage ───────────────────────────────────────────
+FROM golang:1.24-bullseye AS build
 WORKDIR /src/backend
 
+# speed-up: set a CDN mirror first, fall back to direct Git fetches
+RUN go env -w GOPROXY=https://goproxy.io,direct
+
+# copy go.mod/sum so we can cache the download layer
 COPY backend/go.* ./
-RUN go mod download
 
+# 1) download modules into a cached mount
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+# 2) copy the rest of the source
 COPY backend .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/api .
 
-# ──────────────────────────────────────────
-# 2) Build the React frontend with Vite
-# ──────────────────────────────────────────
-FROM node:20-alpine AS frontend
+# 3) compile, again using the cache mounts
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -a -o /go/bin/bennwallet .
+
+# ─── tiny runtime stage (scratch or alpine) ───────────────────────────
+FROM scratch
 WORKDIR /app
-
-# deps first for better cache hit-rate
-COPY package*.json ./
-RUN npm ci --omit=dev     # vite is a prod dep, dev-only deps are skipped
-
-# copy **everything except what .dockerignore filters out**
-COPY . .
-
-RUN npm run build         # → /app/dist
-
-# ──────────────────────────────────────────
-# 3) Final, minimal runtime image
-# ──────────────────────────────────────────
-FROM alpine:3.19
-WORKDIR /app
-
-# CA certs for outbound HTTPS traffic
-RUN apk add --no-cache ca-certificates
-
-COPY --from=backend  /bin/api  ./api
-COPY --from=frontend /app/dist ./dist
-
-ENV PORT=8080
+COPY --from=build /usr/share/ca-certificates /usr/share/ca-certificates
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=build /go/bin/bennwallet .
 EXPOSE 8080
-
-CMD ["./api"]
+CMD ["./bennwallet"]
