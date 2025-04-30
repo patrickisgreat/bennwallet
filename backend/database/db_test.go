@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"os"
 	"testing"
 
@@ -8,14 +9,15 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Set test environment
-	os.Setenv("TEST_DB", "1")
-
-	// Initialize database with tables
-	err := InitDB()
+	// Directly create an in-memory database for tests
+	var err error
+	DB, err = sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		panic(err)
 	}
+
+	// Create tables manually
+	createTables()
 
 	// Run tests
 	code := m.Run()
@@ -24,6 +26,56 @@ func TestMain(m *testing.M) {
 	DB.Close()
 
 	os.Exit(code)
+}
+
+// createTables creates all necessary tables for tests
+func createTables() {
+	// Create users table
+	createUsersTable := `
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT UNIQUE NOT NULL,
+		name TEXT NOT NULL
+	);
+	`
+	_, err := DB.Exec(createUsersTable)
+	if err != nil {
+		panic(err)
+	}
+
+	// Create transactions table
+	createTransactionsTable := `
+	CREATE TABLE IF NOT EXISTS transactions (
+		id TEXT PRIMARY KEY,
+		amount REAL NOT NULL,
+		description TEXT NOT NULL,
+		date DATETIME NOT NULL,
+		type TEXT NOT NULL,
+		payTo TEXT,
+		paid BOOLEAN NOT NULL DEFAULT 0,
+		paidDate TEXT,
+		enteredBy TEXT NOT NULL
+	);
+	`
+	_, err = DB.Exec(createTransactionsTable)
+	if err != nil {
+		panic(err)
+	}
+
+	// Create categories table
+	createCategoriesTable := `
+	CREATE TABLE IF NOT EXISTS categories (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		description TEXT,
+		user_id TEXT NOT NULL,
+		color TEXT
+	);
+	`
+	_, err = DB.Exec(createCategoriesTable)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func TestInitDB(t *testing.T) {
