@@ -20,6 +20,11 @@ export default defineConfig({
         '**/*.config.{ts,js}',
       ],
     },
+    threads: true,
+    watch: false,
+    silent: true,
+    testTimeout: 10000,
+    hookTimeout: 10000,
   },
   server: {
     proxy: {
