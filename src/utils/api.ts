@@ -152,7 +152,7 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
         payTo: "Sarah",
         paid: false,
         enteredBy: "Patrick"
-      }).catch(e => console.log(`Failed to create test transaction ${i}:`, e));
+      }).catch((e: Error) => console.log(`Failed to create test transaction ${i}:`, e));
     }
     
     console.log('Sending report request with userId:', userId);
