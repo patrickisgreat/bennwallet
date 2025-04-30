@@ -32,6 +32,7 @@ RUN npm ci
 # copy the rest of the frontend
 COPY vite.config.* ./
 COPY tsconfig.* ./
+COPY index.html ./
 COPY src/ ./src/
 RUN npm run build
 
