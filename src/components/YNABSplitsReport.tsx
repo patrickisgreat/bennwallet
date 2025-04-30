@@ -33,6 +33,7 @@ export default function YNABSplitsReport({ categories, currentUser }: YNABSplits
         enteredBy: currentUser
       });
       
+      // Use the fetchYNABSplits function from api.ts which now uses POST
       const data = await fetchYNABSplits({
         startDate,
         endDate,
