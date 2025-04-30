@@ -1,7 +1,6 @@
 package database
 
 import (
-	"database/sql"
 	"os"
 	"testing"
 
@@ -9,15 +8,11 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Use in-memory database for tests
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		panic(err)
-	}
-	DB = db
+	// Set test environment
+	os.Setenv("TEST_DB", "1")
 
 	// Initialize database with tables
-	err = InitDB()
+	err := InitDB()
 	if err != nil {
 		panic(err)
 	}

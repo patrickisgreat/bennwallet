@@ -15,6 +15,9 @@ func InitDB() error {
 	if os.Getenv("FLY_APP_NAME") != "" {
 		// We're running on Fly.io, use the mounted volume
 		dbPath = filepath.Join("/data", "transactions.db")
+	} else if os.Getenv("TEST_DB") == "1" {
+		// We're running tests, use in-memory database
+		dbPath = ":memory:"
 	} else {
 		// Local development
 		dbPath = "./transactions.db"

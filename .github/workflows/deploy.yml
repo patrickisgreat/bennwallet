@@ -78,6 +78,7 @@ jobs:
           npm ci --prefer-offline --no-audit
 
       - name: Run tests with coverage
+        timeout-minutes: 5
         run: npm run test:coverage
 
       - name: Upload coverage to Codecov
