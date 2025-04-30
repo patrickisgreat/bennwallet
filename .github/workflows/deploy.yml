@@ -39,6 +39,8 @@ jobs:
           go mod download
 
       - name: Run tests with coverage
+        env:
+          TEST_DB: "1"
         run: |
           cd backend
           go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
