@@ -16,6 +16,12 @@ func TestMain(m *testing.M) {
 	}
 	DB = db
 
+	// Initialize database with tables
+	err = InitDB()
+	if err != nil {
+		panic(err)
+	}
+
 	// Run tests
 	code := m.Run()
 
