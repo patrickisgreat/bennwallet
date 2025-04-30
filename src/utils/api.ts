@@ -30,12 +30,14 @@ interface BackendTransaction {
   id: string;
   amount: number;
   description: string;
-  date: string;
+  date: string; // for entered date
+  transactionDate: string; // for transaction date
   type: string;
   payTo?: string;
   paid?: boolean;
   paidDate?: string;
   enteredBy: string;
+  optional?: boolean;
 }
 
 // Convert the frontend Transaction type to the backend format
@@ -45,11 +47,13 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
     amount: tx.amount,
     description: tx.note,
     date: tx.entered,
+    transactionDate: tx.transactionDate,
     type: tx.category,
     payTo: tx.payTo,
     paid: tx.paid,
     paidDate: tx.paidDate,
-    enteredBy: tx.enteredBy
+    enteredBy: tx.enteredBy,
+    optional: tx.optional
   };
 }
 
@@ -58,13 +62,15 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
   return {
     id: tx.id,
     entered: tx.date,
+    transactionDate: tx.transactionDate || tx.date, // Fall back to entered date if transaction date not available
     payTo: (tx.payTo as 'Sarah' | 'Patrick') || 'Sarah',
     amount: tx.amount,
     note: tx.description,
     category: tx.type,
     paid: tx.paid || false,
     paidDate: tx.paidDate,
-    enteredBy: tx.enteredBy as 'Sarah' | 'Patrick'
+    enteredBy: tx.enteredBy as 'Sarah' | 'Patrick',
+    optional: tx.optional || false
   };
 }
 

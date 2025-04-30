@@ -22,6 +22,8 @@ function AddTransactionForm({
   const [amount, setAmount] = useState<string>('0.00');
   const [note, setNote] = useState('');
   const [category, setCategory] = useState('');
+  const [optional, setOptional] = useState(false);
+  const [transactionDate, setTransactionDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const { currentUser } = useUser();
@@ -57,6 +59,8 @@ function AddTransactionForm({
       setAmount(editingTransaction.amount.toFixed(2));
       setNote(editingTransaction.note);
       setCategory(editingTransaction.category);
+      setOptional(editingTransaction.optional || false);
+      setTransactionDate(new Date(editingTransaction.transactionDate).toISOString().split('T')[0]);
     } else {
       resetForm();
     }
@@ -67,6 +71,8 @@ function AddTransactionForm({
     setAmount('0.00');
     setNote('');
     setCategory('');
+    setOptional(false);
+    setTransactionDate(new Date().toISOString().split('T')[0]);
   };
 
   // Handle amount input change
@@ -96,6 +102,12 @@ function AddTransactionForm({
       return;
     }
 
+    // Validate transaction date
+    if (!transactionDate) {
+      alert('Please select a transaction date');
+      return;
+    }
+
     setSubmitting(true);
     
     try {
@@ -104,18 +116,23 @@ function AddTransactionForm({
           payTo,
           amount: parsedAmount,
           note,
-          category
+          category,
+          optional,
+          transactionDate: new Date(transactionDate + 'T00:00:00').toISOString()
         });
       } else {
+        const now = new Date();
         const newTransaction: Transaction = {
           id: uuidv4(),
-          entered: new Date().toISOString(),
+          entered: now.toISOString(),
+          transactionDate: new Date(transactionDate + 'T00:00:00').toISOString(),
           payTo,
           amount: parsedAmount,
           note,
           category,
           paid: false,
-          enteredBy: currentUser.name
+          enteredBy: currentUser.name,
+          optional
         };
         
         // First save to backend
@@ -178,6 +195,16 @@ function AddTransactionForm({
           </div>
         </div>
         <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Date</label>
+          <input
+            type="date"
+            value={transactionDate}
+            onChange={(e) => setTransactionDate(e.target.value)}
+            className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+            required
+          />
+        </div>
+        <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
           <select
             value={category}
@@ -201,6 +228,17 @@ function AddTransactionForm({
             onChange={(e) => setNote(e.target.value)}
             className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
           />
+        </div>
+        <div className="md:col-span-2">
+          <label className="flex items-center text-sm font-medium text-gray-700">
+            <input
+              type="checkbox"
+              checked={optional}
+              onChange={(e) => setOptional(e.target.checked)}
+              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2"
+            />
+            Mark as Optional Transaction
+          </label>
         </div>
       </div>
       <div className="mt-4 flex gap-2">
