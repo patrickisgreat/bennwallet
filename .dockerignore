@@ -1,13 +1,14 @@
-# back end (we already copy it in the Go stage)
-backend/
+# .dockerignore  (trimmed)
 
-# things we never need in the container
-.git/
+# ─── universal cruft we never need ───────────────────────────
+.git
 .gitignore
+.DS_Store
 Dockerfile
 fly.toml
-dist/
-node_modules/
 
-# OS / IDE debris
-*.DS_Store
+# ─── cache & build artefacts ─────────────────────────────────
+node_modules/
+dist/
+
+# (notice: NO 'backend/' line anymore)
