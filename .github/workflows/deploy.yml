@@ -38,12 +38,20 @@ jobs:
           cd backend
           go mod download
 
-      - name: Run tests with coverage
-        env:
-          TEST_DB: "1"
+      - name: Test database package
         run: |
           cd backend
-          go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+          go test -v -race ./database
+
+      - name: Test handlers package
+        run: |
+          cd backend
+          go test -v -race ./handlers
+
+      - name: Test other packages
+        run: |
+          cd backend
+          go test -v -race ./... -coverpkg=./... -coverprofile=coverage.txt -covermode=atomic
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
