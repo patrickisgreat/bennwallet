@@ -1,4 +1,5 @@
 /// <reference types="vitest" />
+/// <reference types="node" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -20,7 +21,6 @@ export default defineConfig({
         '**/*.config.{ts,js}',
       ],
     },
-    threads: true,
     watch: false,
     silent: true,
     testTimeout: 10000,
