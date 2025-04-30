@@ -7,6 +7,8 @@ function ReportsPage() {
   const [splits, setSplits] = useState<CategoryTotal[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isDemoData, setIsDemoData] = useState(false);
   const [filter, setFilter] = useState<ReportFilter>({
     startDate: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0], // First day of current year
     endDate: new Date().toISOString().split('T')[0], // Today
@@ -16,42 +18,92 @@ function ReportsPage() {
   });
   const [total, setTotal] = useState(0);
 
+  // First check if user is authenticated
   useEffect(() => {
     if (currentUser) {
-      loadReportData();
+      const userId = localStorage.getItem('userId');
+      if (!userId) {
+        console.log('Waiting for userId to be set in localStorage...');
+        // Don't set authChecked yet
+      } else {
+        console.log('User authenticated with userId:', userId);
+        setAuthChecked(true);
+      }
     }
   }, [currentUser]);
 
+  // Only load data after authentication is confirmed
+  useEffect(() => {
+    if (currentUser && authChecked) {
+      loadReportData();
+    }
+  }, [currentUser, authChecked]);
+
   const loadReportData = async () => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      console.warn('Attempted to load data without authenticated user');
+      return;
+    }
+    
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      setError('Authentication issue: Please log out and log back in');
+      return;
+    }
+    
+    // Validate dates
+    if (filter.startDate && filter.endDate) {
+      const startDate = new Date(filter.startDate);
+      const endDate = new Date(filter.endDate);
+      if (startDate > endDate) {
+        setError('Start date must be before end date');
+        return;
+      }
+    }
     
     setLoading(true);
+    setSplits([]);
+    setTotal(0);
+    setError(null);
+    
     try {
       console.log('Sending filter to YNAB splits API:', filter);
       
       // Make sure dates are formatted correctly and filter is complete
       const filterToSend = {
-        ...filter,
-        startDate: filter.startDate || undefined, 
-        endDate: filter.endDate || undefined,
+        startDate: filter.startDate,
+        endDate: filter.endDate,
         category: filter.category || undefined,
         payTo: filter.payTo || undefined,
         enteredBy: filter.enteredBy || undefined,
       };
       
+      // Track original data length to detect if mock data was used
+      const originalSplitsLength = splits.length;
+      
       const data = await fetchYNABSplits(filterToSend);
       console.log('Received YNAB splits data:', data);
       
-      setSplits(data);
+      // Check if this is likely mock data (if error was previously shown and now we have data)
+      const isMockData = error !== null && data.length > 0;
+      setIsDemoData(isMockData);
       
-      // Calculate total for percentage
-      const sum = data.reduce((acc, item) => acc + item.total, 0);
-      setTotal(sum);
-      
-      setError(null);
+      if (Array.isArray(data) && data.length) {
+        setSplits(data);
+        
+        // Calculate total for percentage
+        const sum = data.reduce((acc, item) => acc + item.total, 0);
+        setTotal(sum);
+      } else {
+        console.warn('No data or empty array returned from report API');
+        setSplits([]);
+        setTotal(0);
+      }
     } catch (err) {
       console.error('Error loading report data:', err);
       setError('Failed to load report data. Please try again.');
+      setSplits([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -83,6 +135,12 @@ function ReportsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-4">YNAB Category Splits</h1>
+      
+      {isDemoData && (
+        <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded mb-4">
+          Note: Showing demo data because the API is currently unavailable.
+        </div>
+      )}
       
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">

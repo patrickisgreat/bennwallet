@@ -37,9 +37,17 @@ function AddTransactionForm({
       const response = await api.get('/categories', {
         params: { userId: currentUser?.id }
       });
-      setCategories(response.data || []);
+      
+      // Ensure we always set an array, even if API returns null or undefined
+      if (Array.isArray(response.data)) {
+        setCategories(response.data);
+      } else {
+        console.warn('Categories API did not return an array:', response.data);
+        setCategories([]);
+      }
     } catch (error) {
       console.error('Error loading categories:', error);
+      setCategories([]);
     }
   };
 
@@ -178,11 +186,11 @@ function AddTransactionForm({
             required
           >
             <option value="">Select a category</option>
-            {categories.map((cat) => (
+            {Array.isArray(categories) ? categories.map((cat) => (
               <option key={cat.id} value={cat.name}>
                 {cat.name}
               </option>
-            ))}
+            )) : null}
           </select>
         </div>
         <div>
