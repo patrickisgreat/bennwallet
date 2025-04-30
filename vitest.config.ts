@@ -8,6 +8,11 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
-    threads: false
+    poolOptions: {
+      threads: {
+        minThreads: 2,
+        maxThreads: 8
+      }
+    }
   },
 }); 
