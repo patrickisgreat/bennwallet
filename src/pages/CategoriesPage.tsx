@@ -82,14 +82,17 @@ function CategoriesPage() {
       
       console.log('Update category response:', response);
       
-      // Make sure we're updating an array
-      if (Array.isArray(categories)) {
-        if (response.data) {
-          setCategories(categories.map(c => c.id === category.id ? response.data : c));
-          console.log('Category updated successfully');
-        } else {
-          console.warn('Update response did not contain data');
-        }
+      // Check if we received a response
+      if (response && response.status === 200) {
+        // If we have data in the response, use it, otherwise use our local updated data
+        const updatedCategory = response.data || category;
+        
+        setCategories(prev => 
+          prev.map(c => c.id === category.id ? updatedCategory : c)
+        );
+        console.log('Category updated successfully');
+      } else {
+        console.warn('Update request did not succeed');
       }
       
       setEditingCategory(null);

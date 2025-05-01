@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strconv"
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/models"
@@ -101,7 +102,10 @@ func UpdateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	// Return the updated category
+	c.ID, _ = strconv.Atoi(id) // Convert id to int
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(c)
 }
 
 func DeleteCategory(w http.ResponseWriter, r *http.Request) {

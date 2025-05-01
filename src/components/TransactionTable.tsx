@@ -131,7 +131,10 @@ function TransactionTable({ transactions, onUpdate, onDelete, onEdit, onBulkDele
         </thead>
         <tbody>
           {sortedTransactions.map((tx) => (
-            <tr key={tx.id} className="border-t">
+            <tr 
+              key={tx.id} 
+              className={`border-t ${tx.optional ? 'italic text-gray-600 bg-gray-50' : ''}`}
+            >
               {onBulkDelete && (
                 <td className="p-2">
                   <input
