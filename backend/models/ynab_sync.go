@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"bennwallet/backend/database"
@@ -52,16 +54,46 @@ type YNABSubtransaction struct {
 
 // CreateYNABTransaction sends a transaction to YNAB
 func CreateYNABTransaction(request YNABSyncRequest) error {
-	// Get user's YNAB configuration - it's okay to get the token from here for now
-	var token, budgetID, accountID string
+	log.Printf("Starting YNAB transaction creation for user %s with %d categories",
+		request.UserID, len(request.Categories))
+
+	// Get user's YNAB configuration
+	var dbToken, budgetID, accountID string
 	err := database.DB.QueryRow(
 		"SELECT token, budget_id, account_id FROM user_ynab_settings WHERE user_id = ?",
 		request.UserID,
-	).Scan(&token, &budgetID, &accountID)
+	).Scan(&dbToken, &budgetID, &accountID)
 
 	if err != nil {
+		log.Printf("Error getting YNAB settings for user %s: %v", request.UserID, err)
 		return fmt.Errorf("error getting YNAB settings: %w", err)
 	}
+
+	// Check if token is stored in environment variables
+	token := dbToken
+	if strings.HasPrefix(dbToken, "enc:") {
+		// For local dev, token is prefixed in DB
+		token = strings.TrimPrefix(dbToken, "enc:")
+		log.Printf("Using locally stored token for user %s", request.UserID)
+	} else if dbToken == "[stored in environment variables]" {
+		// For production, get token from environment
+		envToken := os.Getenv(fmt.Sprintf("YNAB_TOKEN_USER_%s", request.UserID))
+		if envToken == "" {
+			// Fallback to default token
+			envToken = os.Getenv("YNAB_TOKEN")
+		}
+
+		if envToken == "" {
+			log.Printf("Error: No YNAB token found for user %s in env vars", request.UserID)
+			return fmt.Errorf("no YNAB token found in environment variables")
+		}
+
+		token = envToken
+		log.Printf("Using token from environment variables for user %s", request.UserID)
+	}
+
+	log.Printf("Found YNAB settings for user %s: budget=%s, account=%s",
+		request.UserID, budgetID, accountID)
 
 	// Convert to YNAB transaction
 	transaction := YNABTransaction{
@@ -75,7 +107,11 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 
 	// Setup subtransactions for each category split
 	var totalAmount int64
+	log.Printf("Processing %d category splits", len(request.Categories))
+
 	for _, split := range request.Categories {
+		log.Printf("Looking up category: '%s'", split.CategoryName)
+
 		// Get category ID
 		var categoryID string
 		err := database.DB.QueryRow(
@@ -84,7 +120,25 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 		).Scan(&categoryID)
 
 		if err != nil {
-			return fmt.Errorf("error finding category '%s': %w", split.CategoryName, err)
+			log.Printf("Error finding category '%s' for user %s: %v",
+				split.CategoryName, request.UserID, err)
+
+			// Attempt a more permissive search by using LIKE instead of exact match
+			err = database.DB.QueryRow(
+				"SELECT id FROM ynab_categories WHERE user_id = ? AND name LIKE ?",
+				request.UserID, "%"+split.CategoryName+"%",
+			).Scan(&categoryID)
+
+			if err != nil {
+				log.Printf("Still couldn't find category even with fuzzy search: %v", err)
+				return fmt.Errorf("error finding category '%s': %w", split.CategoryName, err)
+			}
+
+			log.Printf("Found category '%s' with fuzzy match, ID: %s",
+				split.CategoryName, categoryID)
+		} else {
+			log.Printf("Found category '%s' with exact match, ID: %s",
+				split.CategoryName, categoryID)
 		}
 
 		// Convert dollar amount to milliunits (YNAB uses integer)
@@ -101,6 +155,7 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 
 	// Set total transaction amount
 	transaction.Amount = totalAmount
+	log.Printf("Total transaction amount: %d milliunits", totalAmount)
 
 	// Create request to YNAB API
 	url := fmt.Sprintf("https://api.ynab.com/v1/budgets/%s/transactions", budgetID)
@@ -112,11 +167,16 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
+		log.Printf("Error marshaling transaction: %v", err)
 		return fmt.Errorf("error marshaling transaction: %w", err)
 	}
 
+	log.Printf("Sending transaction to YNAB API with URL: %s", url)
+	// Don't log the full payload as it contains sensitive data
+
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
+		log.Printf("Error creating request: %v", err)
 		return fmt.Errorf("error creating request: %w", err)
 	}
 
@@ -126,16 +186,25 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("Error sending transaction to YNAB: %v", err)
 		return fmt.Errorf("error sending transaction to YNAB: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Check response
+	body, _ := ioutil.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		log.Printf("YNAB API error: %s (%d)", string(body), resp.StatusCode)
+
+		// If 401 Unauthorized, provide a more specific error
+		if resp.StatusCode == http.StatusUnauthorized {
+			return fmt.Errorf("YNAB API unauthorized: token may be invalid or expired (%d)", resp.StatusCode)
+		}
+
 		return fmt.Errorf("YNAB API error: %s (%d)", string(body), resp.StatusCode)
 	}
 
-	log.Printf("Successfully created transaction in YNAB for user %s", request.UserID)
+	log.Printf("Successfully created transaction in YNAB for user %s. Response: %s",
+		request.UserID, string(body))
 	return nil
 }

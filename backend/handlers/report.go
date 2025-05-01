@@ -25,8 +25,30 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 	// Print the userId to see if it's included
 	log.Printf("UserId in request: %s", request.UserId)
 
-	// Get current transactions to debug
-	rows, err := database.DB.Query("SELECT id, amount, description, date, type, payTo, enteredBy FROM transactions")
+	// Check if the optional column exists
+	var hasOptionalColumn bool
+	err := database.DB.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('transactions') 
+		WHERE name = 'optional'
+	`).Scan(&hasOptionalColumn)
+
+	if err != nil {
+		log.Printf("Error checking for optional column: %v", err)
+		hasOptionalColumn = false
+	}
+
+	log.Printf("Table has optional column: %v", hasOptionalColumn)
+
+	// Debugging: List all transactions with their fields
+	var query string
+	if hasOptionalColumn {
+		query = "SELECT id, amount, description, date, type, payTo, enteredBy, paid, optional FROM transactions"
+	} else {
+		query = "SELECT id, amount, description, date, type, payTo, enteredBy, paid FROM transactions"
+	}
+
+	rows, err := database.DB.Query(query)
 	if err != nil {
 		log.Printf("Error querying transactions: %v", err)
 	} else {
@@ -37,18 +59,31 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 			var id, desc, typ, payTo, enteredBy string
 			var amount float64
 			var date time.Time
-			if err := rows.Scan(&id, &amount, &desc, &date, &typ, &payTo, &enteredBy); err != nil {
-				log.Printf("Error scanning row: %v", err)
-				continue
+			var paid bool
+			var optional bool
+
+			if hasOptionalColumn {
+				if err := rows.Scan(&id, &amount, &desc, &date, &typ, &payTo, &enteredBy, &paid, &optional); err != nil {
+					log.Printf("Error scanning row: %v", err)
+					continue
+				}
+				log.Printf("  - %s: $%.2f (%s) on %s [%s] payTo=%s enteredBy=%s paid=%v optional=%v",
+					id, amount, desc, date.Format("2006-01-02"), typ, payTo, enteredBy, paid, optional)
+			} else {
+				if err := rows.Scan(&id, &amount, &desc, &date, &typ, &payTo, &enteredBy, &paid); err != nil {
+					log.Printf("Error scanning row: %v", err)
+					continue
+				}
+				log.Printf("  - %s: $%.2f (%s) on %s [%s] payTo=%s enteredBy=%s paid=%v",
+					id, amount, desc, date.Format("2006-01-02"), typ, payTo, enteredBy, paid)
 			}
-			log.Printf("  - %s: $%.2f (%s) on %s [%s] payTo=%s enteredBy=%s",
-				id, amount, desc, date.Format("2006-01-02"), typ, payTo, enteredBy)
 			count++
 		}
 		log.Printf("Total transactions found: %d", count)
 	}
 
-	query := `
+	// Build the main query
+	query = `
 		SELECT type as category, SUM(amount) as total
 		FROM transactions
 		WHERE 1=1
@@ -84,11 +119,29 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		args = append(args, request.EnteredBy)
 		log.Printf("Added EnteredBy filter: %s", request.EnteredBy)
 	}
-	if request.Paid != nil {
-		query += " AND paid = ?"
-		args = append(args, *request.Paid)
-		log.Printf("Added Paid filter: %v", *request.Paid)
+
+	// Handle paid filter (default to true if not specified)
+	if request.Paid == nil {
+		// Default to true (only show paid transactions)
+		paid := true
+		request.Paid = &paid
 	}
+
+	query += " AND paid = ?"
+	args = append(args, *request.Paid)
+	log.Printf("Added Paid filter: %v", *request.Paid)
+
+	// Only filter out optional transactions if the column exists and the filter requests it
+	if hasOptionalColumn && (request.Optional == nil || *request.Optional == false) {
+		query += " AND (optional = 0 OR optional IS NULL)"
+		log.Printf("Added filter to exclude optional transactions")
+	} else if hasOptionalColumn && *request.Optional == true {
+		// Include optional transactions if specifically requested
+		log.Printf("Including optional transactions as requested")
+	} else {
+		log.Printf("Skipping optional filter since column doesn't exist")
+	}
+
 	// We don't filter by userId since that column doesn't exist in the database
 
 	query += " GROUP BY type ORDER BY total DESC"
