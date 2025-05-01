@@ -2,167 +2,247 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
+	"bennwallet/backend/database"
 	"bennwallet/backend/models"
-	"bennwallet/backend/security"
 )
 
-// YNABHandler handles YNAB-related operations
-type YNABHandler struct {
-	db *sql.DB
-}
-
-// NewYNABHandler creates a new YNAB handler
-func NewYNABHandler(db *sql.DB) *YNABHandler {
-	return &YNABHandler{
-		db: db,
+// GetYNABCategories returns YNAB categories for a user in a hierarchical structure
+func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
+	userId := r.URL.Query().Get("userId")
+	if userId == "" {
+		http.Error(w, "userId is required", http.StatusBadRequest)
+		return
 	}
-}
 
-// GetYNABConfig returns the current YNAB configuration
-func (h *YNABHandler) GetYNABConfig(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	// First, verify if YNAB tables exist and create them if they don't
+	log.Printf("Verifying YNAB tables exist for user %s", userId)
 
-	config, err := models.GetYNABConfig(h.db, userID)
+	// Set a context with timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Check if ynab_category_groups table exists
+	var tableCount int
+	err := database.DB.QueryRowContext(ctx, `
+		SELECT count(*) FROM sqlite_master 
+		WHERE type='table' AND name='ynab_category_groups'
+	`).Scan(&tableCount)
+
+	// If we hit a timeout or other error, just proceed anyway - worst case tables don't exist
+	// and we'll get an empty result
 	if err != nil {
-		log.Printf("Error getting YNAB config: %v", err)
-		http.Error(w, "Failed to get YNAB configuration", http.StatusInternalServerError)
+		log.Printf("Error checking if YNAB tables exist: %v", err)
+		// Return empty array to avoid UI issues
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]struct{}{})
 		return
 	}
 
-	if config == nil {
-		// No configuration found, return empty response
-		w.WriteHeader(http.StatusNoContent)
+	if tableCount == 0 {
+		log.Printf("YNAB tables missing, creating them now")
+
+		// Create YNAB category groups table with timeout context
+		// To this:
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		_, err := database.DB.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS ynab_category_groups (
+				id TEXT NOT NULL,
+				name TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				last_updated DATETIME NOT NULL,
+				PRIMARY KEY (id, user_id)
+			)
+		`)
+		if err != nil {
+			log.Printf("Error creating ynab_category_groups table: %v", err)
+			// Return empty array to avoid UI issues
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]struct{}{})
+			return
+		}
+
+		// Create YNAB categories table
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err = database.DB.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS ynab_categories (
+				id TEXT NOT NULL,
+				group_id TEXT NOT NULL,
+				name TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				last_updated DATETIME NOT NULL,
+				PRIMARY KEY (id, user_id),
+				FOREIGN KEY (group_id, user_id) REFERENCES ynab_category_groups(id, user_id)
+			)
+		`)
+		if err != nil {
+			log.Printf("Error creating ynab_categories table: %v", err)
+			// Return empty array to avoid UI issues
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]struct{}{})
+			return
+		}
+
+		// Create user YNAB settings table
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err = database.DB.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS user_ynab_settings (
+				user_id TEXT PRIMARY KEY,
+				token TEXT NOT NULL,
+				budget_id TEXT NOT NULL,
+				account_id TEXT NOT NULL,
+				sync_enabled BOOLEAN NOT NULL DEFAULT 0,
+				last_synced DATETIME
+			)
+		`)
+		if err != nil {
+			log.Printf("Error creating user_ynab_settings table: %v", err)
+			// Return empty array to avoid UI issues
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]struct{}{})
+			return
+		}
+
+		log.Printf("YNAB tables created successfully")
+	}
+
+	// Now check if user has YNAB configured with timeout
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var syncEnabled bool
+	err = database.DB.QueryRowContext(ctx, `
+		SELECT sync_enabled FROM user_ynab_settings WHERE user_id = ?
+	`, userId).Scan(&syncEnabled)
+
+	if err != nil || !syncEnabled {
+		// If no YNAB settings or sync disabled, return an empty result
+		log.Printf("User %s has no YNAB configuration or sync disabled: %v", userId, err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]struct{}{})
 		return
 	}
 
-	// Return safe version without sensitive data
+	// Get category groups first with timeout
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	groupRows, err := database.DB.QueryContext(ctx, `
+		SELECT id, name 
+		FROM ynab_category_groups 
+		WHERE user_id = ? 
+		ORDER BY name
+	`, userId)
+	if err != nil {
+		log.Printf("Error querying YNAB category groups: %v", err)
+		// Return empty array to avoid UI issues
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]struct{}{})
+		return
+	}
+	defer groupRows.Close()
+
+	type CategoryGroup struct {
+		ID         string                `json:"id"`
+		Name       string                `json:"name"`
+		Categories []models.YNABCategory `json:"categories"`
+	}
+
+	var groups []CategoryGroup
+	for groupRows.Next() {
+		var group CategoryGroup
+		err := groupRows.Scan(&group.ID, &group.Name)
+		if err != nil {
+			log.Printf("Error scanning group: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		groups = append(groups, group)
+	}
+
+	// Get categories for each group
+	for i, group := range groups {
+		catRows, err := database.DB.QueryContext(ctx, `
+			SELECT id, name
+			FROM ynab_categories
+			WHERE user_id = ? AND group_id = ?
+			ORDER BY name
+		`, userId, group.ID)
+		if err != nil {
+			log.Printf("Error querying categories for group %s: %v", group.ID, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		var categories []models.YNABCategory
+		for catRows.Next() {
+			var cat models.YNABCategory
+			err := catRows.Scan(&cat.ID, &cat.Name)
+			if err != nil {
+				catRows.Close()
+				log.Printf("Error scanning category: %v", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			cat.CategoryGroupID = group.ID
+			cat.CategoryGroupName = group.Name
+			categories = append(categories, cat)
+		}
+		catRows.Close()
+
+		groups[i].Categories = categories
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(config.ToResponse())
+	json.NewEncoder(w).Encode(groups)
 }
 
-// UpdateYNABConfig updates the YNAB configuration
-func (h *YNABHandler) UpdateYNABConfig(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
-
-	var req struct {
-		APIToken      string `json:"api_token"`
-		BudgetID      string `json:"budget_id"`
-		AccountID     string `json:"account_id"`
-		SyncFrequency int    `json:"sync_frequency"`
-	}
-
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+// SyncYNABTransaction creates a transaction in YNAB based on split data
+func SyncYNABTransaction(w http.ResponseWriter, r *http.Request) {
+	var request models.YNABSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Get current config if it exists
-	currentConfig, err := models.GetYNABConfig(h.db, userID)
-	if err != nil {
-		log.Printf("Error getting current YNAB config: %v", err)
-		http.Error(w, "Failed to get current YNAB configuration", http.StatusInternalServerError)
+	// Validate request
+	if request.UserID == "" {
+		http.Error(w, "userId is required", http.StatusBadRequest)
 		return
 	}
 
-	// Create new config if none exists
-	if currentConfig == nil {
-		currentConfig = &models.YNABConfig{
-			UserID: userID,
-		}
-	}
-
-	// Only update fields that were provided
-	if req.APIToken != "" && !isTokenMasked(req.APIToken) {
-		encryptedToken, err := security.Encrypt(req.APIToken)
-		if err != nil {
-			http.Error(w, "Failed to encrypt API token", http.StatusInternalServerError)
-			return
-		}
-		currentConfig.EncryptedAPIToken = encryptedToken
-	}
-
-	if req.BudgetID != "" {
-		encryptedBudgetID, err := security.Encrypt(req.BudgetID)
-		if err != nil {
-			http.Error(w, "Failed to encrypt budget ID", http.StatusInternalServerError)
-			return
-		}
-		currentConfig.EncryptedBudgetID = encryptedBudgetID
-	}
-
-	if req.AccountID != "" {
-		encryptedAccountID, err := security.Encrypt(req.AccountID)
-		if err != nil {
-			http.Error(w, "Failed to encrypt account ID", http.StatusInternalServerError)
-			return
-		}
-		currentConfig.EncryptedAccountID = encryptedAccountID
-	}
-
-	if req.SyncFrequency > 0 {
-		currentConfig.SyncFrequency = req.SyncFrequency
-	}
-
-	// Save the updated config
-	err = models.SaveYNABConfig(h.db, currentConfig)
-	if err != nil {
-		log.Printf("Error saving YNAB config: %v", err)
-		http.Error(w, "Failed to save YNAB configuration", http.StatusInternalServerError)
+	if len(request.Categories) == 0 {
+		http.Error(w, "at least one category split is required", http.StatusBadRequest)
 		return
 	}
 
+	if request.Date == "" {
+		http.Error(w, "date is required", http.StatusBadRequest)
+		return
+	}
+
+	// Create YNAB transaction via service
+	err := models.CreateYNABTransaction(request)
+	if err != nil {
+		log.Printf("Error creating YNAB transaction: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success
 	w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "Configuration updated"})
-}
-
-// SyncYNABCategories manually triggers a sync of YNAB categories
-func (h *YNABHandler) SyncYNABCategories(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
-
-	client := NewYNABClient(h.db)
-	err := client.SyncCategories(r.Context(), userID)
-	if err != nil {
-		log.Printf("Error syncing YNAB categories: %v", err)
-		http.Error(w, "Failed to sync YNAB categories: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "Categories synced successfully"})
-}
-
-// Helper function to check if a token is masked
-func isTokenMasked(token string) bool {
-	// Check if token starts with asterisks (masked)
-	for i := 0; i < len(token) && i < 12; i++ {
-		if token[i] != '*' {
-			return false
-		}
-	}
-	return true
-}
-
-// NewYNABClient creates a new YNAB client
-func NewYNABClient(db *sql.DB) *YNABClient {
-	return &YNABClient{
-		db: db,
-	}
-}
-
-// YNABClient is a client for interacting with YNAB
-type YNABClient struct {
-	db *sql.DB
-}
-
-// SyncCategories syncs categories from YNAB
-func (c *YNABClient) SyncCategories(ctx context.Context, userID string) error {
-	// This is a stub - implement the actual sync logic or call into ynab package
-	return nil
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Transaction successfully synced to YNAB",
+	})
 }

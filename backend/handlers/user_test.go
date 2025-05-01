@@ -24,7 +24,7 @@ func setupTestDB() {
 	// Create users table
 	_, err = db.Exec(`
 		CREATE TABLE users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id TEXT PRIMARY KEY,
 			username TEXT UNIQUE NOT NULL,
 			name TEXT
 		)
@@ -34,7 +34,7 @@ func setupTestDB() {
 	}
 
 	// Insert test data
-	_, err = db.Exec("INSERT INTO users (username, name) VALUES (?, ?)", "testuser", "Test User")
+	_, err = db.Exec("INSERT INTO users (id, username, name) VALUES (?, ?, ?)", "test1", "testuser", "Test User")
 	if err != nil {
 		panic(err)
 	}

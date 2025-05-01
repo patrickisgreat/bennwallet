@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { api } from '../utils/api';
 
 interface User {
     id: string;
@@ -22,6 +23,22 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [users, setUsers] = useState<User[]>([]);
 
+    // Sync Firebase user with backend
+    const syncUserWithBackend = async (user: User) => {
+        try {
+            const response = await api.post('/users/sync', {
+                firebaseId: user.id,
+                name: user.name,
+                email: user.username,
+            });
+
+            console.log('User synced with backend:', response.data);
+            return response.data;
+        } catch (error) {
+            console.error('Error syncing user with backend:', error);
+        }
+    };
+
     useEffect(() => {
         // If Firebase auth user changes, update our user context
         if (authUser) {
@@ -33,6 +50,9 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
             setCurrentUser(user);
             localStorage.setItem('userId', user.id);
+            
+            // Sync the Firebase user with our backend
+            syncUserWithBackend(user);
         } else {
             setCurrentUser(null);
             localStorage.removeItem('userId');

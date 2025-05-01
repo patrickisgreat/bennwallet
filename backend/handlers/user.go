@@ -52,3 +52,53 @@ func GetUserByUsername(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(user)
 }
+
+// SyncFirebaseUser syncs a Firebase user with the backend database
+// This ensures that Firebase users exist in our users table
+func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		FirebaseID string `json:"firebaseId"`
+		Name       string `json:"name"`
+		Email      string `json:"email"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if request.FirebaseID == "" {
+		http.Error(w, "firebaseId is required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if user already exists
+	var userID string
+	err := database.DB.QueryRow("SELECT id FROM users WHERE id = ?", request.FirebaseID).Scan(&userID)
+
+	if err == sql.ErrNoRows {
+		// User doesn't exist, create a new one
+		_, err = database.DB.Exec(
+			"INSERT INTO users (id, username, name) VALUES (?, ?, ?)",
+			request.FirebaseID,
+			request.Email,
+			request.Name,
+		)
+
+		if err != nil {
+			http.Error(w, "Failed to create user: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		userID = request.FirebaseID
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success with user ID
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"id": userID,
+	})
+}

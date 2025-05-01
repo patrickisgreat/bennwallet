@@ -10,7 +10,6 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import Dashboard from './pages/Dashboard';
 import ProfilePage from './pages/ProfilePage';
-import CategoriesPage from './pages/CategoriesPage';
 import TransactionsPage from './pages/TransactionsPage';
 import ReportsPage from './pages/ReportsPage';
 import './App.css';
@@ -69,7 +68,6 @@ function App() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/profile" element={<ProfilePage />} />
                     <Route path="/transactions" element={<TransactionsPage />} />
-                    <Route path="/categories" element={<CategoriesPage />} />
                     <Route path="/reports" element={<ReportsPage />} />
                   </Route>
                 </Route>

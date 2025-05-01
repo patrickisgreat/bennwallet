@@ -7,6 +7,7 @@ type ReportFilter struct {
 	PayTo     string `json:"payTo,omitempty"`
 	EnteredBy string `json:"enteredBy,omitempty"`
 	Paid      *bool  `json:"paid,omitempty"`
+	Optional  *bool  `json:"optional,omitempty"`
 	UserId    string `json:"userId,omitempty"`
 }
 

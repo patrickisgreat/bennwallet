@@ -144,11 +144,23 @@ export interface ReportFilter {
   payTo?: string;
   enteredBy?: string;
   paid?: boolean;
+  optional?: boolean;
 }
 
 export interface CategoryTotal {
   category: string;
   total: number;
+}
+
+export interface YNABSyncRequest {
+  userId: string;
+  date: string;
+  payeeName: string;
+  memo: string;
+  categories: {
+    categoryName: string;
+    amount: number;
+  }[];
 }
 
 export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTotal[]> {
@@ -180,7 +192,8 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       endDate: formatDate(filter.endDate),
       category: filter.category || null,
       payTo: filter.payTo || null,
-      enteredBy: filter.enteredBy || null
+      enteredBy: filter.enteredBy || null,
+      paid: filter.paid
     };
     
     console.log('Sending POST request with body:', requestBody);
@@ -211,5 +224,25 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
     }
     
     throw error; // Propagate error to caller
+  }
+}
+
+// Add this function to sync splits to YNAB
+export async function syncToYNAB(request: YNABSyncRequest): Promise<void> {
+  try {
+    const response = await api.post('/ynab/sync', request, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (response.status !== 200) {
+      throw new Error(`YNAB sync failed with status ${response.status}`);
+    }
+    
+    return;
+  } catch (error) {
+    console.error('Error syncing to YNAB:', error);
+    throw error;
   }
 } 
