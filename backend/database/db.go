@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"bennwallet/backend/migrations"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -73,6 +75,11 @@ func InitDB() error {
 	`
 	_, err = DB.Exec(createCategoriesTable)
 	if err != nil {
+		return err
+	}
+
+	// Run migrations
+	if err := migrations.RunMigrations(DB); err != nil {
 		return err
 	}
 
