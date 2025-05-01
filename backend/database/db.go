@@ -1,11 +1,11 @@
 package database
 
 import (
+	"bennwallet/backend/migrations"
 	"database/sql"
 	"os"
 	"path/filepath"
-
-	"bennwallet/backend/migrations"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -22,11 +22,37 @@ func InitDB() error {
 		dbPath = ":memory:"
 	} else {
 		// Local development
-		dbPath = "./transactions.db"
+		dbPath = "./database.db"
 	}
 
 	var err error
-	DB, err = sql.Open("sqlite3", dbPath)
+	// Add connection parameters to better handle concurrency
+	dsn := dbPath + "?_journal=WAL&_timeout=10000&_busy_timeout=10000"
+	DB, err = sql.Open("sqlite3", dsn)
+	if err != nil {
+		return err
+	}
+
+	// Configure database connection
+	DB.SetMaxOpenConns(5) // Increase from 1 to 5
+	DB.SetMaxIdleConns(5) // Increase from 1 to 5
+
+	// Add this line
+	DB.SetConnMaxLifetime(time.Minute * 5)
+
+	// Execute PRAGMA statements for better concurrency handling
+	_, err = DB.Exec("PRAGMA journal_mode=WAL;")
+	if err != nil {
+		return err
+	}
+
+	_, err = DB.Exec("PRAGMA busy_timeout=5000;")
+	if err != nil {
+		return err
+	}
+
+	// Test the connection
+	err = DB.Ping()
 	if err != nil {
 		return err
 	}
@@ -34,7 +60,7 @@ func InitDB() error {
 	// Create users table
 	createUsersTable := `
 	CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id TEXT PRIMARY KEY,
 		username TEXT UNIQUE NOT NULL,
 		name TEXT NOT NULL
 	);
@@ -97,16 +123,17 @@ func SeedDefaultUsers() error {
 	if count == 0 {
 		// Insert default users
 		defaultUsers := []struct {
+			id       string
 			username string
 			name     string
 		}{
-			{username: "sarah", name: "Sarah"},
-			{username: "patrick", name: "Patrick"},
+			{id: "1", username: "sarah", name: "Sarah"},
+			{id: "2", username: "patrick", name: "Patrick"},
 		}
 
 		for _, user := range defaultUsers {
-			_, err := DB.Exec("INSERT INTO users (username, name) VALUES (?, ?)",
-				user.username, user.name)
+			_, err := DB.Exec("INSERT INTO users (id, username, name) VALUES (?, ?, ?)",
+				user.id, user.username, user.name)
 			if err != nil {
 				return err
 			}
