@@ -8,6 +8,7 @@ interface YNABConfigProps {
 export function YNABConfig({ userId }: YNABConfigProps) {
   const [config, setConfig] = useState<YNABConfigType | null>(null);
   const [apiToken, setApiToken] = useState('');
+  const [showApiToken, setShowApiToken] = useState(false);
   const [budgetId, setBudgetId] = useState('');
   const [accountId, setAccountId] = useState('');
   const [syncFrequency, setSyncFrequency] = useState(60);
@@ -31,12 +32,16 @@ export function YNABConfig({ userId }: YNABConfigProps) {
       if (data) {
         console.log('budgetId:', data.budgetId);
         console.log('accountId:', data.accountId);
+        console.log('apiToken value:', data.apiToken);
+        console.log('apiToken type:', typeof data.apiToken);
+        console.log('apiToken empty check:', data.apiToken === '');
+        console.log('apiToken undefined check:', data.apiToken === undefined);
         console.log('hasCredentials:', data.hasCredentials);
         
         setConfig(data);
         setSyncFrequency(data.syncFrequency || 60);
         
-        // Set the form fields with the returned data (except API token)
+        // Set the form fields with the returned data
         if (data.budgetId) {
           console.log('Setting budgetId field to:', data.budgetId);
           setBudgetId(data.budgetId);
@@ -47,8 +52,16 @@ export function YNABConfig({ userId }: YNABConfigProps) {
           setAccountId(data.accountId);
         }
         
-        // We don't populate the API token field for security reasons
-        // The user needs to re-enter it if they want to update
+        // For API token, if we receive a placeholder, show it in the field
+        if (data.apiToken) {
+          console.log('Setting apiToken field to placeholder:', data.apiToken);
+          setApiToken(data.apiToken);
+        } else if (data.hasCredentials) {
+          // Fallback in case the API token is missing but credentials exist
+          console.log('API token missing but hasCredentials is true, setting placeholder');
+          setApiToken('********');
+        }
+        
       } else {
         console.log('No config data returned');
       }
@@ -62,6 +75,13 @@ export function YNABConfig({ userId }: YNABConfigProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check if API token is the placeholder or empty when updating existing config
+    if (config?.hasCredentials && apiToken === '********') {
+      setError('Please enter your actual YNAB API token. For security reasons, we require you to re-enter it when updating settings.');
+      return;
+    }
+    
     if (!apiToken || !budgetId || !accountId) {
       setError('All fields are required');
       return;
@@ -173,24 +193,39 @@ export function YNABConfig({ userId }: YNABConfigProps) {
       <form onSubmit={handleSubmit}>
         <div className="mb-4">
           <label htmlFor="apiToken" className="block text-sm font-medium text-gray-700 mb-1">
-            YNAB API Token
+            YNAB API Token <span className="text-red-600">*</span>
           </label>
-          <input
-            id="apiToken"
-            type="password"
-            value={apiToken}
-            onChange={(e) => setApiToken(e.target.value)}
-            placeholder="Enter your YNAB API token"
-            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-          />
+          <div className="relative">
+            <input
+              id="apiToken"
+              type={showApiToken ? "text" : "password"}
+              value={apiToken}
+              onChange={(e) => setApiToken(e.target.value)}
+              placeholder={apiToken === '********' ? 'Re-enter your token to update' : 'Enter your YNAB API token'}
+              className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm pr-20"
+              required
+            />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                setShowApiToken(!showApiToken);
+              }}
+              className="absolute inset-y-0 right-0 mt-1 px-3 py-1 text-xs text-indigo-600 hover:text-indigo-800 bg-gray-50 border-l border-gray-300 rounded-r-md flex items-center"
+            >
+              {showApiToken ? 'Hide' : 'Show'}
+            </button>
+          </div>
           <p className="mt-1 text-xs text-gray-500">
-            Your API token is stored securely and encrypted in the database.
+            {apiToken === '********' 
+              ? 'For security, you must re-enter your API token to update settings. The token is stored securely and encrypted in the database.'
+              : 'Your API token is stored securely and encrypted in the database.'}
           </p>
         </div>
 
         <div className="mb-4">
           <label htmlFor="budgetId" className="block text-sm font-medium text-gray-700 mb-1">
-            Budget ID
+            Budget ID <span className="text-red-600">*</span>
           </label>
           <input
             id="budgetId"
@@ -199,12 +234,13 @@ export function YNABConfig({ userId }: YNABConfigProps) {
             onChange={(e) => setBudgetId(e.target.value)}
             placeholder="Enter your YNAB budget ID"
             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            required
           />
         </div>
 
         <div className="mb-4">
           <label htmlFor="accountId" className="block text-sm font-medium text-gray-700 mb-1">
-            Account ID
+            Account ID <span className="text-red-600">*</span>
           </label>
           <input
             id="accountId"
@@ -213,6 +249,7 @@ export function YNABConfig({ userId }: YNABConfigProps) {
             onChange={(e) => setAccountId(e.target.value)}
             placeholder="Enter your YNAB account ID"
             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            required
           />
         </div>
 

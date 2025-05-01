@@ -44,11 +44,25 @@ func (h *YNABHandler) GetYNABConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Don't return token value for security reasons
-	config.APIToken = ""
+	// Don't return actual token value for security reasons
+	// But set placeholder if it exists to indicate to the UI that a token is saved
+	if config.HasCredentials {
+		config.APIToken = "********" // Placeholder to indicate token exists
+		log.Printf("Setting API token placeholder for user %s", userID)
+	} else {
+		config.APIToken = ""
+	}
 
-	log.Printf("Retrieved YNAB config for user %s: HasCredentials=%v, LastSyncTime=%v, BudgetID=%v, AccountID=%v",
-		userID, config.HasCredentials, config.LastSyncTime, config.BudgetID, config.AccountID)
+	log.Printf("Retrieved YNAB config for user %s: HasCredentials=%v, LastSyncTime=%v, BudgetID=%v, AccountID=%v, APIToken=%v",
+		userID, config.HasCredentials, config.LastSyncTime, config.BudgetID, config.AccountID, config.APIToken)
+
+	// Marshal to JSON and then log it to debug potential issues
+	jsonBytes, err := json.Marshal(config)
+	if err != nil {
+		log.Printf("Error marshaling config to JSON: %v", err)
+	} else {
+		log.Printf("Full JSON response: %s", string(jsonBytes))
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(config)

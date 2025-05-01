@@ -16,7 +16,7 @@ type YNABConfig struct {
 	EncryptedAPIToken  string    `json:"-"`                   // Not returned in API responses
 	EncryptedBudgetID  string    `json:"-"`                   // Not returned in API responses
 	EncryptedAccountID string    `json:"-"`                   // Not returned in API responses
-	APIToken           string    `json:"apiToken,omitempty"`  // Used only for input/output
+	APIToken           string    `json:"apiToken"`            // Used only for input/output
 	BudgetID           string    `json:"budgetId,omitempty"`  // Used only for input/output
 	AccountID          string    `json:"accountId,omitempty"` // Used only for input/output
 	LastSyncTime       time.Time `json:"lastSyncTime,omitempty"`
