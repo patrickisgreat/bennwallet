@@ -51,11 +51,15 @@ jobs:
           [build]
             dockerfile = "Dockerfile"
 
+          [build.args]
+            YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
+
           [env]
             PORT = "8080"
             NODE_ENV = "production"
             PR_DEPLOYMENT = "true"
             PR_NUMBER = "${{ github.event.pull_request.number }}"
+            YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
 
           [http_service]
             internal_port = 8080

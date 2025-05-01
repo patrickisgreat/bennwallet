@@ -7,6 +7,7 @@ import (
 	"bennwallet/backend/database"
 	"bennwallet/backend/handlers"
 	"bennwallet/backend/middleware"
+	"bennwallet/backend/ynab"
 
 	"github.com/gorilla/mux"
 )
@@ -22,6 +23,12 @@ func main() {
 	err = database.SeedDefaultUsers()
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// Initialize YNAB sync
+	err = ynab.InitYNABSync()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize YNAB sync: %v", err)
 	}
 
 	// Create router
@@ -42,6 +49,11 @@ func main() {
 	r.HandleFunc("/categories", handlers.AddCategory).Methods("POST")
 	r.HandleFunc("/categories/{id}", handlers.UpdateCategory).Methods("PUT")
 	r.HandleFunc("/categories/{id}", handlers.DeleteCategory).Methods("DELETE")
+
+	// YNAB routes
+	r.HandleFunc("/ynab/config", handlers.GetYNABConfig).Methods("GET")
+	r.HandleFunc("/ynab/config", handlers.UpdateYNABConfig).Methods("POST")
+	r.HandleFunc("/ynab/sync-categories", handlers.SyncYNABCategories).Methods("POST")
 
 	// User routes
 	r.HandleFunc("/users", handlers.GetUsers).Methods("GET")

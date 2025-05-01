@@ -165,10 +165,14 @@ jobs:
           [build]
             dockerfile = "Dockerfile"
 
+          [build.args]
+            YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
+
           [env]
             PORT = "8080"
             NODE_ENV = "production"
             ENVIRONMENT = "production"
+            YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
 
           [http_service]
             internal_port = 8080

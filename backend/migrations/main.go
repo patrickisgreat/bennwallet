@@ -28,6 +28,7 @@ func RunMigrations(db *sql.DB) error {
 		fn   func(*sql.DB) error
 	}{
 		{"add_transaction_date", AddTransactionDateColumn},
+		{"add_ynab_config_table", AddYNABConfigTable},
 		// Add future migrations here
 	}
 
