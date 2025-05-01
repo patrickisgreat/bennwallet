@@ -18,7 +18,12 @@ function AddTransactionForm({
   onEditSubmit,
   cancelEdit,
 }: AddTransactionFormProps) {
-  const [payTo, setPayTo] = useState<'Sarah' | 'Patrick'>('Sarah');
+  const { currentUser } = useUser();
+  
+  // Set default payTo based on current user
+  const [payTo, setPayTo] = useState<'Sarah' | 'Patrick'>(
+    currentUser?.name === 'Patrick' ? 'Patrick' : 'Sarah'
+  );
   const [amount, setAmount] = useState<string>('0.00');
   const [note, setNote] = useState('');
   const [category, setCategory] = useState('');
@@ -26,13 +31,20 @@ function AddTransactionForm({
   const [transactionDate, setTransactionDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const { currentUser } = useUser();
 
   useEffect(() => {
     if (currentUser) {
       loadCategories();
     }
   }, [currentUser]);
+
+  // Update payTo when currentUser changes
+  useEffect(() => {
+    if (currentUser && !editingTransaction) {
+      // Only update if we're not editing (to avoid overwriting edited values)
+      setPayTo(currentUser.name === 'Patrick' ? 'Patrick' : 'Sarah');
+    }
+  }, [currentUser, editingTransaction]);
 
   const loadCategories = async () => {
     try {
@@ -67,7 +79,8 @@ function AddTransactionForm({
   }, [editingTransaction]);
 
   const resetForm = () => {
-    setPayTo('Sarah');
+    // Set payTo to current user's name when resetting the form
+    setPayTo(currentUser?.name === 'Patrick' ? 'Patrick' : 'Sarah');
     setAmount('0.00');
     setNote('');
     setCategory('');

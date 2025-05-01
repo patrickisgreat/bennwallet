@@ -10,8 +10,12 @@ import { v4 as uuidv4 } from 'uuid';
 
 // Define the filter interface
 interface TransactionFilter {
+  // Entry date filters
   startDate: string;
   endDate: string;
+  // Transaction date filters
+  txStartDate: string;
+  txEndDate: string;
   payTo: string;
   enteredBy: string;
   paid?: boolean;
@@ -50,6 +54,8 @@ function TransactionsPage() {
     return {
       startDate,
       endDate,
+      txStartDate: '',
+      txEndDate: '',
       payTo: isPatrick ? 'Patrick' : 'Sarah',
       enteredBy: isPatrick ? 'Sarah' : 'Patrick',
       paid: false
@@ -89,28 +95,49 @@ function TransactionsPage() {
     console.log('Raw transactions before filtering:', transactions);
     let filtered = [...transactions];
     
-    // Filter by date range
+    // Filter by entered date range
     if (filter.startDate) {
-      console.log(`Filtering by start date: ${filter.startDate}`);
+      console.log(`Filtering by entered start date: ${filter.startDate}`);
       // For start date, set time to beginning of day
       const startDate = new Date(filter.startDate + 'T00:00:00');
       
       filtered = filtered.filter(tx => {
         const txDate = new Date(tx.entered);
-        console.log(`Comparing transaction date ${tx.entered} (${txDate}) >= ${startDate}`);
+        console.log(`Comparing entered date ${tx.entered} (${txDate}) >= ${startDate}`);
         return txDate >= startDate;
       });
     }
     
     if (filter.endDate) {
-      console.log(`Filtering by end date: ${filter.endDate}`);
+      console.log(`Filtering by entered end date: ${filter.endDate}`);
       // For end date, set time to end of day
       const endDate = new Date(filter.endDate + 'T23:59:59');
       
       filtered = filtered.filter(tx => {
         const txDate = new Date(tx.entered);
-        console.log(`Comparing transaction date ${tx.entered} (${txDate}) <= ${endDate}`);
+        console.log(`Comparing entered date ${tx.entered} (${txDate}) <= ${endDate}`);
         return txDate <= endDate;
+      });
+    }
+    
+    // Filter by transaction date range
+    if (filter.txStartDate) {
+      console.log(`Filtering by transaction start date: ${filter.txStartDate}`);
+      const txStartDate = new Date(filter.txStartDate + 'T00:00:00');
+      
+      filtered = filtered.filter(tx => {
+        const txDate = new Date(tx.transactionDate);
+        return txDate >= txStartDate;
+      });
+    }
+    
+    if (filter.txEndDate) {
+      console.log(`Filtering by transaction end date: ${filter.txEndDate}`);
+      const txEndDate = new Date(filter.txEndDate + 'T23:59:59');
+      
+      filtered = filtered.filter(tx => {
+        const txDate = new Date(tx.transactionDate);
+        return txDate <= txEndDate;
       });
     }
     
@@ -211,6 +238,8 @@ function TransactionsPage() {
     setFilter({
       startDate: '',
       endDate: '',
+      txStartDate: '',
+      txEndDate: '',
       payTo: '',
       enteredBy: '',
       paid: undefined
@@ -239,6 +268,79 @@ function TransactionsPage() {
     
     await loadTransactions();
     setLoading(false);
+  };
+
+  const exportToCSV = () => {
+    // Return if no transactions to export
+    if (!filteredTransactions.length) {
+      setError('No transactions to export');
+      return;
+    }
+
+    try {
+      // Define CSV headers
+      const headers = [
+        'ID',
+        'Entry Date',
+        'Transaction Date',
+        'Pay To',
+        'Amount',
+        'Category',
+        'Note',
+        'Paid',
+        'Paid Date',
+        'Entered By',
+        'Optional'
+      ];
+
+      // Format transactions for CSV
+      const csvRows = filteredTransactions.map(tx => {
+        // Format dates for better readability
+        const enteredDate = new Date(tx.entered).toLocaleDateString();
+        const txDate = new Date(tx.transactionDate).toLocaleDateString();
+        const paidDate = tx.paidDate ? new Date(tx.paidDate).toLocaleDateString() : '';
+        
+        return [
+          tx.id,
+          enteredDate,
+          txDate,
+          tx.payTo,
+          tx.amount.toFixed(2),
+          tx.category,
+          tx.note.replace(/,/g, ' '), // Replace commas in notes to avoid CSV issues
+          tx.paid ? 'Yes' : 'No',
+          paidDate,
+          tx.enteredBy,
+          tx.optional ? 'Yes' : 'No'
+        ];
+      });
+
+      // Combine headers and rows
+      const csvContent = [
+        headers.join(','),
+        ...csvRows.map(row => row.join(','))
+      ].join('\n');
+
+      // Create a blob and download link
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      
+      // Set filename with current date
+      const today = new Date().toISOString().split('T')[0];
+      const fileName = `transactions_${today}.csv`;
+      
+      // Set up and trigger download
+      link.setAttribute('href', url);
+      link.setAttribute('download', fileName);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Error exporting transactions to CSV:', err);
+      setError('Failed to export transactions');
+    }
   };
 
   const handleCSVUpload = () => {
@@ -367,6 +469,13 @@ function TransactionsPage() {
         <h1 className="text-2xl font-bold">Transactions</h1>
         <div className="flex gap-2">
           <button 
+            onClick={exportToCSV}
+            disabled={loading || filteredTransactions.length === 0}
+            className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:bg-gray-400"
+          >
+            Export CSV
+          </button>
+          <button 
             onClick={handleCSVUpload}
             disabled={isUploading}
             className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:bg-gray-400"
@@ -413,69 +522,106 @@ function TransactionsPage() {
           </button>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+            <h3 className="font-medium text-gray-700 mb-2">Entry Date</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start</label>
+                <input
+                  type="date"
+                  name="startDate"
+                  value={filter.startDate}
+                  onChange={handleFilterChange}
+                  className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">End</label>
+                <input
+                  type="date"
+                  name="endDate"
+                  value={filter.endDate}
+                  onChange={handleFilterChange}
+                  className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div>
+            <h3 className="font-medium text-gray-700 mb-2">Transaction Date</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start</label>
+                <input
+                  type="date"
+                  name="txStartDate"
+                  value={filter.txStartDate}
+                  onChange={handleFilterChange}
+                  className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">End</label>
+                <input
+                  type="date"
+                  name="txEndDate"
+                  value={filter.txEndDate}
+                  onChange={handleFilterChange}
+                  className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div>
+            <h3 className="font-medium text-gray-700 mb-2">Other Filters</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Pay To</label>
+                <select
+                  name="payTo"
+                  value={filter.payTo}
+                  onChange={handleFilterChange}
+                  className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+                >
+                  <option value="">All</option>
+                  <option value="Sarah">Sarah</option>
+                  <option value="Patrick">Patrick</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Entered By</label>
+                <select
+                  name="enteredBy"
+                  value={filter.enteredBy}
+                  onChange={handleFilterChange}
+                  className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+                >
+                  <option value="">All</option>
+                  <option value="Sarah">Sarah</option>
+                  <option value="Patrick">Patrick</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex items-center">
+          <label className="flex items-center text-sm font-medium text-gray-700">
             <input
-              type="date"
-              name="startDate"
-              value={filter.startDate}
+              type="checkbox"
+              name="paid"
+              checked={filter.paid ?? false}
               onChange={handleFilterChange}
-              className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2"
             />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-            <input
-              type="date"
-              name="endDate"
-              value={filter.endDate}
-              onChange={handleFilterChange}
-              className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Pay To</label>
-            <select
-              name="payTo"
-              value={filter.payTo}
-              onChange={handleFilterChange}
-              className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
-            >
-              <option value="">All</option>
-              <option value="Sarah">Sarah</option>
-              <option value="Patrick">Patrick</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Entered By</label>
-            <select
-              name="enteredBy"
-              value={filter.enteredBy}
-              onChange={handleFilterChange}
-              className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
-            >
-              <option value="">All</option>
-              <option value="Sarah">Sarah</option>
-              <option value="Patrick">Patrick</option>
-            </select>
-          </div>
-          
-          <div className="flex items-center">
-            <label className="flex items-center text-sm font-medium text-gray-700 mb-1 mt-4">
-              <input
-                type="checkbox"
-                name="paid"
-                checked={filter.paid ?? false}
-                onChange={handleFilterChange}
-                className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2"
-              />
-              Only Show Unpaid
-            </label>
-          </div>
+            Only Show Unpaid
+          </label>
         </div>
       </div>
       
