@@ -48,7 +48,43 @@ func InitYNABSync(db *sql.DB) error {
 		return fmt.Errorf("failed to create YNAB config table: %w", err)
 	}
 
+	// Check if any users have YNAB configured with all required credentials
+	var count int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM ynab_config 
+		WHERE encrypted_api_token IS NOT NULL AND encrypted_api_token != ''
+		AND encrypted_budget_id IS NOT NULL AND encrypted_budget_id != ''
+		AND encrypted_account_id IS NOT NULL AND encrypted_account_id != ''
+	`).Scan(&count)
+
+	if err != nil {
+		log.Printf("Error checking for configured users in ynab_config: %v", err)
+		count = 0
+	}
+
+	if count == 0 {
+		// Also check legacy table
+		err = db.QueryRow(`
+			SELECT COUNT(*) FROM user_ynab_settings
+			WHERE token IS NOT NULL AND token != ''
+			AND budget_id IS NOT NULL AND budget_id != ''
+			AND account_id IS NOT NULL AND account_id != ''
+			AND sync_enabled = 1
+		`).Scan(&count)
+
+		if err != nil {
+			log.Printf("Error checking for configured users in user_ynab_settings: %v", err)
+			count = 0
+		}
+	}
+
+	if count == 0 {
+		log.Println("No users with YNAB configured, skipping background sync")
+		return nil
+	}
+
 	// Start background sync for all configured users
+	log.Printf("Starting background sync for %d users with YNAB configured", count)
 	go startBackgroundSync(db)
 
 	return nil
@@ -60,19 +96,20 @@ func startBackgroundSync(db *sql.DB) {
 	ticker := time.NewTicker(1 * time.Minute) // Check every minute for users to sync
 
 	for range ticker.C {
-		// Get all users with YNAB config
+		// Get all users with complete YNAB config
 		rows, err := db.Query(`
 			SELECT user_id, sync_frequency, last_sync_time
 			FROM ynab_config
-			WHERE encrypted_api_token IS NOT NULL
-			AND encrypted_budget_id IS NOT NULL
-			AND encrypted_account_id IS NOT NULL
+			WHERE encrypted_api_token IS NOT NULL AND encrypted_api_token != ''
+			AND encrypted_budget_id IS NOT NULL AND encrypted_budget_id != ''
+			AND encrypted_account_id IS NOT NULL AND encrypted_account_id != ''
 		`)
 		if err != nil {
 			log.Printf("Error querying YNAB configs: %v", err)
 			continue
 		}
-		defer rows.Close()
+
+		users := make(map[string]bool)
 
 		for rows.Next() {
 			var userID string
@@ -110,7 +147,73 @@ func startBackgroundSync(db *sql.DB) {
 					}
 				}(userID)
 			}
+
+			// Keep track of which users we've seen
+			users[userID] = true
 		}
+		rows.Close()
+
+		// Check the legacy table for any users not already synced
+		legacyRows, err := db.Query(`
+			SELECT user_id, last_synced
+			FROM user_ynab_settings
+			WHERE token IS NOT NULL AND token != ''
+			AND budget_id IS NOT NULL AND budget_id != ''
+			AND account_id IS NOT NULL AND account_id != ''
+			AND sync_enabled = 1
+		`)
+		if err != nil {
+			log.Printf("Error querying legacy YNAB settings: %v", err)
+			continue
+		}
+
+		for legacyRows.Next() {
+			var userID string
+			var lastSynced sql.NullTime
+
+			if err := legacyRows.Scan(&userID, &lastSynced); err != nil {
+				log.Printf("Error scanning legacy YNAB settings: %v", err)
+				continue
+			}
+
+			// Skip users we've already processed
+			if users[userID] {
+				continue
+			}
+
+			// Check if it's time to sync (using default 60 minute frequency)
+			shouldSync := false
+			if !lastSynced.Valid {
+				// First sync
+				shouldSync = true
+			} else {
+				// Check if enough time has passed since last sync (default 60 minutes)
+				nextSync := lastSynced.Time.Add(60 * time.Minute)
+				shouldSync = time.Now().After(nextSync)
+			}
+
+			if shouldSync {
+				// Perform sync in a goroutine
+				go func(userID string) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+
+					// Get the budget ID
+					var budgetID string
+					err := db.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = ?", userID).Scan(&budgetID)
+					if err != nil {
+						log.Printf("Error getting budget ID for user %s: %v", userID, err)
+						return
+					}
+
+					// Sync categories using the services package which works with legacy format
+					if err := client.SyncCategories(ctx, userID); err != nil {
+						log.Printf("Error syncing categories for legacy user %s: %v", userID, err)
+					}
+				}(userID)
+			}
+		}
+		legacyRows.Close()
 	}
 }
 
@@ -124,16 +227,34 @@ func (c *YNABClient) SyncCategories(ctx context.Context, userID string) error {
 		return fmt.Errorf("no YNAB configuration found for user")
 	}
 
-	// Decrypt API token
-	apiToken, err := security.Decrypt(config.EncryptedAPIToken)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt API token: %w", err)
-	}
+	// Get API token and budget ID, either from encrypted fields or legacy format
+	var apiToken, budgetID string
 
-	// Decrypt budget ID
-	budgetID, err := security.Decrypt(config.EncryptedBudgetID)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt budget ID: %w", err)
+	if config.EncryptedAPIToken != "" {
+		// Get from encrypted fields
+		apiToken, err = security.Decrypt(config.EncryptedAPIToken)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt API token: %w", err)
+		}
+
+		budgetID, err = security.Decrypt(config.EncryptedBudgetID)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt budget ID: %w", err)
+		}
+	} else {
+		// Try legacy format
+		var token string
+		err := c.db.QueryRow("SELECT token, budget_id FROM user_ynab_settings WHERE user_id = ?", userID).Scan(&token, &budgetID)
+		if err != nil {
+			return fmt.Errorf("failed to get YNAB settings from legacy table: %w", err)
+		}
+
+		// Handle legacy token format
+		if token != "" && token != "[stored in environment variables]" && len(token) > 4 && token[:4] == "enc:" {
+			apiToken = token[4:] // Remove "enc:" prefix
+		} else {
+			return fmt.Errorf("unsupported token format in legacy table")
+		}
 	}
 
 	// Make API request to YNAB
@@ -177,21 +298,39 @@ func (c *YNABClient) SyncTransactions(ctx context.Context, userID string) error 
 		return fmt.Errorf("no YNAB configuration found for user")
 	}
 
-	// Decrypt API token
-	apiToken, err := security.Decrypt(config.EncryptedAPIToken)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt API token: %w", err)
-	}
+	// Get API credentials, either from encrypted fields or legacy format
+	var apiToken, budgetID, accountID string
 
-	// Decrypt budget ID and account ID
-	budgetID, err := security.Decrypt(config.EncryptedBudgetID)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt budget ID: %w", err)
-	}
+	if config.EncryptedAPIToken != "" {
+		// Get from encrypted fields
+		apiToken, err = security.Decrypt(config.EncryptedAPIToken)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt API token: %w", err)
+		}
 
-	accountID, err := security.Decrypt(config.EncryptedAccountID)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt account ID: %w", err)
+		budgetID, err = security.Decrypt(config.EncryptedBudgetID)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt budget ID: %w", err)
+		}
+
+		accountID, err = security.Decrypt(config.EncryptedAccountID)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt account ID: %w", err)
+		}
+	} else {
+		// Try legacy format
+		var token string
+		err := c.db.QueryRow("SELECT token, budget_id, account_id FROM user_ynab_settings WHERE user_id = ?", userID).Scan(&token, &budgetID, &accountID)
+		if err != nil {
+			return fmt.Errorf("failed to get YNAB settings from legacy table: %w", err)
+		}
+
+		// Handle legacy token format
+		if token != "" && token != "[stored in environment variables]" && len(token) > 4 && token[:4] == "enc:" {
+			apiToken = token[4:] // Remove "enc:" prefix
+		} else {
+			return fmt.Errorf("unsupported token format in legacy table")
+		}
 	}
 
 	// Make API request to YNAB

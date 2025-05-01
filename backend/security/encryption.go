@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"log"
 )
 
 var encryptionKey []byte
@@ -52,22 +53,28 @@ func Decrypt(encrypted string) (string, error) {
 		return "", errors.New("encryption key not initialized")
 	}
 
+	log.Printf("Attempting to decrypt value (length: %d)", len(encrypted))
+
 	ciphertext, err := base64.StdEncoding.DecodeString(encrypted)
 	if err != nil {
+		log.Printf("Failed to decode base64: %v", err)
 		return "", err
 	}
 
 	block, err := aes.NewCipher(encryptionKey)
 	if err != nil {
+		log.Printf("Failed to create cipher: %v", err)
 		return "", err
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
+		log.Printf("Failed to create GCM: %v", err)
 		return "", err
 	}
 
 	if len(ciphertext) < gcm.NonceSize() {
+		log.Printf("Ciphertext too short: %d < %d", len(ciphertext), gcm.NonceSize())
 		return "", errors.New("ciphertext too short")
 	}
 
@@ -76,8 +83,11 @@ func Decrypt(encrypted string) (string, error) {
 
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
+		log.Printf("Failed to decrypt: %v", err)
 		return "", err
 	}
 
-	return string(plaintext), nil
+	result := string(plaintext)
+	log.Printf("Successfully decrypted to: %s", result)
+	return result, nil
 }

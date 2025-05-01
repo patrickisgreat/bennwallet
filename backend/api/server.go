@@ -33,22 +33,22 @@ func (s *Server) RegisterRoutes() {
 	// ... existing routes ...
 
 	// YNAB configuration endpoints
-	s.router.HandleFunc("/api/ynab/config", s.authenticate(s.GetYNABConfig)).Methods("GET")
-	s.router.HandleFunc("/api/ynab/config", s.authenticate(s.UpdateYNABConfig)).Methods("PUT")
-	s.router.HandleFunc("/api/ynab/sync/categories", s.authenticate(s.SyncYNABCategories)).Methods("POST")
+	s.router.HandleFunc("/ynab/config", s.authenticate(s.GetYNABConfig)).Methods("GET")
+	s.router.HandleFunc("/ynab/config", s.authenticate(s.UpdateYNABConfig)).Methods("PUT")
+	s.router.HandleFunc("/ynab/sync/categories", s.authenticate(s.SyncYNABCategories)).Methods("POST")
 }
 
-// GetYNABConfig handles GET /api/ynab/config
+// GetYNABConfig handles GET /ynab/config
 func (s *Server) GetYNABConfig(w http.ResponseWriter, r *http.Request) {
 	s.ynabHandler.GetYNABConfig(w, r)
 }
 
-// UpdateYNABConfig handles PUT /api/ynab/config
+// UpdateYNABConfig handles PUT /ynab/config
 func (s *Server) UpdateYNABConfig(w http.ResponseWriter, r *http.Request) {
 	s.ynabHandler.UpdateYNABConfig(w, r)
 }
 
-// SyncYNABCategories handles POST /api/ynab/sync/categories
+// SyncYNABCategories handles POST /ynab/sync/categories
 func (s *Server) SyncYNABCategories(w http.ResponseWriter, r *http.Request) {
 	s.ynabHandler.SyncYNABCategories(w, r)
 }
@@ -61,9 +61,16 @@ func (s *Server) Handler() http.Handler {
 // authenticate is a middleware that checks for authentication
 func (s *Server) authenticate(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Authentication logic here
-		// For now, we'll just pass a dummy user ID in the context
-		ctx := context.WithValue(r.Context(), "user_id", "test_user")
+		// Get the user ID from query parameters
+		userId := r.URL.Query().Get("userId")
+
+		if userId == "" {
+			http.Error(w, "User ID is required", http.StatusUnauthorized)
+			return
+		}
+
+		// Add the user ID to the context
+		ctx := context.WithValue(r.Context(), "user_id", userId)
 
 		next(w, r.WithContext(ctx))
 	}

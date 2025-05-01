@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"bennwallet/backend/database"
+	"bennwallet/backend/models"
+	"bennwallet/backend/security"
 )
 
 // SetupYNABFromEnv loads YNAB settings from environment variables and stores them in the database
@@ -98,18 +100,6 @@ func setupYNABFromEnvForUser(userID string) {
 	log.Printf("DEBUG: Found complete YNAB credentials for user %s, updating database", userID)
 	log.Printf("DEBUG: Using budget ID: %s, account ID: %s", budgetID, accountID)
 
-	// Store token securely
-	hashedToken := token
-	if os.Getenv("FLY_APP_NAME") != "" {
-		// In prod, just store a reference since real token is in env
-		hashedToken = "[stored in environment variables]"
-		log.Printf("DEBUG: Production environment detected, storing token reference")
-	} else {
-		// In local dev, add a simple prefix (in real app, encrypt properly)
-		hashedToken = fmt.Sprintf("enc:%s", token)
-		log.Printf("DEBUG: Development environment detected, adding 'enc:' prefix to token")
-	}
-
 	// Ensure user exists in users table
 	_, err := database.DB.Exec(`
 		INSERT OR IGNORE INTO users (id, username, name) 
@@ -121,7 +111,30 @@ func setupYNABFromEnvForUser(userID string) {
 		log.Printf("DEBUG: Successfully ensured user %s exists in users table", userID)
 	}
 
-	// Update database with YNAB settings
+	// Create config update request
+	config := models.YNABConfigUpdateRequest{
+		APIToken:  token,
+		BudgetID:  budgetID,
+		AccountID: accountID,
+	}
+
+	// Update YNAB config with encrypted values
+	err = models.UpsertYNABConfig(database.DB, &config, userID)
+	if err != nil {
+		log.Printf("DEBUG: Error updating YNAB config for user %s: %v", userID, err)
+		return
+	}
+
+	log.Printf("DEBUG: Successfully updated YNAB config for user %s with encrypted values", userID)
+
+	// Also update legacy table for backward compatibility
+	// Store token with 'enc:' prefix for local dev
+	hashedToken := fmt.Sprintf("enc:%s", token)
+	if os.Getenv("FLY_APP_NAME") != "" {
+		// In prod, just store a reference since real token is in env
+		hashedToken = "[stored in environment variables]"
+	}
+
 	result, err := database.DB.Exec(`
 		INSERT INTO user_ynab_settings (user_id, token, budget_id, account_id, sync_enabled)
 		VALUES (?, ?, ?, ?, 1)
@@ -133,22 +146,11 @@ func setupYNABFromEnvForUser(userID string) {
 	`, userID, hashedToken, budgetID, accountID)
 
 	if err != nil {
-		log.Printf("DEBUG: Error updating YNAB settings for user %s: %v", userID, err)
+		log.Printf("DEBUG: Error updating legacy YNAB settings for user %s: %v", userID, err)
 	} else {
 		rowsAffected, _ := result.RowsAffected()
 		if rowsAffected > 0 {
-			log.Printf("DEBUG: Successfully updated YNAB settings for user %s", userID)
-		} else {
-			log.Printf("DEBUG: No rows affected when updating YNAB settings for user %s", userID)
-		}
-
-		// Verify the settings were actually saved
-		var savedBudgetID string
-		err := database.DB.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = ?", userID).Scan(&savedBudgetID)
-		if err != nil {
-			log.Printf("DEBUG: Error verifying saved YNAB settings: %v", err)
-		} else {
-			log.Printf("DEBUG: Verified YNAB settings for user %s - saved budget ID: %s", userID, savedBudgetID)
+			log.Printf("DEBUG: Successfully updated legacy YNAB settings for user %s", userID)
 		}
 	}
 }
@@ -157,32 +159,83 @@ func setupYNABFromEnvForUser(userID string) {
 func InitialSync() {
 	log.Println("Performing initial YNAB sync for all users...")
 
-	// Get all users with YNAB configured
-	rows, err := database.DB.Query(`
+	// First check the new ynab_config table
+	configRows, err := database.DB.Query(`
+		SELECT user_id, encrypted_budget_id 
+		FROM ynab_config 
+		WHERE encrypted_api_token IS NOT NULL AND encrypted_api_token != ''
+		AND encrypted_budget_id IS NOT NULL AND encrypted_budget_id != ''
+		AND encrypted_account_id IS NOT NULL AND encrypted_account_id != ''
+	`)
+
+	if err != nil {
+		log.Printf("Error fetching users from ynab_config: %v", err)
+	} else {
+		defer configRows.Close()
+
+		// Process users from new config table
+		var userCount int
+		for configRows.Next() {
+			userCount++
+			var userID string
+			var encryptedBudgetID string
+
+			err := configRows.Scan(&userID, &encryptedBudgetID)
+			if err != nil {
+				log.Printf("Error scanning config data: %v", err)
+				continue
+			}
+
+			// Decrypt budget ID
+			budgetID, err := security.Decrypt(encryptedBudgetID)
+			if err != nil {
+				log.Printf("Error decrypting budget ID for user %s: %v", userID, err)
+				continue
+			}
+
+			log.Printf("Found user %s with YNAB configured in new format, budget ID: %s", userID, budgetID)
+			log.Printf("Syncing YNAB categories for user %s", userID)
+
+			if err := SyncYNABCategoriesNew(userID, budgetID); err != nil {
+				log.Printf("Error syncing categories for user %s: %v", userID, err)
+			}
+		}
+
+		if userCount > 0 {
+			log.Printf("Completed initial sync for %d users from ynab_config table", userCount)
+			return
+		}
+	}
+
+	// If no users found in new table, check legacy table
+	legacyRows, err := database.DB.Query(`
 		SELECT user_id, budget_id 
 		FROM user_ynab_settings 
 		WHERE sync_enabled = 1
+		AND token IS NOT NULL AND token != ''
+		AND budget_id IS NOT NULL AND budget_id != ''
+		AND account_id IS NOT NULL AND account_id != ''
 	`)
 	if err != nil {
-		log.Printf("Error fetching users with YNAB settings: %v", err)
+		log.Printf("Error fetching users with YNAB settings from legacy table: %v", err)
 		return
 	}
-	defer rows.Close()
+	defer legacyRows.Close()
 
-	// Count users with YNAB settings
+	// Count users with YNAB settings in legacy table
 	var userCount int
-	for rows.Next() {
+	for legacyRows.Next() {
 		userCount++
 		var userID, budgetID string
-		err := rows.Scan(&userID, &budgetID)
+		err := legacyRows.Scan(&userID, &budgetID)
 		if err != nil {
 			log.Printf("Error scanning user data: %v", err)
 			continue
 		}
 
-		log.Printf("Found user %s with YNAB sync enabled, budget ID: %s", userID, budgetID)
+		log.Printf("Found user %s with YNAB sync enabled in legacy table, budget ID: %s", userID, budgetID)
 		log.Printf("Syncing YNAB categories for user %s", userID)
-		if err := SyncYNABCategories(userID, budgetID); err != nil {
+		if err := SyncYNABCategoriesNew(userID, budgetID); err != nil {
 			log.Printf("Error syncing categories for user %s: %v", userID, err)
 		}
 	}
@@ -257,7 +310,7 @@ func LoadEnvVariables() {
 	log.Printf("No .env file found in search paths: %v", envPaths)
 }
 
-// SetupYNABForUser sets up YNAB settings for a specific user from environment variables
+// SetupYNABForUser sets up YNAB for a user from environment variables and triggers an initial sync
 func SetupYNABForUser(userID string) {
 	log.Printf("Setting up YNAB for user %s", userID)
 
@@ -278,16 +331,6 @@ func SetupYNABForUser(userID string) {
 
 	log.Printf("Found YNAB credentials for user %s", userID)
 
-	// Store token securely
-	hashedToken := token
-	if os.Getenv("FLY_APP_NAME") != "" {
-		// In prod, just store a reference since real token is in env
-		hashedToken = "[stored in environment variables]"
-	} else {
-		// In local dev, add a simple prefix (in real app, encrypt properly)
-		hashedToken = fmt.Sprintf("enc:%s", token)
-	}
-
 	// Ensure user exists
 	_, err := database.DB.Exec(`
 		INSERT OR IGNORE INTO users (id, username, name) 
@@ -299,7 +342,31 @@ func SetupYNABForUser(userID string) {
 		return
 	}
 
-	// Update YNAB settings
+	// Create config update request
+	config := models.YNABConfigUpdateRequest{
+		APIToken:  token,
+		BudgetID:  budgetID,
+		AccountID: accountID,
+	}
+
+	// Update YNAB config with encrypted values
+	err = models.UpsertYNABConfig(database.DB, &config, userID)
+	if err != nil {
+		log.Printf("Error updating YNAB config for user %s: %v", userID, err)
+		return
+	}
+
+	log.Printf("Successfully updated YNAB config for user %s", userID)
+
+	// Also update legacy table for backward compatibility
+	// Store token with 'enc:' prefix for local dev
+	hashedToken := fmt.Sprintf("enc:%s", token)
+	if os.Getenv("FLY_APP_NAME") != "" {
+		// In prod, just store a reference since real token is in env
+		hashedToken = "[stored in environment variables]"
+	}
+
+	// Update YNAB settings in legacy table
 	_, err = database.DB.Exec(`
 		INSERT INTO user_ynab_settings (user_id, token, budget_id, account_id, sync_enabled)
 		VALUES (?, ?, ?, ?, 1)
@@ -311,9 +378,16 @@ func SetupYNABForUser(userID string) {
 	`, userID, hashedToken, budgetID, accountID)
 
 	if err != nil {
-		log.Printf("Error updating YNAB settings: %v", err)
+		log.Printf("Error updating legacy YNAB settings: %v", err)
 		return
 	}
 
-	log.Printf("Successfully set up YNAB for user %s", userID)
+	// Trigger an immediate sync
+	go func() {
+		if err := SyncYNABCategoriesNew(userID, budgetID); err != nil {
+			log.Printf("Error during initial sync for user %s: %v", userID, err)
+		} else {
+			log.Printf("Successfully completed initial sync for user %s", userID)
+		}
+	}()
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"bennwallet/backend/database"
+	"bennwallet/backend/security"
 )
 
 // YNABSyncRequest represents a request to sync transaction data to YNAB
@@ -57,39 +58,69 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 	log.Printf("Starting YNAB transaction creation for user %s with %d categories",
 		request.UserID, len(request.Categories))
 
-	// Get user's YNAB configuration
-	var dbToken, budgetID, accountID string
-	err := database.DB.QueryRow(
-		"SELECT token, budget_id, account_id FROM user_ynab_settings WHERE user_id = ?",
-		request.UserID,
-	).Scan(&dbToken, &budgetID, &accountID)
-
+	// First try to get config from the new ynab_config table
+	config, err := GetYNABConfig(database.DB, request.UserID)
 	if err != nil {
-		log.Printf("Error getting YNAB settings for user %s: %v", request.UserID, err)
-		return fmt.Errorf("error getting YNAB settings: %w", err)
+		log.Printf("Error getting YNAB config: %v", err)
+		return fmt.Errorf("error getting YNAB config: %w", err)
 	}
 
-	// Check if token is stored in environment variables
-	token := dbToken
-	if strings.HasPrefix(dbToken, "enc:") {
-		// For local dev, token is prefixed in DB
-		token = strings.TrimPrefix(dbToken, "enc:")
-		log.Printf("Using locally stored token for user %s", request.UserID)
-	} else if dbToken == "[stored in environment variables]" {
-		// For production, get token from environment
-		envToken := os.Getenv(fmt.Sprintf("YNAB_TOKEN_USER_%s", request.UserID))
-		if envToken == "" {
-			// Fallback to default token
-			envToken = os.Getenv("YNAB_TOKEN")
+	var token, budgetID, accountID string
+
+	if config.HasCredentials && config.EncryptedAPIToken != "" {
+		// Get credentials from encrypted fields
+		token, err = security.Decrypt(config.EncryptedAPIToken)
+		if err != nil {
+			log.Printf("Error decrypting API token: %v", err)
+			return fmt.Errorf("error decrypting API token: %w", err)
 		}
 
-		if envToken == "" {
-			log.Printf("Error: No YNAB token found for user %s in env vars", request.UserID)
-			return fmt.Errorf("no YNAB token found in environment variables")
+		budgetID, err = security.Decrypt(config.EncryptedBudgetID)
+		if err != nil {
+			log.Printf("Error decrypting budget ID: %v", err)
+			return fmt.Errorf("error decrypting budget ID: %w", err)
 		}
 
-		token = envToken
-		log.Printf("Using token from environment variables for user %s", request.UserID)
+		accountID, err = security.Decrypt(config.EncryptedAccountID)
+		if err != nil {
+			log.Printf("Error decrypting account ID: %v", err)
+			return fmt.Errorf("error decrypting account ID: %w", err)
+		}
+	} else {
+		// Fallback to legacy user_ynab_settings table
+		var dbToken string
+		err := database.DB.QueryRow(
+			"SELECT token, budget_id, account_id FROM user_ynab_settings WHERE user_id = ?",
+			request.UserID,
+		).Scan(&dbToken, &budgetID, &accountID)
+
+		if err != nil {
+			log.Printf("Error getting YNAB settings from legacy table for user %s: %v", request.UserID, err)
+			return fmt.Errorf("error getting YNAB settings: %w", err)
+		}
+
+		// Check if token is stored in environment variables
+		token = dbToken
+		if strings.HasPrefix(dbToken, "enc:") {
+			// For local dev, token is prefixed in DB
+			token = strings.TrimPrefix(dbToken, "enc:")
+			log.Printf("Using locally stored token for user %s", request.UserID)
+		} else if dbToken == "[stored in environment variables]" {
+			// For production, get token from environment
+			envToken := os.Getenv(fmt.Sprintf("YNAB_TOKEN_USER_%s", request.UserID))
+			if envToken == "" {
+				// Fallback to default token
+				envToken = os.Getenv("YNAB_TOKEN")
+			}
+
+			if envToken == "" {
+				log.Printf("Error: No YNAB token found for user %s in env vars", request.UserID)
+				return fmt.Errorf("no YNAB token found in environment variables")
+			}
+
+			token = envToken
+			log.Printf("Using token from environment variables for user %s", request.UserID)
+		}
 	}
 
 	log.Printf("Found YNAB settings for user %s: budget=%s, account=%s",
