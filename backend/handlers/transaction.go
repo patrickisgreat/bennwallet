@@ -74,6 +74,41 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(transactions)
 }
 
+func GetTransaction(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	var t models.Transaction
+	var paidDate sql.NullString
+	var transactionDate sql.NullTime
+	err := database.DB.QueryRow(`
+		SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy 
+		FROM transactions 
+		WHERE id = ?
+	`, id).Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Transaction not found", http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if paidDate.Valid {
+		t.PaidDate = paidDate.String
+	}
+	if transactionDate.Valid {
+		t.TransactionDate = transactionDate.Time
+	} else {
+		t.TransactionDate = t.Date // Fall back to entered date if transaction date not available
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(t)
+}
+
 func AddTransaction(w http.ResponseWriter, r *http.Request) {
 	var t models.Transaction
 	err := json.NewDecoder(r.Body).Decode(&t)

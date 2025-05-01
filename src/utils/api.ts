@@ -106,7 +106,20 @@ export async function createTransaction(transaction: Transaction): Promise<boole
 
 export async function updateTransaction(id: string, updates: Partial<Transaction>): Promise<boolean> {
   try {
-    await api.put(`/transactions/${id}`, toBackendTransaction(updates as Transaction));
+    // First fetch the existing transaction to get all fields
+    const response = await api.get(`/transactions/${id}`);
+    if (!response.data) {
+      throw new Error('Transaction not found');
+    }
+    
+    // Convert backend to frontend format
+    const existingTx = toFrontendTransaction(response.data);
+    
+    // Merge the updates with the existing transaction
+    const mergedTx = { ...existingTx, ...updates };
+    
+    // Update with the merged data
+    await api.put(`/transactions/${id}`, toBackendTransaction(mergedTx));
     return true;
   } catch (error) {
     console.error('Error updating transaction:', error);
