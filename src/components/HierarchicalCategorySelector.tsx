@@ -38,7 +38,8 @@ export default function HierarchicalCategorySelector({
   const getSelectedCategoryDisplay = () => {
     if (!value) return 'Select a category';
     
-    for (const group of categoryGroups) {
+    for (const group of categoryGroups || []) {
+      if (!group || !group.categories) continue;
       const category = group.categories.find(c => c.name === value);
       if (category) {
         return `${group.name}: ${category.name}`;
@@ -97,7 +98,14 @@ export default function HierarchicalCategorySelector({
   };
 
   // Filter categories based on search term
-  const filteredGroups = categoryGroups.map(group => {
+  const filteredGroups = (categoryGroups || []).map(group => {
+    if (!group || !group.categories) {
+      return {
+        ...group,
+        categories: []
+      };
+    }
+    
     const filteredCategories = group.categories.filter(category => 
       !searchTerm || 
       category.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -108,7 +116,7 @@ export default function HierarchicalCategorySelector({
       ...group,
       categories: filteredCategories
     };
-  }).filter(group => group.categories.length > 0);
+  }).filter(group => group && group.categories && group.categories.length > 0);
 
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>
@@ -154,7 +162,7 @@ export default function HierarchicalCategorySelector({
               <div key={group.id} className="category-group">
                 <div className="px-3 py-1 bg-gray-100 font-medium">{group.name}</div>
                 <div>
-                  {group.categories.map(category => (
+                  {(group.categories || []).map(category => (
                     <div 
                       key={category.id}
                       className={`px-3 py-2 cursor-pointer hover:bg-gray-100 ${value === category.name ? 'bg-blue-50 text-blue-700' : ''}`}
