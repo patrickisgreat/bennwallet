@@ -1,7 +1,6 @@
 package database
 
 import (
-	"bennwallet/backend/migrations"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -105,7 +104,7 @@ func InitDB() error {
 	}
 
 	// Run migrations
-	if err := migrations.RunMigrations(DB); err != nil {
+	if err := RunMigrations(); err != nil {
 		return err
 	}
 

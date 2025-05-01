@@ -30,6 +30,37 @@ func AddYNABConfigTable(db *sql.DB) error {
 		return fmt.Errorf("failed to create YNAB config table: %w", err)
 	}
 
+	// Ensure we have the YNAB category tables as well
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS ynab_category_groups (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			last_updated TIMESTAMP NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		);
+	`)
+	if err != nil {
+		log.Printf("Error creating YNAB category groups table: %v", err)
+		return fmt.Errorf("failed to create YNAB category groups table: %w", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS ynab_categories (
+			id TEXT PRIMARY KEY,
+			group_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			last_updated TIMESTAMP NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (group_id) REFERENCES ynab_category_groups(id) ON DELETE CASCADE
+		);
+	`)
+	if err != nil {
+		log.Printf("Error creating YNAB categories table: %v", err)
+		return fmt.Errorf("failed to create YNAB categories table: %w", err)
+	}
+
 	log.Println("AddYNABConfigTable migration completed")
 	return nil
 }

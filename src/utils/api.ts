@@ -163,6 +163,17 @@ export interface YNABSyncRequest {
   }[];
 }
 
+export interface YNABConfig {
+  id?: number;
+  userId: string;
+  apiToken?: string;
+  budgetId?: string;
+  accountId?: string;
+  lastSyncTime?: string;
+  syncFrequency: number;
+  hasCredentials: boolean;
+}
+
 export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTotal[]> {
   try {
     console.log('Raw filter sent to API:', filter);
@@ -244,5 +255,41 @@ export async function syncToYNAB(request: YNABSyncRequest): Promise<void> {
   } catch (error) {
     console.error('Error syncing to YNAB:', error);
     throw error;
+  }
+}
+
+export async function fetchYNABConfig(): Promise<YNABConfig | null> {
+  try {
+    const response = await api.get('/api/ynab/config');
+    console.log('YNAB config response:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching YNAB configuration:', error);
+    return null;
+  }
+}
+
+export async function updateYNABConfig(config: {
+  apiToken: string;
+  budgetId: string;
+  accountId: string;
+  syncFrequency?: number;
+}): Promise<boolean> {
+  try {
+    await api.put('/api/ynab/config', config);
+    return true;
+  } catch (error) {
+    console.error('Error updating YNAB configuration:', error);
+    throw error;
+  }
+}
+
+export async function syncYNABCategories(): Promise<boolean> {
+  try {
+    await api.post('/api/ynab/sync/categories');
+    return true;
+  } catch (error) {
+    console.error('Error syncing YNAB categories:', error);
+    return false;
   }
 } 
