@@ -172,6 +172,8 @@ export interface YNABConfig {
   lastSyncTime?: string;
   syncFrequency: number;
   hasCredentials: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTotal[]> {
@@ -261,7 +263,8 @@ export async function syncToYNAB(request: YNABSyncRequest): Promise<void> {
 export async function fetchYNABConfig(): Promise<YNABConfig | null> {
   try {
     const response = await api.get('/api/ynab/config');
-    console.log('YNAB config response:', response.data);
+    console.log('Raw YNAB config response:', response);
+    console.log('YNAB config response data:', response.data);
     return response.data;
   } catch (error) {
     console.error('Error fetching YNAB configuration:', error);

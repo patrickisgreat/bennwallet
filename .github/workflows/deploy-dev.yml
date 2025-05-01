@@ -9,7 +9,7 @@ env:
   GO_VERSION: '1.24'
   NODE_VERSION: '20'
   FLY_DEV_APP_NAME: 'bennwallet'
-  DEV_DOMAIN: 'dev.bennwallet.com'
+  DEV_DOMAIN: ''
 
 jobs:
   backend-test:
@@ -167,9 +167,4 @@ jobs:
         run: flyctl deploy --remote-only --app ${{ env.FLY_DEV_APP_NAME }}
         env:
           NODE_ENV: development
-          ENVIRONMENT: development
-
-      - name: Add Custom Domain (if specified)
-        if: env.DEV_DOMAIN != ''
-        run: |
-          flyctl certs add ${{ env.DEV_DOMAIN }} --app ${{ env.FLY_DEV_APP_NAME }} 
+          ENVIRONMENT: development 
