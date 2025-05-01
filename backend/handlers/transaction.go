@@ -15,7 +15,7 @@ import (
 
 func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	query := `
-		SELECT id, amount, description, date, type, payTo, paid, paidDate, enteredBy 
+		SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy 
 		FROM transactions 
 		WHERE 1=1
 	`
@@ -53,13 +53,19 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t models.Transaction
 		var paidDate sql.NullString
-		err := rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+		var transactionDate sql.NullTime
+		err := rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if paidDate.Valid {
 			t.PaidDate = paidDate.String
+		}
+		if transactionDate.Valid {
+			t.TransactionDate = transactionDate.Time
+		} else {
+			t.TransactionDate = t.Date // Fall back to entered date if transaction date not available
 		}
 		transactions = append(transactions, t)
 	}
@@ -86,10 +92,15 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 		t.Date = time.Now()
 	}
 
+	// Set transaction date to date if not provided
+	if t.TransactionDate.IsZero() {
+		t.TransactionDate = t.Date
+	}
+
 	_, err = database.DB.Exec(`
-		INSERT INTO transactions (id, amount, description, date, type, payTo, paid, paidDate, enteredBy)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, t.ID, t.Amount, t.Description, t.Date, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy)
+		INSERT INTO transactions (id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, t.ID, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -113,9 +124,9 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 
 	_, err = database.DB.Exec(`
 		UPDATE transactions 
-		SET amount = ?, description = ?, date = ?, type = ?, payTo = ?, paid = ?, paidDate = ?, enteredBy = ?
+		SET amount = ?, description = ?, date = ?, transaction_date = ?, type = ?, payTo = ?, paid = ?, paidDate = ?, enteredBy = ?
 		WHERE id = ?
-	`, t.Amount, t.Description, t.Date, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy, id)
+	`, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy, id)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

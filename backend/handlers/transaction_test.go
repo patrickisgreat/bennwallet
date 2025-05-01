@@ -28,6 +28,7 @@ func setupTransactionTestDB() {
 			amount REAL NOT NULL,
 			description TEXT NOT NULL,
 			date DATETIME NOT NULL,
+			transaction_date DATETIME,
 			type TEXT NOT NULL,
 			payTo TEXT,
 			paid BOOLEAN NOT NULL DEFAULT 0,
@@ -45,15 +46,19 @@ func TestAddTransaction(t *testing.T) {
 	defer database.DB.Close()
 
 	// Setup
+	now := time.Now()
+	txDate := now.AddDate(0, 0, -3) // Set the transaction date 3 days before entry
+
 	reqBody := models.Transaction{
-		Amount:      100.50,
-		Description: "Test Transaction",
-		Date:        time.Now(),
-		Type:        "Test",
-		PayTo:       "Test Payee",
-		Paid:        true,
-		PaidDate:    time.Now().Format("2006-01-02"),
-		EnteredBy:   "test-user",
+		Amount:          100.50,
+		Description:     "Test Transaction",
+		Date:            now,
+		TransactionDate: txDate,
+		Type:            "Test",
+		PayTo:           "Test Payee",
+		Paid:            true,
+		PaidDate:        now.Format("2006-01-02"),
+		EnteredBy:       "test-user",
 	}
 
 	jsonBody, _ := json.Marshal(reqBody)
@@ -84,6 +89,20 @@ func TestAddTransaction(t *testing.T) {
 
 	if count != 1 {
 		t.Errorf("Expected 1 transaction, got %d", count)
+	}
+
+	// Verify transaction date was stored correctly
+	var storedTxDate time.Time
+	err = database.DB.QueryRow("SELECT transaction_date FROM transactions WHERE description = ?", reqBody.Description).Scan(&storedTxDate)
+	if err != nil {
+		t.Fatalf("Error checking transaction date: %v", err)
+	}
+
+	// Format both dates to YYYY-MM-DD to compare just the date component
+	expectedDateStr := txDate.Format("2006-01-02")
+	storedDateStr := storedTxDate.Format("2006-01-02")
+	if storedDateStr != expectedDateStr {
+		t.Errorf("Expected transaction date %s, got %s", expectedDateStr, storedDateStr)
 	}
 }
 
