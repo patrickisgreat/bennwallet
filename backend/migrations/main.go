@@ -31,6 +31,7 @@ func RunMigrations(db *sql.DB) error {
 		{"add_ynab_tables", AddYNABTables},
 		{"string_user_ids", StringUserIDs},
 		{"add_categories_unique_constraint", AddCategoriesUniqueConstraint},
+		{"add_optional_field", AddOptionalField},
 		// Add future migrations here
 	}
 

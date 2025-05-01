@@ -144,6 +144,7 @@ export interface ReportFilter {
   payTo?: string;
   enteredBy?: string;
   paid?: boolean;
+  optional?: boolean;
 }
 
 export interface CategoryTotal {
@@ -191,7 +192,8 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       endDate: formatDate(filter.endDate),
       category: filter.category || null,
       payTo: filter.payTo || null,
-      enteredBy: filter.enteredBy || null
+      enteredBy: filter.enteredBy || null,
+      paid: filter.paid
     };
     
     console.log('Sending POST request with body:', requestBody);
