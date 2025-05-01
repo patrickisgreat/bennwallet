@@ -33,7 +33,7 @@ func createTables() {
 	// Create users table
 	createUsersTable := `
 	CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id TEXT PRIMARY KEY,
 		username TEXT UNIQUE NOT NULL,
 		name TEXT NOT NULL
 	);

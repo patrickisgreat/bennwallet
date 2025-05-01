@@ -4,6 +4,7 @@ import { Category } from '../types/category';
 import { v4 as uuidv4 } from 'uuid';
 import { useUser } from '../context/UserContext';
 import { api, createTransaction } from '../utils/api';
+import HierarchicalCategorySelector from './HierarchicalCategorySelector';
 
 interface AddTransactionFormProps {
   onAdd: (transaction: Transaction) => void;
@@ -47,22 +48,8 @@ function AddTransactionForm({
   }, [currentUser, editingTransaction]);
 
   const loadCategories = async () => {
-    try {
-      const response = await api.get('/categories', {
-        params: { userId: currentUser?.id }
-      });
-      
-      // Ensure we always set an array, even if API returns null or undefined
-      if (Array.isArray(response.data)) {
-        setCategories(response.data);
-      } else {
-        console.warn('Categories API did not return an array:', response.data);
-        setCategories([]);
-      }
-    } catch (error) {
-      console.error('Error loading categories:', error);
-      setCategories([]);
-    }
+    // We no longer need this function since we're using the hierarchical selector
+    // that loads its own data
   };
 
   useEffect(() => {
@@ -172,7 +159,7 @@ function AddTransactionForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white p-4 rounded shadow mb-4">
+    <form onSubmit={handleSubmit} className="bg-white p-4 rounded shadow mb-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Pay To</label>
@@ -219,19 +206,11 @@ function AddTransactionForm({
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-          <select
+          <HierarchicalCategorySelector
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
-            required
-          >
-            <option value="">Select a category</option>
-            {Array.isArray(categories) ? categories.map((cat) => (
-              <option key={cat.id} value={cat.name}>
-                {cat.name}
-              </option>
-            )) : null}
-          </select>
+            onChange={setCategory}
+            className="w-full"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
