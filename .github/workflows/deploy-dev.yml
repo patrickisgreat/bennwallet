@@ -1,0 +1,49 @@
+name: Deploy to Development
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ dev ]
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+  FLY_DEV_APP_NAME: 'bennwallet'
+  DEV_DOMAIN: 'dev.bennwallet.com'
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        env:
+          VITE_API_URL: "https://${{ env.FLY_DEV_APP_NAME }}.fly.dev"
+        run: npm run build
+
+      - name: Set up Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io Development
+        run: flyctl deploy --remote-only --app ${{ env.FLY_DEV_APP_NAME }}
+        env:
+          NODE_ENV: development
+          ENVIRONMENT: development
+
+      - name: Add Custom Domain (if specified)
+        if: env.DEV_DOMAIN != ''
+        run: |
+          flyctl certs add ${{ env.DEV_DOMAIN }} --app ${{ env.FLY_DEV_APP_NAME }} 
