@@ -60,9 +60,13 @@ COPY --from=frontend /app/dist ./dist
 
 EXPOSE 8080
 ENV PORT=8080
-# Define YNAB_API_TOKEN as a build arg with empty default
+# Define YNAB API token and IDs as build args with empty defaults
 ARG YNAB_API_TOKEN=""
-# Pass it through as an environment variable
+ARG YNAB_BUDGET_ID=""
+ARG YNAB_ACCOUNT_ID=""
+# Pass them through as environment variables
 ENV YNAB_API_TOKEN=$YNAB_API_TOKEN
+ENV YNAB_BUDGET_ID=$YNAB_BUDGET_ID
+ENV YNAB_ACCOUNT_ID=$YNAB_ACCOUNT_ID
 
 CMD ["./bennwallet"]

@@ -3,16 +3,28 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
+	"bennwallet/backend/api"
 	"bennwallet/backend/database"
 	"bennwallet/backend/handlers"
 	"bennwallet/backend/middleware"
+	"bennwallet/backend/security"
 	"bennwallet/backend/ynab"
 
 	"github.com/gorilla/mux"
 )
 
 func main() {
+	// Initialize encryption
+	encryptionKey := os.Getenv("ENCRYPTION_KEY")
+	if encryptionKey == "" {
+		// Generate a default key for development
+		log.Println("Warning: ENCRYPTION_KEY not set, using a default key. This is NOT secure for production!")
+		encryptionKey = "default-dev-encryption-key-32chars"
+	}
+	security.InitializeEncryption(encryptionKey)
+
 	// Initialize database
 	err := database.InitDB()
 	if err != nil {
@@ -26,13 +38,20 @@ func main() {
 	}
 
 	// Initialize YNAB sync
-	err = ynab.InitYNABSync()
+	err = ynab.InitYNABSync(database.DB)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize YNAB sync: %v", err)
+		// Continue without YNAB sync - it will start when users configure it
 	}
 
 	// Create router
 	r := mux.NewRouter()
+
+	// Initialize API server
+	apiServer := api.NewServer(database.DB)
+
+	// Create YNAB handler
+	ynabHandler := handlers.NewYNABHandler(database.DB)
 
 	// Health check
 	r.HandleFunc("/health", handlers.HealthCheck).Methods("GET")
@@ -50,10 +69,13 @@ func main() {
 	r.HandleFunc("/categories/{id}", handlers.UpdateCategory).Methods("PUT")
 	r.HandleFunc("/categories/{id}", handlers.DeleteCategory).Methods("DELETE")
 
-	// YNAB routes
-	r.HandleFunc("/ynab/config", handlers.GetYNABConfig).Methods("GET")
-	r.HandleFunc("/ynab/config", handlers.UpdateYNABConfig).Methods("POST")
-	r.HandleFunc("/ynab/sync-categories", handlers.SyncYNABCategories).Methods("POST")
+	// YNAB routes using the new handler
+	r.HandleFunc("/ynab/config", ynabHandler.GetYNABConfig).Methods("GET")
+	r.HandleFunc("/ynab/config", ynabHandler.UpdateYNABConfig).Methods("POST", "PUT")
+	r.HandleFunc("/ynab/sync-categories", ynabHandler.SyncYNABCategories).Methods("POST")
+
+	// API routes
+	r.PathPrefix("/api/").Handler(http.StripPrefix("/api", apiServer.Handler()))
 
 	// User routes
 	r.HandleFunc("/users", handlers.GetUsers).Methods("GET")

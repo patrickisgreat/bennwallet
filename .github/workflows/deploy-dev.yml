@@ -12,11 +12,49 @@ env:
   DEV_DOMAIN: 'dev.bennwallet.com'
 
 jobs:
-  deploy-dev:
+  backend-test:
     runs-on: ubuntu-latest
-    env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      
+      - name: Go Mod Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          go mod download
+
+      - name: Test database package
+        run: |
+          cd backend
+          go test -v -race ./database
+
+      - name: Test handlers package
+        run: |
+          cd backend
+          go test -v -race ./handlers
+
+      - name: Test other packages
+        run: |
+          cd backend
+          go test -v -race ./... -coverpkg=./... -coverprofile=coverage.txt -covermode=atomic
+
+  frontend-test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -26,13 +64,61 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
+      - name: NPM Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            **/node_modules
+            ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm install
+          npm ci --prefer-offline --no-audit
+
+      - name: Check test environment
+        run: |
+          ls -la src/test/
+          node --version
+          npm --version
+          npx vitest --version
+
+      - name: Run tests with coverage
+        timeout-minutes: 3
+        run: npm run test:ci
+        env:
+          DEBUG: "vitest:*"
+          VITEST_MAX_THREADS: 1
 
       - name: Build frontend
         env:
           VITE_API_URL: "https://${{ env.FLY_DEV_APP_NAME }}.fly.dev"
         run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/
+          retention-days: 1
+
+  deploy-dev:
+    needs: [backend-test, frontend-test]
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/
 
       - name: Set up Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
@@ -48,12 +134,16 @@ jobs:
 
           [build.args]
             YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
+            YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
+            YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
 
           [env]
             PORT = "8080"
             NODE_ENV = "development"
             ENVIRONMENT = "development"
             YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
+            YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
+            YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
 
           [http_service]
             internal_port = 8080
@@ -67,6 +157,10 @@ jobs:
             cpu_kind = "shared"
             cpus = 1
             memory_mb = 1024
+
+          [mounts]
+            source = "bennwallet_data"
+            destination = "/data"
           EOF
 
       - name: Deploy to Fly.io Development
