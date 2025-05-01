@@ -33,6 +33,7 @@ func main() {
 	// Transaction routes
 	r.HandleFunc("/transactions", handlers.GetTransactions).Methods("GET")
 	r.HandleFunc("/transactions", handlers.AddTransaction).Methods("POST")
+	r.HandleFunc("/transactions/{id}", handlers.GetTransaction).Methods("GET")
 	r.HandleFunc("/transactions/{id}", handlers.UpdateTransaction).Methods("PUT")
 	r.HandleFunc("/transactions/{id}", handlers.DeleteTransaction).Methods("DELETE")
 
