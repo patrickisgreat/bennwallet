@@ -1,20 +1,17 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
-	"bennwallet/backend/api"
 	"bennwallet/backend/database"
 	"bennwallet/backend/handlers"
 	"bennwallet/backend/middleware"
-	"bennwallet/backend/models"
 	"bennwallet/backend/security"
 	"bennwallet/backend/services"
-	"bennwallet/backend/ynab"
 
 	"github.com/gorilla/mux"
 )
@@ -44,128 +41,89 @@ func main() {
 	// Load environment variables but don't do any database operations
 	services.LoadEnvVariables()
 
+	// Initialize Firebase Admin SDK
+	log.Println("Initializing Firebase Admin SDK...")
+	err = middleware.InitializeFirebase()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize Firebase: %v", err)
+		log.Println("Auth token verification will be disabled!")
+	} else {
+		log.Println("Firebase Admin SDK initialized (or running in dev mode with auth checks disabled)")
+	}
+
 	// Create router
 	r := mux.NewRouter()
 
-	// Initialize API server
-	apiServer := api.NewServer(database.DB)
+	// Apply global middleware
+	r.Use(middleware.EnableCORS)
 
-	// Create YNAB handler
-	ynabHandler := handlers.NewYNABHandler(database.DB)
+	// Register routes with both direct paths and /api prefix to maintain compatibility
+	registerRoutes(r)
+	registerRoutes(r.PathPrefix("/api").Subrouter())
 
-	// Health check
-	r.HandleFunc("/health", handlers.HealthCheck).Methods("GET")
-
-	// Transaction routes
-	r.HandleFunc("/transactions", handlers.GetTransactions).Methods("GET")
-	r.HandleFunc("/transactions", handlers.AddTransaction).Methods("POST")
-	r.HandleFunc("/transactions/{id}", handlers.GetTransaction).Methods("GET")
-	r.HandleFunc("/transactions/{id}", handlers.UpdateTransaction).Methods("PUT")
-	r.HandleFunc("/transactions/{id}", handlers.DeleteTransaction).Methods("DELETE")
-
-	// Category routes - consider deprecating these as we're now using YNAB categories
-	r.HandleFunc("/categories", handlers.GetCategories).Methods("GET")
-	r.HandleFunc("/categories", handlers.AddCategory).Methods("POST")
-	r.HandleFunc("/categories/{id}", handlers.UpdateCategory).Methods("PUT")
-	r.HandleFunc("/categories/{id}", handlers.DeleteCategory).Methods("DELETE")
-
-	// YNAB routes
-	r.HandleFunc("/ynab/categories", handlers.GetYNABCategories).Methods("GET")
-	r.HandleFunc("/ynab/sync", handlers.SyncYNABTransaction).Methods("POST")
-	r.HandleFunc("/ynab/config", ynabHandler.GetYNABConfig).Methods("GET")
-	r.HandleFunc("/ynab/config", ynabHandler.UpdateYNABConfig).Methods("POST", "PUT")
-	r.HandleFunc("/ynab/sync-categories", ynabHandler.SyncYNABCategories).Methods("POST")
-	r.HandleFunc("/ynab/force-sync", func(w http.ResponseWriter, r *http.Request) {
-		userId := r.URL.Query().Get("userId")
-		if userId == "" {
-			http.Error(w, "userId is required", http.StatusBadRequest)
-			return
+	// Serve static files from the "dist" directory for the frontend
+	fs := http.FileServer(http.Dir("./dist"))
+	r.PathPrefix("/assets/").Handler(http.StripPrefix("", fs))
+	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Don't log asset requests
+		if !strings.HasPrefix(r.URL.Path, "/assets/") {
+			log.Printf("Serving index.html for path: %s", r.URL.Path)
 		}
-
-		// Get the user's YNAB config
-		config, err := models.GetYNABConfig(database.DB, userId)
-		if err != nil {
-			log.Printf("Error retrieving YNAB config: %v", err)
-			http.Error(w, "Error retrieving YNAB configuration", http.StatusInternalServerError)
-			return
-		}
-
-		if !config.HasCredentials {
-			// Try to configure from environment variables as a fallback
-			services.SetupYNABForUser(userId)
-		}
-
-		// Get budget ID for the user (after potential setup)
-		var budgetId string
-		err = database.DB.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = ?", userId).Scan(&budgetId)
-		if err != nil {
-			log.Printf("Error getting budget ID for user %s: %v", userId, err)
-			http.Error(w, "User not found or YNAB not configured", http.StatusBadRequest)
-			return
-		}
-
-		// Force sync for this user
-		err = services.SyncYNABCategoriesNew(userId, budgetId)
-		if err != nil {
-			log.Printf("Error syncing YNAB categories for user %s: %v", userId, err)
-			http.Error(w, fmt.Sprintf("Error syncing: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"success","message":"YNAB categories synced successfully"}`))
+		http.ServeFile(w, r, "./dist/index.html")
 	}).Methods("GET")
 
-	// API routes
-	r.PathPrefix("/api/").Handler(http.StripPrefix("/api", apiServer.Handler()))
+	// Configure the server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
-	// User routes
-	r.HandleFunc("/users", handlers.GetUsers).Methods("GET")
-	r.HandleFunc("/users/{username}", handlers.GetUserByUsername).Methods("GET")
-	r.HandleFunc("/users/sync", handlers.SyncFirebaseUser).Methods("POST")
+	srv := &http.Server{
+		Handler:      r,
+		Addr:         ":" + port,
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+	}
 
-	// Report routes
-	r.HandleFunc("/reports/ynab-splits", handlers.GetYNABSplits).Methods("GET", "POST")
+	// Start the server
+	log.Printf("Starting server on port %s...", port)
+	log.Fatal(srv.ListenAndServe())
+}
 
-	// Create a file server for static files
-	fileServer := http.FileServer(http.Dir("dist"))
+// registerRoutes sets up all API routes
+func registerRoutes(r *mux.Router) {
+	// Public routes (no auth required)
+	r.HandleFunc("/health", handlers.HealthCheck).Methods("GET", "OPTIONS")
 
-	// Special handler for SPA routes - serve index.html for any unknown routes
-	r.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if the requested path is an API route - if so, return 404
-		if len(r.URL.Path) >= 4 && r.URL.Path[0:4] == "/api" {
-			http.NotFound(w, r)
-			return
-		}
+	// Create a subrouter for authenticated routes
+	protectedRouter := r.PathPrefix("").Subrouter()
+	protectedRouter.Use(middleware.AuthMiddleware)
 
-		// Otherwise serve the static files
-		fileServer.ServeHTTP(w, r)
-	}))
+	// Protected transaction routes
+	protectedRouter.HandleFunc("/transactions", handlers.GetTransactions).Methods("GET")
+	protectedRouter.HandleFunc("/transactions", handlers.AddTransaction).Methods("POST")
+	protectedRouter.HandleFunc("/transactions/{id}", handlers.GetTransaction).Methods("GET")
+	protectedRouter.HandleFunc("/transactions/{id}", handlers.UpdateTransaction).Methods("PUT")
+	protectedRouter.HandleFunc("/transactions/{id}", handlers.DeleteTransaction).Methods("DELETE")
 
-	// Apply middleware
-	handler := middleware.EnableCORS(r)
+	// Protected Category routes
+	protectedRouter.HandleFunc("/categories", handlers.GetCategories).Methods("GET")
+	protectedRouter.HandleFunc("/categories", handlers.AddCategory).Methods("POST")
+	protectedRouter.HandleFunc("/categories/{id}", handlers.UpdateCategory).Methods("PUT")
+	protectedRouter.HandleFunc("/categories/{id}", handlers.DeleteCategory).Methods("DELETE")
 
-	// Start server
-	log.Println("Server starting on :8080")
+	// Protected User routes
+	protectedRouter.HandleFunc("/users", handlers.GetUsers).Methods("GET")
+	protectedRouter.HandleFunc("/users/sync", handlers.SyncFirebaseUser).Methods("POST")
+	protectedRouter.HandleFunc("/users/{username}", handlers.GetUserByUsername).Methods("GET")
 
-	// Start YNAB sync in a separate goroutine after server starts
-	go func() {
-		log.Println("Starting background YNAB initialization...")
-		time.Sleep(5 * time.Second)
+	// Protected YNAB routes
+	protectedRouter.HandleFunc("/ynab/categories", handlers.GetYNABCategories).Methods("GET")
+	protectedRouter.HandleFunc("/ynab/sync", handlers.SyncYNABTransaction).Methods("POST")
+	protectedRouter.HandleFunc("/reports/ynab-splits", handlers.GetYNABSplits).Methods("POST")
 
-		// Setup YNAB from environment variables if available
-		services.SetupYNABFromEnv()
-
-		// Initialize YNAB sync system - this will only start background sync if there are configured users
-		if err := ynab.InitYNABSync(database.DB); err != nil {
-			log.Printf("Error initializing YNAB sync: %v", err)
-		}
-
-		// Trigger initial sync for any configured users
-		services.InitialSync()
-
-		log.Println("YNAB initialization completed")
-	}()
-
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	// YNAB Config routes (add these to match frontend expectations)
+	protectedRouter.HandleFunc("/ynab/config", handlers.GetYNABConfig).Methods("GET")
+	protectedRouter.HandleFunc("/ynab/config", handlers.UpdateYNABConfig).Methods("PUT")
+	protectedRouter.HandleFunc("/ynab/sync/categories", handlers.SyncYNABCategories).Methods("POST")
 }

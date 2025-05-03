@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"bennwallet/backend/database"
+	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
+	"bennwallet/backend/services"
 )
 
 // GetYNABCategories returns YNAB categories for a user in a hierarchical structure
@@ -244,5 +246,126 @@ func SyncYNABTransaction(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Transaction successfully synced to YNAB",
+	})
+}
+
+// GetYNABConfig handles GET requests for YNAB configuration
+func GetYNABConfig(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from authentication context
+	userID := middleware.GetUserIDFromContext(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
+	log.Printf("Getting YNAB config for user %s", userID)
+
+	// Note: YNAB config table is ensured to exist in ynab_handler.go
+
+	config, err := models.GetYNABConfig(database.DB, userID)
+	if err != nil {
+		log.Printf("Error retrieving YNAB config: %v", err)
+		http.Error(w, "Error retrieving YNAB configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Don't return actual token value for security reasons
+	// But set placeholder if it exists to indicate to the UI that a token is saved
+	if config.HasCredentials {
+		config.APIToken = "********" // Placeholder to indicate token exists
+	} else {
+		config.APIToken = ""
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}
+
+// UpdateYNABConfig handles PUT requests to update YNAB configuration
+func UpdateYNABConfig(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from authentication context
+	userID := middleware.GetUserIDFromContext(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
+	var request models.YNABConfigUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if request.APIToken == "" || request.BudgetID == "" || request.AccountID == "" {
+		http.Error(w, "API token, budget ID, and account ID are required", http.StatusBadRequest)
+		return
+	}
+
+	// Note: YNAB config table is ensured to exist in ynab_handler.go
+
+	// Update the config
+	err := models.UpsertYNABConfig(database.DB, &request, userID)
+	if err != nil {
+		log.Printf("Error updating YNAB config: %v", err)
+		http.Error(w, "Error updating YNAB configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Immediately trigger a sync of the YNAB categories
+	go func() {
+		log.Printf("Triggering initial YNAB category sync for user %s", userID)
+		if err := services.SyncYNABCategoriesNew(userID, request.BudgetID); err != nil {
+			log.Printf("Error during initial YNAB category sync: %v", err)
+		}
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "YNAB configuration updated successfully. Categories will be synced in the background.",
+	})
+}
+
+// SyncYNABCategories handles POST requests to sync YNAB categories
+func SyncYNABCategories(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from authentication context
+	userID := middleware.GetUserIDFromContext(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
+	// Get the user's YNAB config
+	config, err := models.GetYNABConfig(database.DB, userID)
+	if err != nil {
+		log.Printf("Error retrieving YNAB config: %v", err)
+		http.Error(w, "Error retrieving YNAB configuration", http.StatusInternalServerError)
+		return
+	}
+
+	if !config.HasCredentials {
+		http.Error(w, "YNAB not configured for this user", http.StatusBadRequest)
+		return
+	}
+
+	// Use the budget ID from the config
+	if config.BudgetID == "" {
+		http.Error(w, "YNAB budget ID not found", http.StatusBadRequest)
+		return
+	}
+
+	// Trigger the sync in the background
+	go func() {
+		if err := services.SyncYNABCategoriesNew(userID, config.BudgetID); err != nil {
+			log.Printf("Error syncing YNAB categories: %v", err)
+		}
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "YNAB category sync initiated",
 	})
 }
