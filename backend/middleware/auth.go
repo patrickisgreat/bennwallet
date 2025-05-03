@@ -19,7 +19,32 @@ var firebaseAuth *auth.Client
 
 // InitializeFirebase initializes the Firebase Admin SDK
 func InitializeFirebase() error {
-	// First check for Base64-encoded Firebase credentials in environment variables (production)
+	// First check for direct JSON Firebase credentials in environment variables (production)
+	firebaseCredentialsJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	if firebaseCredentialsJSON != "" {
+		log.Println("Using JSON Firebase credentials from environment")
+
+		// Initialize Firebase with credentials JSON directly
+		opt := option.WithCredentialsJSON([]byte(firebaseCredentialsJSON))
+		config := &firebase.Config{ProjectID: "benwallett-ab39d"}
+
+		app, err := firebase.NewApp(context.Background(), config, opt)
+		if err != nil {
+			log.Printf("Error initializing Firebase app from JSON env: %v", err)
+			return err
+		}
+
+		firebaseAuth, err = app.Auth(context.Background())
+		if err != nil {
+			log.Printf("Error getting Firebase Auth client: %v", err)
+			return err
+		}
+
+		log.Println("Firebase Admin SDK initialized successfully with JSON credentials")
+		return nil
+	}
+
+	// Next check for Base64-encoded Firebase credentials in environment variables
 	firebaseCredentialsBase64 := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64")
 	if firebaseCredentialsBase64 != "" {
 		log.Println("Using base64-encoded Firebase credentials from environment")
