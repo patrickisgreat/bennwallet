@@ -10,6 +10,7 @@ env:
   NODE_VERSION: '20'
   FLY_DEV_APP_NAME: 'bennwallet'
   DEV_DOMAIN: ''
+  VOLUME_NAME: 'bennwallet_data'
 
 jobs:
   backend-test:
@@ -123,6 +124,11 @@ jobs:
       - name: Set up Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: Debug - Display app and volume names
+        run: |
+          echo "App Name: ${{ env.FLY_DEV_APP_NAME }}"
+          echo "Volume Name: ${{ env.VOLUME_NAME }}"
+
       - name: Create development fly.toml
         run: |
           cat > fly.toml << EOF
@@ -159,12 +165,23 @@ jobs:
             memory_mb = 1024
 
           [mounts]
-            source = "bennwallet_data"
+            source = "${{ env.VOLUME_NAME }}"
             destination = "/data"
           EOF
 
+      - name: Check if volume exists and create if needed
+        run: |
+          if ! flyctl volumes list --app "${{ env.FLY_DEV_APP_NAME }}" | grep -q "${{ env.VOLUME_NAME }}"; then
+            echo "Creating volume ${{ env.VOLUME_NAME }}..."
+            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.FLY_DEV_APP_NAME }}" --region sjc --size 1
+          else
+            echo "Volume ${{ env.VOLUME_NAME }} already exists"
+          fi
+
       - name: Deploy to Fly.io Development
-        run: flyctl deploy --remote-only --app ${{ env.FLY_DEV_APP_NAME }}
+        run: |
+          echo "Deploying to app: ${{ env.FLY_DEV_APP_NAME }}"
+          flyctl deploy --remote-only --app "${{ env.FLY_DEV_APP_NAME }}"
         env:
           NODE_ENV: development
-          ENVIRONMENT: development 
+          ENVIRONMENT: development

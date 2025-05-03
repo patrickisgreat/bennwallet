@@ -22,11 +22,15 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Generate valid volume name
+      - name: Generate PR app name and volume name
+        id: app-name
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
+          APP_NAME="bennwallet-pr-${PR_NUMBER}"
           VOLUME_NAME="bennwalletpr${PR_NUMBER}_data"
+          echo "APP_NAME=${APP_NAME}" >> $GITHUB_ENV
           echo "VOLUME_NAME=${VOLUME_NAME}" >> $GITHUB_ENV
+          echo "app_name=${APP_NAME}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: |
@@ -77,9 +81,15 @@ jobs:
             memory_mb = 1024
             
           [mounts]
-            source = "${{ env.APP_NAME }}_data"
+            source = "${{ env.VOLUME_NAME }}"
             destination = "/data"
           EOF
+
+      - name: Debug - Display app name and volume name
+        run: |
+          echo "APP_NAME: ${{ env.APP_NAME }}"
+          echo "VOLUME_NAME: ${{ env.VOLUME_NAME }}"
+          cat fly.toml | grep -E 'app|source'
 
       - name: Check if app exists
         id: check-app
@@ -97,6 +107,15 @@ jobs:
         run: |
           flyctl apps create "${{ env.APP_NAME }}" --org personal
 
+      - name: Check if volume exists and create if needed
+        run: |
+          if ! flyctl volumes list --app "${{ env.APP_NAME }}" | grep -q "${{ env.VOLUME_NAME }}"; then
+            echo "Creating volume ${{ env.VOLUME_NAME }}..."
+            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1
+          else
+            echo "Volume ${{ env.VOLUME_NAME }} already exists"
+          fi
+
       - name: Deploy to Fly.io
         run: flyctl deploy --remote-only --app "${{ env.APP_NAME }}"
 
@@ -109,7 +128,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `🚀 PR environment deployed to https://${{ steps.app-name.outputs.app_name }}.fly.dev
+              body: `🚀 PR environment deployed to https://${{ env.APP_NAME }}.fly.dev
 
             This environment will be automatically destroyed when the PR is closed.`
-            }) 
+            })
