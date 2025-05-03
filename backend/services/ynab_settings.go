@@ -73,6 +73,30 @@ func setupYNABFromEnvironment() {
 func setupYNABFromEnvForUser(userID string) {
 	log.Printf("DEBUG: Checking for YNAB credentials for user %s", userID)
 
+	// First check if user already has credentials in the database
+	config, err := models.GetYNABConfig(database.DB, userID)
+	if err == nil && config.HasCredentials {
+		log.Printf("DEBUG: User %s already has YNAB credentials in ynab_config table, skipping setup from env", userID)
+		return
+	}
+
+	// Check legacy table as well
+	var count int
+	err = database.DB.QueryRow(`
+		SELECT COUNT(*) FROM user_ynab_settings 
+		WHERE user_id = ? 
+		AND token IS NOT NULL 
+		AND token != ''
+		AND budget_id IS NOT NULL
+		AND budget_id != ''`,
+		userID).Scan(&count)
+
+	if err == nil && count > 0 {
+		log.Printf("DEBUG: User %s already has YNAB credentials in legacy table, skipping setup from env", userID)
+		return
+	}
+
+	// Only proceed with setup from environment variables if no existing credentials were found
 	tokenEnvVar := fmt.Sprintf("YNAB_TOKEN_USER_%s", userID)
 	token := os.Getenv(tokenEnvVar)
 	if token == "" {
@@ -101,7 +125,7 @@ func setupYNABFromEnvForUser(userID string) {
 	log.Printf("DEBUG: Using budget ID: %s, account ID: %s", budgetID, accountID)
 
 	// Ensure user exists in users table
-	_, err := database.DB.Exec(`
+	_, err = database.DB.Exec(`
 		INSERT OR IGNORE INTO users (id, username, name) 
 		VALUES (?, ?, ?)
 	`, userID, fmt.Sprintf("user_%s", userID), fmt.Sprintf("User %s", userID))
@@ -314,6 +338,29 @@ func LoadEnvVariables() {
 func SetupYNABForUser(userID string) {
 	log.Printf("Setting up YNAB for user %s", userID)
 
+	// First check if user already has credentials in the database
+	config, err := models.GetYNABConfig(database.DB, userID)
+	if err == nil && config.HasCredentials {
+		log.Printf("DEBUG: User %s already has YNAB credentials in ynab_config table, skipping setup from env", userID)
+		return
+	}
+
+	// Check legacy table as well
+	var count int
+	err = database.DB.QueryRow(`
+		SELECT COUNT(*) FROM user_ynab_settings 
+		WHERE user_id = ? 
+		AND token IS NOT NULL 
+		AND token != ''
+		AND budget_id IS NOT NULL
+		AND budget_id != ''`,
+		userID).Scan(&count)
+
+	if err == nil && count > 0 {
+		log.Printf("DEBUG: User %s already has YNAB credentials in legacy table, skipping setup from env", userID)
+		return
+	}
+
 	// Check for user-specific YNAB credentials
 	token := os.Getenv(fmt.Sprintf("YNAB_TOKEN_USER_%s", userID))
 	if token == "" {
@@ -332,7 +379,7 @@ func SetupYNABForUser(userID string) {
 	log.Printf("Found YNAB credentials for user %s", userID)
 
 	// Ensure user exists
-	_, err := database.DB.Exec(`
+	_, err = database.DB.Exec(`
 		INSERT OR IGNORE INTO users (id, username, name) 
 		VALUES (?, ?, ?)
 	`, userID, fmt.Sprintf("user_%s", userID), fmt.Sprintf("User %s", userID))
