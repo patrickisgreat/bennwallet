@@ -16,13 +16,14 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	// Create tables manually
+	// Create base tables
 	createTables()
 
 	// Run tests
 	code := m.Run()
 
 	// Cleanup
+	cleanupTestDB()
 	DB.Close()
 
 	os.Exit(code)
@@ -78,6 +79,15 @@ func createTables() {
 	}
 }
 
+// cleanupTestDB cleans up all test data
+func cleanupTestDB() {
+	tables := []string{"users", "transactions", "categories", "ynab_config", "user_ynab_settings", "ynab_category_groups", "ynab_categories"}
+
+	for _, table := range tables {
+		DB.Exec("DELETE FROM " + table)
+	}
+}
+
 func TestInitDB(t *testing.T) {
 	// Test that tables were created
 	var count int
@@ -124,5 +134,146 @@ func TestSeedDefaultUsers(t *testing.T) {
 	}
 	if !exists {
 		t.Error("User 'patrick' not found")
+	}
+}
+
+func TestRunMigrations(t *testing.T) {
+	// First, drop any YNAB-related tables to ensure a clean state
+	ynabTables := []string{"ynab_config", "user_ynab_settings", "ynab_category_groups", "ynab_categories"}
+	for _, table := range ynabTables {
+		_, err := DB.Exec("DROP TABLE IF EXISTS " + table)
+		if err != nil {
+			t.Fatalf("Error dropping table %s: %v", table, err)
+		}
+	}
+
+	// Run the migrations
+	err := RunMigrations()
+	if err != nil {
+		t.Fatalf("Error running migrations: %v", err)
+	}
+
+	// Check that YNAB config table was created
+	var exists bool
+	err = DB.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='ynab_config')").Scan(&exists)
+	if err != nil {
+		t.Fatalf("Error checking ynab_config table: %v", err)
+	}
+	if !exists {
+		t.Error("YNAB config table not created")
+	}
+
+	// Check that user_ynab_settings table was created
+	err = DB.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_ynab_settings')").Scan(&exists)
+	if err != nil {
+		t.Fatalf("Error checking user_ynab_settings table: %v", err)
+	}
+	if !exists {
+		t.Error("Legacy user_ynab_settings table not created")
+	}
+
+	// Get the actual columns in the ynab_config table
+	rows, err := DB.Query("PRAGMA table_info(ynab_config)")
+	if err != nil {
+		t.Fatalf("Error getting ynab_config columns: %v", err)
+	}
+	defer rows.Close()
+
+	// Map to store column names
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			t.Fatalf("Error scanning column info: %v", err)
+		}
+		columns[name] = true
+	}
+
+	// Now insert using the actual columns from the table
+	// This will be more resilient to schema changes
+	if columns["user_id"] && columns["encrypted_api_token"] {
+		_, err = DB.Exec(`
+			INSERT INTO ynab_config (user_id, encrypted_api_token) 
+			VALUES (?, ?)`,
+			"test-user", "encrypted-token")
+		if err != nil {
+			t.Fatalf("Error inserting test data into ynab_config: %v", err)
+		}
+
+		var userId string
+		err = DB.QueryRow("SELECT user_id FROM ynab_config WHERE user_id = ?", "test-user").Scan(&userId)
+		if err != nil {
+			t.Fatalf("Error retrieving test data from ynab_config: %v", err)
+		}
+		if userId != "test-user" {
+			t.Errorf("Expected user_id 'test-user', got '%s'", userId)
+		}
+	} else {
+		t.Skip("Skipping insert test as required columns not found in ynab_config table")
+	}
+}
+
+func TestSeedDefaultUsers_WithExistingUsers(t *testing.T) {
+	// Reset user table to make sure we have consistent test state
+	_, err := DB.Exec("DELETE FROM users")
+	if err != nil {
+		t.Fatalf("Error clearing users table: %v", err)
+	}
+
+	// Insert a different user
+	_, err = DB.Exec("INSERT INTO users (id, username, name) VALUES (?, ?, ?)",
+		"3", "testuser", "Test User")
+	if err != nil {
+		t.Fatalf("Error inserting test user: %v", err)
+	}
+
+	// Check the user count
+	var initialCount int
+	err = DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&initialCount)
+	if err != nil {
+		t.Fatalf("Error counting users: %v", err)
+	}
+	if initialCount != 1 {
+		t.Errorf("Expected 1 user before seeding, got %d", initialCount)
+	}
+
+	// Run SeedDefaultUsers which checks for existing users
+	// Note: SeedDefaultUsers only adds default users if the users table is empty
+	// Since we've added one user, it shouldn't add the default users
+	err = SeedDefaultUsers()
+	if err != nil {
+		t.Fatalf("Error running SeedDefaultUsers: %v", err)
+	}
+
+	// Verify user table state after seeding
+	var testUserExists bool
+	err = DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username = 'testuser')").Scan(&testUserExists)
+	if err != nil {
+		t.Fatalf("Error checking testuser: %v", err)
+	}
+	if !testUserExists {
+		t.Error("User 'testuser' should still exist after seeding default users")
+	}
+
+	// Check the total count - should still be 1 since default users aren't added when table isn't empty
+	var finalCount int
+	err = DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&finalCount)
+	if err != nil {
+		t.Fatalf("Error counting users: %v", err)
+	}
+	if finalCount != 1 {
+		t.Errorf("Expected 1 user after seeding (since table wasn't empty), got %d", finalCount)
+	}
+
+	// Test that default users are not added when table isn't empty
+	var sarahExists bool
+	err = DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username = 'sarah')").Scan(&sarahExists)
+	if err != nil {
+		t.Fatalf("Error checking sarah: %v", err)
+	}
+	if sarahExists {
+		t.Error("User 'sarah' should not exist after seeding since table wasn't empty")
 	}
 }

@@ -45,7 +45,10 @@ func setupTransactionTestDB() {
 
 func TestAddTransaction(t *testing.T) {
 	setupTransactionTestDB()
-	defer database.DB.Close()
+	defer func() {
+		CleanupTestDB()
+		database.DB.Close()
+	}()
 
 	// Setup
 	now := time.Now()
@@ -124,7 +127,10 @@ func TestAddTransaction(t *testing.T) {
 
 func TestGetTransactions(t *testing.T) {
 	setupTransactionTestDB()
-	defer database.DB.Close()
+	defer func() {
+		CleanupTestDB()
+		database.DB.Close()
+	}()
 
 	// First add a test transaction
 	_, err := database.DB.Exec(`

@@ -9,8 +9,29 @@ import (
 func AddYNABTables(db *sql.DB) error {
 	log.Println("Adding YNAB tables...")
 
-	// Create YNAB category groups table
+	// Create YNAB config table
 	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS ynab_config (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id TEXT NOT NULL,
+			encrypted_api_token TEXT,
+			encrypted_budget_id TEXT,
+			encrypted_account_id TEXT,
+			last_sync_time TIMESTAMP,
+			sync_frequency INTEGER DEFAULT 60,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE(user_id)
+		)
+	`)
+	if err != nil {
+		log.Printf("Error creating ynab_config table: %v", err)
+		return err
+	}
+
+	// Create YNAB category groups table
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS ynab_category_groups (
 			id TEXT NOT NULL,
 			name TEXT NOT NULL,
