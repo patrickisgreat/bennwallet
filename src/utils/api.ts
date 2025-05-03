@@ -214,6 +214,13 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       }
     };
 
+    // Convert month and year to integers or null
+    const parseIntOrNull = (value: string | number | undefined | null): number | null => {
+      if (value === '' || value === undefined || value === null) return null;
+      const parsed = parseInt(String(value), 10);
+      return isNaN(parsed) ? null : parsed;
+    };
+
     // Send request to the API
     const requestBody = {
       startDate: formatDate(filter.startDate),
@@ -223,8 +230,8 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       enteredBy: filter.enteredBy || null,
       paid: filter.paid,
       optional: filter.optional,
-      transactionDateMonth: filter.transactionDateMonth,
-      transactionDateYear: filter.transactionDateYear,
+      transactionDateMonth: parseIntOrNull(filter.transactionDateMonth),
+      transactionDateYear: parseIntOrNull(filter.transactionDateYear),
     };
 
     console.log('Sending POST request with body:', requestBody);
@@ -337,5 +344,42 @@ export async function fetchUniqueTransactionFields(): Promise<UniqueTransactionF
       console.error('Response data:', axiosError.response.data);
     }
     return { payTo: [], enteredBy: [] };
+  }
+}
+
+export interface YNABCategory {
+  id: string;
+  name: string;
+  categoryGroupID: string;
+  categoryGroupName: string;
+}
+
+export interface CategoryGroup {
+  id: string;
+  name: string;
+  categories: YNABCategory[];
+}
+
+export async function fetchYNABCategories(): Promise<CategoryGroup[]> {
+  try {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      console.warn('No userId found in localStorage - user may not be fully authenticated');
+      return [];
+    }
+
+    console.log('Fetching YNAB categories for user:', userId);
+    const response = await api.get(`/ynab/categories?userId=${userId}`);
+    console.log('YNAB categories response:', response.data);
+
+    if (!response.data || !Array.isArray(response.data)) {
+      console.warn('Invalid or empty YNAB categories response');
+      return [];
+    }
+
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching YNAB categories:', error);
+    return [];
   }
 }
