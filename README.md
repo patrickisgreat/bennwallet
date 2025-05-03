@@ -15,7 +15,7 @@ BennWallet is a full-stack web application designed to help couples or roommates
 
 ### Frontend
 
-- React (with TypeScript)
+- React (with TypeScript) bloop.
 - Vite for fast development and optimized builds
 - React Router for SPA navigation
 - Tailwind CSS for styling
