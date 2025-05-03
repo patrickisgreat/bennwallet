@@ -606,3 +606,145 @@ func generateID() string {
 	}
 	return string(b)
 }
+
+// GetUniqueTransactionFields returns unique values for PayTo and EnteredBy fields
+func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
+	// Get the user ID from the authentication context
+	userID := middleware.GetUserIDFromContext(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
+	log.Printf("Getting unique fields for user: %s", userID)
+
+	// First, let's check if we have any transactions at all
+	var transactionCount int
+	err := database.DB.QueryRow("SELECT COUNT(*) FROM transactions").Scan(&transactionCount)
+	if err != nil {
+		log.Printf("Error checking transaction count: %v", err)
+	} else {
+		log.Printf("Total transactions in database: %d", transactionCount)
+	}
+
+	// Check if the userId column exists
+	var hasUserIdColumn bool
+	err = database.DB.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('transactions') 
+		WHERE name = 'userId'
+	`).Scan(&hasUserIdColumn)
+
+	if err != nil {
+		log.Printf("Error checking for userId column: %v", err)
+		hasUserIdColumn = false
+	}
+
+	log.Printf("Has userId column: %v", hasUserIdColumn)
+
+	// Build separate queries for payTo and enteredBy
+	payToQuery := `
+		SELECT DISTINCT payTo 
+		FROM transactions 
+		WHERE payTo IS NOT NULL
+	`
+
+	enteredByQuery := `
+		SELECT DISTINCT enteredBy 
+		FROM transactions 
+		WHERE enteredBy IS NOT NULL
+	`
+
+	args := []interface{}{}
+
+	// Add user ID filter if the column exists
+	if hasUserIdColumn {
+		payToQuery += " AND (userId = ? OR userId IS NULL)"
+		enteredByQuery += " AND (userId = ? OR userId IS NULL)"
+		args = append(args, userID)
+	}
+
+	// Add ORDER BY to make the results more predictable
+	payToQuery += " ORDER BY payTo"
+	enteredByQuery += " ORDER BY enteredBy"
+
+	log.Printf("PayTo query: %s", payToQuery)
+	log.Printf("EnteredBy query: %s", enteredByQuery)
+	log.Printf("Query args: %v", args)
+
+	// Query for unique payTo values
+	payToRows, err := database.DB.Query(payToQuery, args...)
+	if err != nil {
+		log.Printf("Error querying unique payTo fields: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer payToRows.Close()
+
+	// Query for unique enteredBy values
+	enteredByRows, err := database.DB.Query(enteredByQuery, args...)
+	if err != nil {
+		log.Printf("Error querying unique enteredBy fields: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer enteredByRows.Close()
+
+	// Use maps to store unique values
+	payToValues := make(map[string]bool)
+	enteredByValues := make(map[string]bool)
+
+	// Process payTo values
+	for payToRows.Next() {
+		var payTo sql.NullString
+		err := payToRows.Scan(&payTo)
+		if err != nil {
+			log.Printf("Error scanning payTo row: %v", err)
+			continue
+		}
+		if payTo.Valid {
+			payToValues[payTo.String] = true
+			log.Printf("Found payTo value: %s", payTo.String)
+		}
+	}
+
+	// Process enteredBy values
+	for enteredByRows.Next() {
+		var enteredBy sql.NullString
+		err := enteredByRows.Scan(&enteredBy)
+		if err != nil {
+			log.Printf("Error scanning enteredBy row: %v", err)
+			continue
+		}
+		if enteredBy.Valid {
+			enteredByValues[enteredBy.String] = true
+			log.Printf("Found enteredBy value: %s", enteredBy.String)
+		}
+	}
+
+	// Convert maps to slices
+	payToSlice := make([]string, 0, len(payToValues))
+	for k := range payToValues {
+		payToSlice = append(payToSlice, k)
+	}
+
+	enteredBySlice := make([]string, 0, len(enteredByValues))
+	for k := range enteredByValues {
+		enteredBySlice = append(enteredBySlice, k)
+	}
+
+	log.Printf("Final payTo values: %v", payToSlice)
+	log.Printf("Final enteredBy values: %v", enteredBySlice)
+
+	// Create response
+	response := struct {
+		PayTo     []string `json:"payTo"`
+		EnteredBy []string `json:"enteredBy"`
+	}{
+		PayTo:     payToSlice,
+		EnteredBy: enteredBySlice,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}

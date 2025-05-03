@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -39,6 +40,21 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Table has optional column: %v", hasOptionalColumn)
+
+	// Check if the transaction_date column exists
+	var hasTransactionDateColumn bool
+	err = database.DB.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('transactions') 
+		WHERE name = 'transaction_date'
+	`).Scan(&hasTransactionDateColumn)
+
+	if err != nil {
+		log.Printf("Error checking for transaction_date column: %v", err)
+		hasTransactionDateColumn = false
+	}
+
+	log.Printf("Table has transaction_date column: %v", hasTransactionDateColumn)
 
 	// Debugging: List all transactions with their fields
 	var query string
@@ -82,28 +98,37 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Total transactions found: %d", count)
 	}
 
-	// Build the main query
+	// Build the base query
 	query = `
 		SELECT type as category, SUM(amount) as total
 		FROM transactions
 		WHERE 1=1
 	`
-	args := []interface{}{}
+	var args []interface{}
 
-	log.Printf("Starting to build query with filters. Initial query: %s", query)
-
+	// Add date filters
 	if request.StartDate != "" {
-		// Use SQLite's date() function to extract just the date part for comparison
-		query += " AND date(date) >= date(?)"
+		query += " AND date >= ?"
 		args = append(args, request.StartDate)
 		log.Printf("Added StartDate filter: %s", request.StartDate)
 	}
 	if request.EndDate != "" {
-		// Use SQLite's date() function to extract just the date part for comparison
-		query += " AND date(date) <= date(?)"
+		query += " AND date <= ?"
 		args = append(args, request.EndDate)
 		log.Printf("Added EndDate filter: %s", request.EndDate)
 	}
+
+	// Add transaction date filters if column exists and filters are provided
+	if hasTransactionDateColumn && request.TransactionDateMonth != nil && request.TransactionDateYear != nil {
+		// Create start and end dates for the month
+		startDate := fmt.Sprintf("%d-%02d-01", *request.TransactionDateYear, *request.TransactionDateMonth)
+		endDate := fmt.Sprintf("%d-%02d-31", *request.TransactionDateYear, *request.TransactionDateMonth)
+
+		query += " AND transaction_date >= ? AND transaction_date <= ?"
+		args = append(args, startDate, endDate)
+		log.Printf("Added TransactionDate filters: month=%d, year=%d", *request.TransactionDateMonth, *request.TransactionDateYear)
+	}
+
 	if request.Category != "" {
 		query += " AND type = ?"
 		args = append(args, request.Category)
