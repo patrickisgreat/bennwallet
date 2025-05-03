@@ -313,6 +313,19 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 		hasUserIdColumn = false
 	}
 
+	// Check if the transaction_date column exists
+	var hasTransactionDateColumn bool
+	err = database.DB.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('transactions') 
+		WHERE name = 'transaction_date'
+	`).Scan(&hasTransactionDateColumn)
+
+	if err != nil {
+		log.Printf("Error checking for transaction_date column: %v", err)
+		hasTransactionDateColumn = false
+	}
+
 	// If columns don't exist, add them
 	if !hasOptionalColumn {
 		log.Printf("Adding optional column to transactions table")
@@ -334,6 +347,17 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		hasUserIdColumn = true
+	}
+
+	if !hasTransactionDateColumn {
+		log.Printf("Adding transaction_date column to transactions table")
+		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN transaction_date DATETIME`)
+		if err != nil {
+			log.Printf("Error adding transaction_date column: %v", err)
+			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		hasTransactionDateColumn = true
 	}
 
 	// Build query based on available columns
@@ -415,6 +439,19 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		hasUserIdColumn = false
 	}
 
+	// Check if the transaction_date column exists
+	var hasTransactionDateColumn bool
+	err = database.DB.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('transactions') 
+		WHERE name = 'transaction_date'
+	`).Scan(&hasTransactionDateColumn)
+
+	if err != nil {
+		log.Printf("Error checking for transaction_date column: %v", err)
+		hasTransactionDateColumn = false
+	}
+
 	// If columns don't exist, add them
 	if !hasOptionalColumn {
 		log.Printf("Adding optional column to transactions table")
@@ -436,6 +473,17 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		hasUserIdColumn = true
+	}
+
+	if !hasTransactionDateColumn {
+		log.Printf("Adding transaction_date column to transactions table")
+		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN transaction_date DATETIME`)
+		if err != nil {
+			log.Printf("Error adding transaction_date column: %v", err)
+			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		hasTransactionDateColumn = true
 	}
 
 	// Build query based on available columns

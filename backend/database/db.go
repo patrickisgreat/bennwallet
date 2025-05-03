@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"testing"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -140,4 +142,138 @@ func SeedDefaultUsers() error {
 	}
 
 	return nil
+}
+
+// SetupTestDB creates a new test database and returns it along with a cleanup function
+func SetupTestDB(t *testing.T) (*sql.DB, func()) {
+	// Create a new in-memory database
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Create tables
+	createUsersTable := `
+	CREATE TABLE IF NOT EXISTS users (
+		id TEXT PRIMARY KEY,
+		username TEXT UNIQUE NOT NULL,
+		name TEXT NOT NULL
+	);
+	`
+	_, err = db.Exec(createUsersTable)
+	if err != nil {
+		t.Fatalf("Failed to create users table: %v", err)
+	}
+
+	// Create transactions table
+	createTransactionsTable := `
+	CREATE TABLE IF NOT EXISTS transactions (
+		id TEXT PRIMARY KEY,
+		amount REAL NOT NULL,
+		description TEXT NOT NULL,
+		date DATETIME NOT NULL,
+		transaction_date DATETIME,
+		type TEXT NOT NULL,
+		payTo TEXT,
+		paid BOOLEAN NOT NULL DEFAULT 0,
+		paidDate TEXT,
+		enteredBy TEXT NOT NULL,
+		optional BOOLEAN NOT NULL DEFAULT 0,
+		userId TEXT
+	);
+	`
+	_, err = db.Exec(createTransactionsTable)
+	if err != nil {
+		t.Fatalf("Failed to create transactions table: %v", err)
+	}
+
+	// Create categories table
+	createCategoriesTable := `
+	CREATE TABLE IF NOT EXISTS categories (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		description TEXT,
+		user_id TEXT NOT NULL,
+		color TEXT,
+		UNIQUE(name, user_id)
+	);
+	`
+	_, err = db.Exec(createCategoriesTable)
+	if err != nil {
+		t.Fatalf("Failed to create categories table: %v", err)
+	}
+
+	// Create YNAB config table with all required columns
+	createYNABConfigTable := `
+	CREATE TABLE IF NOT EXISTS ynab_config (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id TEXT NOT NULL,
+		encrypted_api_token TEXT,
+		encrypted_budget_id TEXT,
+		encrypted_account_id TEXT,
+		last_sync_time TIMESTAMP,
+		sync_frequency INTEGER DEFAULT 60,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		UNIQUE(user_id)
+	);
+	`
+	_, err = db.Exec(createYNABConfigTable)
+	if err != nil {
+		t.Fatalf("Failed to create ynab_config table: %v", err)
+	}
+
+	// Create user_ynab_settings table
+	createUserYNABSettingsTable := `
+	CREATE TABLE IF NOT EXISTS user_ynab_settings (
+		user_id TEXT PRIMARY KEY,
+		token TEXT,
+		budget_id TEXT,
+		account_id TEXT,
+		sync_enabled INTEGER,
+		last_synced TIMESTAMP
+	);
+	`
+	_, err = db.Exec(createUserYNABSettingsTable)
+	if err != nil {
+		t.Fatalf("Failed to create user_ynab_settings table: %v", err)
+	}
+
+	// Create YNAB category groups table
+	createYNABCategoryGroupsTable := `
+	CREATE TABLE IF NOT EXISTS ynab_category_groups (
+		id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		last_updated DATETIME NOT NULL,
+		PRIMARY KEY (id, user_id)
+	);
+	`
+	_, err = db.Exec(createYNABCategoryGroupsTable)
+	if err != nil {
+		t.Fatalf("Failed to create ynab_category_groups table: %v", err)
+	}
+
+	// Create YNAB categories table
+	createYNABCategoriesTable := `
+	CREATE TABLE IF NOT EXISTS ynab_categories (
+		id TEXT NOT NULL,
+		group_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		last_updated DATETIME NOT NULL,
+		PRIMARY KEY (id, user_id),
+		FOREIGN KEY (group_id, user_id) REFERENCES ynab_category_groups(id, user_id)
+	);
+	`
+	_, err = db.Exec(createYNABCategoriesTable)
+	if err != nil {
+		t.Fatalf("Failed to create ynab_categories table: %v", err)
+	}
+
+	// Return the database and a cleanup function
+	return db, func() {
+		db.Close()
+	}
 }
