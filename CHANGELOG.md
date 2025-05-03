@@ -1,3 +1,18 @@
+## [1.0.1](https://github.com/patrickisgreat/bennwallet/compare/v1.0.0...v1.0.1) (2025-05-03)
+
+### Bug Fixes
+
+* deploy github actions workflow to create needed fly volumes ([ee7c0b7](https://github.com/patrickisgreat/bennwallet/commit/ee7c0b7e812c2242d0ce08d7515e339dd4cb4f50))
+* fly mount volume naming ([15af89a](https://github.com/patrickisgreat/bennwallet/commit/15af89a8d36f52a4faf983e4f02bcf18b93bb163))
+* fly mount volume naming ([c685098](https://github.com/patrickisgreat/bennwallet/commit/c685098c2d22149d71590548bd9b20ab857dd712))
+* update husky scripts to remove deprecated syntax ([de702d4](https://github.com/patrickisgreat/bennwallet/commit/de702d46e287ea9ab90caad322680e4c14b7cd6b))
+* workflows ([3c3fa0a](https://github.com/patrickisgreat/bennwallet/commit/3c3fa0aaae15e4e313dd9e67597197def7af760b))
+* workflows for good ([d6c0339](https://github.com/patrickisgreat/bennwallet/commit/d6c0339b796b1604492e55465e6e7bcb550a33f6))
+
+### Chores
+
+* updating workflow permissions, adding husky pre commit linter configs ([9caa7df](https://github.com/patrickisgreat/bennwallet/commit/9caa7df8754186fbde052462c2200e869ec15b52))
+
 ## 1.0.0 (2025-05-03)
 
 ### Bug Fixes
