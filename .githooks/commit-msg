@@ -1,0 +1,27 @@
+#!/bin/sh
+
+# This hook validates commit messages according to Conventional Commits format
+# To enable: git config core.hooksPath .githooks
+
+# Get the commit message (the first argument is the filename of the commit message)
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Check if the commit message matches the Conventional Commits format
+# Format: <type>(<scope>): <description>
+# Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore
+
+PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\([a-z0-9-]+\))?: .{1,}"
+
+if ! echo "$COMMIT_MSG" | grep -iqE "$PATTERN"; then
+  echo "\033[0;31mError: Commit message does not follow the Conventional Commits format.\033[0m"
+  echo "\033[0;31mFormat: <type>(<scope>): <description>\033[0m"
+  echo "\033[0;31mTypes: feat, fix, docs, style, refactor, perf, test, build, ci, chore\033[0m"
+  echo "\033[0;31mExample: feat(auth): add user registration\033[0m"
+  echo ""
+  echo "Your commit message was:"
+  echo "\033[0;33m$COMMIT_MSG\033[0m"
+  echo ""
+  echo "See .github/COMMIT_TEMPLATE.md for more details."
+  exit 1
+fi 
