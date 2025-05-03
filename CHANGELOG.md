@@ -1,3 +1,10 @@
+## [1.0.5](https://github.com/patrickisgreat/bennwallet/compare/v1.0.4...v1.0.5) (2025-05-03)
+
+### Bug Fixes
+
+* husky commit hooks ([67992d4](https://github.com/patrickisgreat/bennwallet/commit/67992d46062244db0e11fafa0debe71161cfba7b))
+* transaction persistence and husky tests ([2695e8b](https://github.com/patrickisgreat/bennwallet/commit/2695e8bf07a1b3f55217c491403fe04a2d9007fc))
+
 ## [1.0.4](https://github.com/patrickisgreat/bennwallet/compare/v1.0.3...v1.0.4) (2025-05-03)
 
 ### Bug Fixes
