@@ -22,13 +22,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Generate PR app name
-        id: app-name
+      - name: Generate valid volume name
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          APP_NAME="bennwallet-pr-${PR_NUMBER}"
-          echo "APP_NAME=${APP_NAME}" >> $GITHUB_ENV
-          echo "app_name=${APP_NAME}" >> $GITHUB_OUTPUT
+          VOLUME_NAME="bennwalletpr${PR_NUMBER}_data"
+          echo "VOLUME_NAME=${VOLUME_NAME}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: |
