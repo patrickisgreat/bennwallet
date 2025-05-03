@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import YNABConfig from '../components/YNABConfig';
 
 function ProfilePage() {
   const { currentUser, updateUserProfile, loading, error, clearError } = useAuth();
@@ -168,6 +169,8 @@ function ProfilePage() {
               </div>
             </form>
           </div>
+          
+          <YNABConfig userId={currentUser.uid} />
         </div>
       </div>
     </div>

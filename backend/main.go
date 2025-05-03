@@ -4,25 +4,38 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
+	"bennwallet/backend/api"
 	"bennwallet/backend/database"
 	"bennwallet/backend/handlers"
 	"bennwallet/backend/middleware"
+	"bennwallet/backend/models"
+	"bennwallet/backend/security"
 	"bennwallet/backend/services"
+	"bennwallet/backend/ynab"
 
 	"github.com/gorilla/mux"
 )
 
 func main() {
+	// Initialize encryption
+	encryptionKey := os.Getenv("ENCRYPTION_KEY")
+	if encryptionKey == "" {
+		// Generate a default key for development
+		log.Println("Warning: ENCRYPTION_KEY not set, using a default key. This is NOT secure for production!")
+		encryptionKey = "default-dev-encryption-key-32chars"
+	}
+	security.InitializeEncryption(encryptionKey)
+
 	// Initialize database
 	err := database.InitDB()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Just load environment variables and seed default users
-	// but don't start syncing yet
+	// Seed default users but don't start syncing yet
 	err = database.SeedDefaultUsers()
 	if err != nil {
 		log.Fatal(err)
@@ -33,6 +46,12 @@ func main() {
 
 	// Create router
 	r := mux.NewRouter()
+
+	// Initialize API server
+	apiServer := api.NewServer(database.DB)
+
+	// Create YNAB handler
+	ynabHandler := handlers.NewYNABHandler(database.DB)
 
 	// Health check
 	r.HandleFunc("/health", handlers.HealthCheck).Methods("GET")
@@ -53,6 +72,9 @@ func main() {
 	// YNAB routes
 	r.HandleFunc("/ynab/categories", handlers.GetYNABCategories).Methods("GET")
 	r.HandleFunc("/ynab/sync", handlers.SyncYNABTransaction).Methods("POST")
+	r.HandleFunc("/ynab/config", ynabHandler.GetYNABConfig).Methods("GET")
+	r.HandleFunc("/ynab/config", ynabHandler.UpdateYNABConfig).Methods("POST", "PUT")
+	r.HandleFunc("/ynab/sync-categories", ynabHandler.SyncYNABCategories).Methods("POST")
 	r.HandleFunc("/ynab/force-sync", func(w http.ResponseWriter, r *http.Request) {
 		userId := r.URL.Query().Get("userId")
 		if userId == "" {
@@ -60,12 +82,22 @@ func main() {
 			return
 		}
 
-		// First configure YNAB for this user from env vars
-		services.SetupYNABForUser(userId)
+		// Get the user's YNAB config
+		config, err := models.GetYNABConfig(database.DB, userId)
+		if err != nil {
+			log.Printf("Error retrieving YNAB config: %v", err)
+			http.Error(w, "Error retrieving YNAB configuration", http.StatusInternalServerError)
+			return
+		}
 
-		// Get budget ID for the user
+		if !config.HasCredentials {
+			// Try to configure from environment variables as a fallback
+			services.SetupYNABForUser(userId)
+		}
+
+		// Get budget ID for the user (after potential setup)
 		var budgetId string
-		err := database.DB.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = ?", userId).Scan(&budgetId)
+		err = database.DB.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = ?", userId).Scan(&budgetId)
 		if err != nil {
 			log.Printf("Error getting budget ID for user %s: %v", userId, err)
 			http.Error(w, "User not found or YNAB not configured", http.StatusBadRequest)
@@ -73,7 +105,7 @@ func main() {
 		}
 
 		// Force sync for this user
-		err = services.SyncYNABCategories(userId, budgetId)
+		err = services.SyncYNABCategoriesNew(userId, budgetId)
 		if err != nil {
 			log.Printf("Error syncing YNAB categories for user %s: %v", userId, err)
 			http.Error(w, fmt.Sprintf("Error syncing: %v", err), http.StatusInternalServerError)
@@ -83,6 +115,9 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"success","message":"YNAB categories synced successfully"}`))
 	}).Methods("GET")
+
+	// API routes
+	r.PathPrefix("/api/").Handler(http.StripPrefix("/api", apiServer.Handler()))
 
 	// User routes
 	r.HandleFunc("/users", handlers.GetUsers).Methods("GET")
@@ -117,9 +152,16 @@ func main() {
 	go func() {
 		log.Println("Starting background YNAB initialization...")
 		time.Sleep(5 * time.Second)
+
+		// Setup YNAB from environment variables if available
 		services.SetupYNABFromEnv()
 
-		// Add this line to trigger the actual sync
+		// Initialize YNAB sync system - this will only start background sync if there are configured users
+		if err := ynab.InitYNABSync(database.DB); err != nil {
+			log.Printf("Error initializing YNAB sync: %v", err)
+		}
+
+		// Trigger initial sync for any configured users
 		services.InitialSync()
 
 		log.Println("YNAB initialization completed")

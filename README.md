@@ -129,6 +129,43 @@ To deploy:
 fly deploy
 ```
 
+## Release Process
+
+BennWallet uses semantic versioning for releases. When you merge a PR from the `dev` branch to `main`, the GitHub Actions workflow automatically:
+
+1. Generates a new version based on commit messages
+2. Creates a new tag
+3. Generates a changelog
+4. Creates a GitHub release
+
+### Conventional Commits
+
+To ensure proper versioning, use the following commit message format:
+
+```
+<type>(<scope>): <short summary>
+```
+
+Where `type` is one of:
+- `feat`: A new feature (minor version bump)
+- `fix`: A bug fix (patch version bump)
+- `docs`: Documentation changes (patch version bump)
+- `style`: Changes that don't affect code meaning (patch version bump)
+- `refactor`: Code changes that neither fix bugs nor add features (patch version bump)
+- `perf`: Performance improvements (patch version bump)
+- `test`: Adding or updating tests (patch version bump)
+- `build`: Changes to build system or dependencies (patch version bump)
+- `ci`: Changes to CI/CD configuration (patch version bump)
+
+For a major version bump, include `BREAKING CHANGE:` in your commit message body.
+
+Example:
+```
+feat(ynab): add ability to sync with multiple accounts
+
+This adds support for syncing with multiple YNAB accounts.
+```
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

@@ -51,11 +51,19 @@ jobs:
           [build]
             dockerfile = "Dockerfile"
 
+          [build.args]
+            YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
+            YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
+            YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
+
           [env]
             PORT = "8080"
             NODE_ENV = "production"
             PR_DEPLOYMENT = "true"
             PR_NUMBER = "${{ github.event.pull_request.number }}"
+            YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
+            YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
+            YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
 
           [http_service]
             internal_port = 8080
@@ -69,6 +77,10 @@ jobs:
             cpu_kind = "shared"
             cpus = 1
             memory_mb = 1024
+            
+          [mounts]
+            source = "${{ env.APP_NAME }}_data"
+            destination = "/data"
           EOF
 
       - name: Check if app exists
