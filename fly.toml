@@ -46,8 +46,8 @@ primary_region = "sjc"                 # Silicon Valley
 # Persistent SQLite volume
 # ─────────────────────────────────────────
 [[mounts]]
-  source = "${{ env.VOLUME_NAME }}"
-  destination = "/data"
+  source      = "bennwallet_data"      # volume name (create with `fly volumes create …`)
+  destination = "/data"                # path your code expects
 
   [mounts.options]
     size = "1"                         # GB
