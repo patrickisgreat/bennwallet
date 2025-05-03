@@ -59,7 +59,8 @@ func main() {
 
 	// Register routes with both direct paths and /api prefix to maintain compatibility
 	registerRoutes(r)
-	registerRoutes(r.PathPrefix("/api").Subrouter())
+	apiRouter := r.PathPrefix("/api").Subrouter()
+	registerRoutes(apiRouter)
 
 	// Serve static files from the "dist" directory for the frontend
 	fs := http.FileServer(http.Dir("./dist"))
@@ -102,6 +103,7 @@ func registerRoutes(r *mux.Router) {
 	// Protected transaction routes
 	protectedRouter.HandleFunc("/transactions", handlers.GetTransactions).Methods("GET")
 	protectedRouter.HandleFunc("/transactions", handlers.AddTransaction).Methods("POST")
+	protectedRouter.HandleFunc("/transactions/unique-fields", handlers.GetUniqueTransactionFields).Methods("GET")
 	protectedRouter.HandleFunc("/transactions/{id}", handlers.GetTransaction).Methods("GET")
 	protectedRouter.HandleFunc("/transactions/{id}", handlers.UpdateTransaction).Methods("PUT")
 	protectedRouter.HandleFunc("/transactions/{id}", handlers.DeleteTransaction).Methods("DELETE")

@@ -1,4 +1,4 @@
-import axios, { InternalAxiosRequestConfig } from 'axios';
+import axios, { InternalAxiosRequestConfig, AxiosError } from 'axios';
 import { Transaction } from '../types/transaction';
 import { auth } from '../firebase/firebase';
 
@@ -151,13 +151,15 @@ export async function deleteTransaction(id: string): Promise<boolean> {
 }
 
 export interface ReportFilter {
-  startDate?: string;
-  endDate?: string;
+  startDate: string;
+  endDate: string;
   category?: string;
   payTo?: string;
   enteredBy?: string;
   paid?: boolean;
   optional?: boolean;
+  transactionDateMonth?: number;
+  transactionDateYear?: number;
 }
 
 export interface CategoryTotal {
@@ -220,6 +222,9 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       payTo: filter.payTo || null,
       enteredBy: filter.enteredBy || null,
       paid: filter.paid,
+      optional: filter.optional,
+      transactionDateMonth: filter.transactionDateMonth,
+      transactionDateYear: filter.transactionDateYear,
     };
 
     console.log('Sending POST request with body:', requestBody);
@@ -308,5 +313,29 @@ export async function syncYNABCategories(): Promise<boolean> {
   } catch (error) {
     console.error('Error syncing YNAB categories:', error);
     return false;
+  }
+}
+
+export interface UniqueTransactionFields {
+  payTo: string[];
+  enteredBy: string[];
+}
+
+export async function fetchUniqueTransactionFields(): Promise<UniqueTransactionFields> {
+  try {
+    console.log('API base URL:', api.defaults.baseURL);
+    const url = '/transactions/unique-fields';
+    console.log('Fetching unique fields from:', url);
+    const response = await api.get(url);
+    console.log('Unique fields response:', response.data);
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    console.error('Error fetching unique transaction fields:', axiosError);
+    if (axiosError.response) {
+      console.error('Response status:', axiosError.response.status);
+      console.error('Response data:', axiosError.response.data);
+    }
+    return { payTo: [], enteredBy: [] };
   }
 }
