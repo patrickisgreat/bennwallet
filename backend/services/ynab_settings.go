@@ -136,14 +136,14 @@ func setupYNABFromEnvForUser(userID string) {
 	}
 
 	// Create config update request
-	config := models.YNABConfigUpdateRequest{
+	configRequest := models.YNABConfigUpdateRequest{
 		APIToken:  token,
 		BudgetID:  budgetID,
 		AccountID: accountID,
 	}
 
 	// Update YNAB config with encrypted values
-	err = models.UpsertYNABConfig(database.DB, &config, userID)
+	err = models.UpsertYNABConfig(database.DB, &configRequest, userID)
 	if err != nil {
 		log.Printf("DEBUG: Error updating YNAB config for user %s: %v", userID, err)
 		return
@@ -334,14 +334,14 @@ func LoadEnvVariables() {
 	log.Printf("No .env file found in search paths: %v", envPaths)
 }
 
-// SetupYNABForUser sets up YNAB for a user from environment variables and triggers an initial sync
+// SetupYNABForUser sets up YNAB for a user from env vars if they don't have credentials
 func SetupYNABForUser(userID string) {
 	log.Printf("Setting up YNAB for user %s", userID)
 
 	// First check if user already has credentials in the database
 	config, err := models.GetYNABConfig(database.DB, userID)
 	if err == nil && config.HasCredentials {
-		log.Printf("DEBUG: User %s already has YNAB credentials in ynab_config table, skipping setup from env", userID)
+		log.Printf("User %s already has YNAB credentials in ynab_config table, skipping setup from env", userID)
 		return
 	}
 
@@ -357,7 +357,7 @@ func SetupYNABForUser(userID string) {
 		userID).Scan(&count)
 
 	if err == nil && count > 0 {
-		log.Printf("DEBUG: User %s already has YNAB credentials in legacy table, skipping setup from env", userID)
+		log.Printf("User %s already has YNAB credentials in legacy table, skipping setup from env", userID)
 		return
 	}
 
@@ -390,14 +390,14 @@ func SetupYNABForUser(userID string) {
 	}
 
 	// Create config update request
-	config := models.YNABConfigUpdateRequest{
+	configRequest := models.YNABConfigUpdateRequest{
 		APIToken:  token,
 		BudgetID:  budgetID,
 		AccountID: accountID,
 	}
 
 	// Update YNAB config with encrypted values
-	err = models.UpsertYNABConfig(database.DB, &config, userID)
+	err = models.UpsertYNABConfig(database.DB, &configRequest, userID)
 	if err != nil {
 		log.Printf("Error updating YNAB config for user %s: %v", userID, err)
 		return
