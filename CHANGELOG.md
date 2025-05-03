@@ -1,3 +1,9 @@
+## [1.1.1](https://github.com/patrickisgreat/bennwallet/compare/v1.1.0...v1.1.1) (2025-05-03)
+
+### Bug Fixes
+
+* tests and transaction saving ([f5b9243](https://github.com/patrickisgreat/bennwallet/commit/f5b9243963d82c843762cd1e4b37d3dbe4625706))
+
 ## [1.1.0](https://github.com/patrickisgreat/bennwallet/compare/v1.0.5...v1.1.0) (2025-05-03)
 
 ### Features
