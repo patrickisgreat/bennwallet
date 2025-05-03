@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# Run frontend checks (lint, TypeScript, tests)
+npm run pre-commit
+
+# Check for Go files changes
+if git diff --cached --name-only | grep -q "\.go$"; then
+  echo "🔍 Checking Go files..."
+  
+  # Run go fmt on changed files
+  git diff --cached --name-only | grep "\.go$" | xargs -I{} go fmt {}
+  
+  # Add formatted files back to staging
+  git diff --cached --name-only | grep "\.go$" | xargs -I{} git add {}
+  
+  # Run Go tests
+  echo "🧪 Running Go tests..."
+  cd backend && go test ./... -short || {
+    echo "❌ Go tests failed. Please fix the issues before committing."
+    exit 1
+  }
+fi
+
+# Check commit message format
+./.githooks/commit-msg .git/COMMIT_EDITMSG 

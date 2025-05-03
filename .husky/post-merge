@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# Check if package.json has changed
+if git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD | grep -q "package.json"; then
+  echo "📦 Changes to package.json detected. Running npm install..."
+  npm install
+fi
+
+# Check if go.mod has changed
+if git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD | grep -q "go.mod"; then
+  echo "📦 Changes to go.mod detected. Running go mod download..."
+  cd backend && go mod download
+fi 
