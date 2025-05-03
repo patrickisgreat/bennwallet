@@ -3,7 +3,7 @@ name: Deploy PR Environment
 on:
   pull_request:
     types: [opened, reopened, synchronize]
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   issues: write
@@ -42,7 +42,7 @@ jobs:
 
       - name: Build frontend
         env:
-          VITE_API_URL: "https://${{ env.APP_NAME }}.fly.dev"
+          VITE_API_URL: 'https://${{ env.APP_NAME }}.fly.dev'
         run: npm run build
 
       - name: Set up Flyctl
@@ -84,9 +84,12 @@ jobs:
             cpus = 1
             memory_mb = 1024
             
-          [mounts]
+          [[mounts]]
             source = "${{ env.VOLUME_NAME }}"
             destination = "/data"
+            
+            [mounts.options]
+              size = "1"
           EOF
 
       - name: Debug - Display app name and volume name

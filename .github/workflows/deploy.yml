@@ -10,7 +10,6 @@ env:
   GO_VERSION: '1.24'
   NODE_VERSION: '20'
   FLY_PROD_APP_NAME: 'bennwallet-prod'
-  PROD_DOMAIN: 'app.bennwallet.com'
 
 jobs:
   backend-test:
@@ -112,7 +111,7 @@ jobs:
 
       - name: Build frontend
         env:
-          VITE_API_URL: ${{ github.ref == 'refs/heads/main' && format('https://{0}', env.PROD_DOMAIN) || 'http://localhost:8080' }}
+          VITE_API_URL: ${{ github.ref == 'refs/heads/main' && format('https://{0}.fly.dev', env.FLY_PROD_APP_NAME) || 'http://localhost:8080' }}
         run: npm run build
 
       - name: Upload build artifacts
@@ -215,7 +214,3 @@ jobs:
         run: flyctl deploy --remote-only --app ${{ env.FLY_PROD_APP_NAME }}
         env:
           NODE_ENV: production
-
-      - name: Add Custom Domain
-        run: |
-          flyctl certs add ${{ env.PROD_DOMAIN }} --app ${{ env.FLY_PROD_APP_NAME }}
