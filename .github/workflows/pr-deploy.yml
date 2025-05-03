@@ -111,7 +111,7 @@ jobs:
         run: |
           if ! flyctl volumes list --app "${{ env.APP_NAME }}" | grep -q "${{ env.VOLUME_NAME }}"; then
             echo "Creating volume ${{ env.VOLUME_NAME }}..."
-            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1
+            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1 --yes
           else
             echo "Volume ${{ env.VOLUME_NAME }} already exists"
           fi
