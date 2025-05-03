@@ -14,12 +14,14 @@ BennWallet is a full-stack web application designed to help couples or roommates
 ## Technologies
 
 ### Frontend
+
 - React (with TypeScript)
 - Vite for fast development and optimized builds
 - React Router for SPA navigation
 - Tailwind CSS for styling
 
 ### Backend
+
 - Go (Golang)
 - Gorilla Mux for routing
 - SQLite for database
@@ -49,6 +51,7 @@ bennwallet/
 ## Getting Started
 
 ### Prerequisites
+
 - Go 1.16+
 - Node.js 16+
 - npm or yarn
@@ -56,28 +59,33 @@ bennwallet/
 ### Development Setup
 
 1. Clone the repository:
+
    ```
    git clone https://github.com/yourusername/bennwallet.git
    cd bennwallet
    ```
 
 2. Install frontend dependencies:
+
    ```
    npm install
    ```
 
 3. Build the backend:
+
    ```
    cd backend
    go build
    ```
 
 4. Run the backend server:
+
    ```
    ./bennwallet
    ```
 
 5. In a separate terminal, start the frontend development server:
+
    ```
    npm run dev
    ```
@@ -89,6 +97,7 @@ bennwallet/
 When developing for BennWallet, the following checks run automatically before each commit:
 
 1. **Frontend Checks**:
+
    - ESLint for code quality
    - Prettier for code formatting
    - TypeScript type checking
@@ -115,11 +124,13 @@ go test ./...      # Run Go tests
 ### Building for Production
 
 1. Build the frontend:
+
    ```
    npm run build
    ```
 
 2. Build the backend:
+
    ```
    cd backend
    go build
@@ -133,17 +144,20 @@ go test ./...      # Run Go tests
 ## Features
 
 ### User Management
+
 - User registration and login
 - Password reset functionality
 - Profile management
 
 ### Transactions
+
 - Add, edit, and delete transactions
 - Categorize transactions
 - Mark transactions as paid/unpaid
 - Filter transactions by date, category, or person
 
 ### Reports
+
 - Generate YNAB-compatible reports
 - View spending by category
 - Filter reports by date range and other criteria
@@ -153,6 +167,7 @@ go test ./...      # Run Go tests
 The application is configured for deployment to Fly.io. The `fly.toml` file contains the necessary configuration.
 
 To deploy:
+
 ```
 fly deploy
 ```
@@ -175,6 +190,7 @@ To ensure proper versioning, use the following commit message format:
 ```
 
 Where `type` is one of:
+
 - `feat`: A new feature (minor version bump)
 - `fix`: A bug fix (patch version bump)
 - `docs`: Documentation changes (patch version bump)
@@ -188,6 +204,7 @@ Where `type` is one of:
 For a major version bump, include `BREAKING CHANGE:` in your commit message body.
 
 Example:
+
 ```
 feat(ynab): add ability to sync with multiple accounts
 
@@ -201,3 +218,43 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Contributors
 
 - Patrick Bennette - Initial work
+
+## Firebase Authentication Setup for Deployment
+
+For production deployments, Firebase authentication credentials need to be set up correctly:
+
+### Setting up GitHub Actions Secrets
+
+1. Go to your GitHub repository settings → Secrets and variables → Actions
+2. Add the following secrets:
+   - `FIREBASE_SERVICE_ACCOUNT_JSON`: The entire content of your `service-account.json` file
+   - `FLY_API_TOKEN`: Your Fly.io API token for deployments
+
+### Manual Setup for Fly.io
+
+If you need to set up Firebase credentials manually on Fly.io:
+
+```bash
+# Export your service account JSON content to a file
+cat service-account.json > /tmp/firebase-credentials.json
+
+# Set as a secret in Fly.io
+flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a your-app-name
+
+# Clean up
+rm /tmp/firebase-credentials.json
+```
+
+### Setting Up Multiple Environments
+
+For each deployment environment, add the Firebase credentials as a secret:
+
+```bash
+# For production
+flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a bennwallet-prod
+
+# For staging
+flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a bennwallet-staging
+```
+
+The GitHub Actions workflow will automatically set these secrets during deployment.
