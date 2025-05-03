@@ -19,12 +19,4 @@ echo "🧪 Running backend Go tests..."
 cd backend && go test ./... -short || {
   echo "❌ Go tests failed. Please fix the issues before committing."
   exit 1
-}
-
-# Check commit message format - make sure we're back in the root directory
-cd "$GIT_PREFIX" || cd "$(git rev-parse --show-toplevel)"
-if [ -f ".githooks/commit-msg" ]; then
-  ./.githooks/commit-msg .git/COMMIT_EDITMSG
-else
-  echo "⚠️ Warning: commit-msg hook not found at .githooks/commit-msg"
-fi 
+} 
