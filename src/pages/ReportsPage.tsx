@@ -94,25 +94,52 @@ function ReportsPage() {
   }, [currentUser]);
 
   const loadCategoryData = async () => {
+    console.log('🔍 BEGIN loadCategoryData - Fetching YNAB categories...');
     try {
-      console.log('Fetching YNAB categories...');
+      // Check if we already have categories loaded
+      console.log('🔍 Current category groups state:', categoryGroups);
+      console.log('🔍 Current all categories state:', allCategories);
+
+      console.log('🔍 Calling fetchYNABCategories API function...');
       const groups = await fetchYNABCategories();
-      console.log('Retrieved category groups:', groups);
+
+      console.log('🔍 fetchYNABCategories returned:', groups);
+      console.log('🔍 Groups is array?', Array.isArray(groups));
+      console.log('🔍 Groups length:', groups.length);
+
+      if (!Array.isArray(groups) || groups.length === 0) {
+        console.warn('🔍 No category groups returned from API');
+      }
+
       setCategoryGroups(groups);
 
       // Extract all category names for the dropdown
       const categories: string[] = [];
-      groups.forEach(group => {
-        console.log(`Group: ${group.name} has ${group.categories.length} categories`);
-        group.categories.forEach(cat => {
-          categories.push(cat.name);
-        });
-      });
 
-      console.log('All available categories:', categories);
+      if (Array.isArray(groups)) {
+        groups.forEach(group => {
+          console.log(
+            `🔍 Processing group: ${group.name} with ${group.categories?.length || 0} categories`
+          );
+
+          if (Array.isArray(group.categories)) {
+            group.categories.forEach(cat => {
+              console.log(`🔍 Adding category: ${cat.name}`);
+              categories.push(cat.name);
+            });
+          } else {
+            console.warn(`🔍 Group ${group.name} has no categories array`);
+          }
+        });
+      }
+
+      console.log('🔍 Final categories list length:', categories.length);
+      console.log('🔍 Categories:', categories);
       setAllCategories(categories);
+      console.log('🔍 END loadCategoryData - Success');
     } catch (err) {
-      console.error('Error loading YNAB categories:', err);
+      console.error('🔍 Error loading YNAB categories:', err);
+      console.error('🔍 END loadCategoryData - Failed');
     }
   };
 
