@@ -1,8 +1,19 @@
-import js from '@eslint/js'
-import globals from 'globals'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
-import tseslint from 'typescript-eslint'
+import js from '@eslint/js';
+import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
+import reactRefresh from 'eslint-plugin-react-refresh';
+import tseslint from 'typescript-eslint';
+
+// Create a sanitized version of browser globals
+const browserGlobals = { ...globals.browser };
+
+// Fix any globals with trailing spaces
+// This specifically addresses the "AudioWorkletGlobalScope " issue
+if ('AudioWorkletGlobalScope ' in browserGlobals) {
+  const value = browserGlobals['AudioWorkletGlobalScope '];
+  delete browserGlobals['AudioWorkletGlobalScope '];
+  browserGlobals['AudioWorkletGlobalScope'] = value;
+}
 
 export default tseslint.config(
   { ignores: ['dist'] },
@@ -11,7 +22,7 @@ export default tseslint.config(
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2020,
-      globals: globals.browser,
+      globals: browserGlobals,
     },
     plugins: {
       'react-hooks': reactHooks,
@@ -19,10 +30,7 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      'react-refresh/only-export-components': [
-        'warn',
-        { allowConstantExport: true },
-      ],
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
-  },
-)
+  }
+);

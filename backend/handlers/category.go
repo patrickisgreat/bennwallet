@@ -8,16 +8,22 @@ import (
 	"strconv"
 
 	"bennwallet/backend/database"
+	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
 
 	"github.com/gorilla/mux"
 )
 
 func GetCategories(w http.ResponseWriter, r *http.Request) {
-	userId := r.URL.Query().Get("userId")
+	// Get user ID from authentication context
+	userId := middleware.GetUserIDFromContext(r)
 	if userId == "" {
-		http.Error(w, "userId is required", http.StatusBadRequest)
-		return
+		// For backward compatibility, still check the query parameter
+		userId = r.URL.Query().Get("userId")
+		if userId == "" {
+			http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	rows, err := database.DB.Query("SELECT id, name, description, color FROM categories WHERE user_id = ? ORDER BY name", userId)
@@ -47,12 +53,22 @@ func GetCategories(w http.ResponseWriter, r *http.Request) {
 }
 
 func AddCategory(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from authentication context
+	userId := middleware.GetUserIDFromContext(r)
+	if userId == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
 	var c models.Category
 	err := json.NewDecoder(r.Body).Decode(&c)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Set the user ID from the authentication context
+	c.UserID = userId
 
 	// Generate a random color if not provided
 	if c.Color == "" {
@@ -81,6 +97,13 @@ func AddCategory(w http.ResponseWriter, r *http.Request) {
 }
 
 func UpdateCategory(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from authentication context
+	userId := middleware.GetUserIDFromContext(r)
+	if userId == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
 	vars := mux.Vars(r)
 	id := vars["id"]
 
@@ -91,11 +114,12 @@ func UpdateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use the user ID from the authentication context
 	_, err = database.DB.Exec(`
 		UPDATE categories 
 		SET name = ?, description = ?, color = ?
 		WHERE id = ? AND user_id = ?
-	`, c.Name, c.Description, c.Color, id, c.UserID)
+	`, c.Name, c.Description, c.Color, id, userId)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -104,19 +128,25 @@ func UpdateCategory(w http.ResponseWriter, r *http.Request) {
 
 	// Return the updated category
 	c.ID, _ = strconv.Atoi(id) // Convert id to int
+	c.UserID = userId
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(c)
 }
 
 func DeleteCategory(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from authentication context
+	userId := middleware.GetUserIDFromContext(r)
+	if userId == "" {
+		// For backward compatibility, still check the query parameter
+		userId = r.URL.Query().Get("userId")
+		if userId == "" {
+			http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	vars := mux.Vars(r)
 	id := vars["id"]
-	userId := r.URL.Query().Get("userId")
-
-	if userId == "" {
-		http.Error(w, "userId is required", http.StatusBadRequest)
-		return
-	}
 
 	_, err := database.DB.Exec("DELETE FROM categories WHERE id = ? AND user_id = ?", id, userId)
 	if err != nil {
