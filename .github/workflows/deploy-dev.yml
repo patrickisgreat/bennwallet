@@ -3,13 +3,12 @@ name: Deploy to Development
 on:
   workflow_dispatch:
   push:
-    branches: [ dev ]
+    branches: [dev]
 
 env:
   GO_VERSION: '1.24'
   NODE_VERSION: '20'
   FLY_DEV_APP_NAME: 'bennwallet'
-  DEV_DOMAIN: ''
   VOLUME_NAME: 'bennwallet_data'
 
 jobs:
@@ -23,7 +22,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      
+
       - name: Go Mod Cache
         uses: actions/cache@v4
         with:
@@ -91,12 +90,12 @@ jobs:
         timeout-minutes: 3
         run: npm run test:ci
         env:
-          DEBUG: "vitest:*"
+          DEBUG: 'vitest:*'
           VITEST_MAX_THREADS: 1
 
       - name: Build frontend
         env:
-          VITE_API_URL: "https://${{ env.FLY_DEV_APP_NAME }}.fly.dev"
+          VITE_API_URL: 'https://${{ env.FLY_DEV_APP_NAME }}.fly.dev'
         run: npm run build
 
       - name: Upload build artifacts
@@ -111,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-    
+
     steps:
       - uses: actions/checkout@v4
 
@@ -164,9 +163,12 @@ jobs:
             cpus = 1
             memory_mb = 1024
 
-          [mounts]
+          [[mounts]]
             source = "${{ env.VOLUME_NAME }}"
             destination = "/data"
+            
+            [mounts.options]
+              size = "1"
           EOF
 
       - name: Check if volume exists and create if needed
