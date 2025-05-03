@@ -33,7 +33,8 @@ func setupTransactionTestDB() {
 			payTo TEXT,
 			paid BOOLEAN NOT NULL DEFAULT 0,
 			paidDate TEXT,
-			enteredBy TEXT NOT NULL
+			enteredBy TEXT NOT NULL,
+			optional BOOLEAN NOT NULL DEFAULT 0
 		)
 	`)
 	if err != nil {
@@ -59,6 +60,7 @@ func TestAddTransaction(t *testing.T) {
 		Paid:            true,
 		PaidDate:        now.Format("2006-01-02"),
 		EnteredBy:       "test-user",
+		Optional:        false,
 	}
 
 	jsonBody, _ := json.Marshal(reqBody)
@@ -112,9 +114,9 @@ func TestGetTransactions(t *testing.T) {
 
 	// First add a test transaction
 	_, err := database.DB.Exec(`
-		INSERT INTO transactions (id, amount, description, date, type, payTo, paid, paidDate, enteredBy)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, "test-id", 100.50, "Test Transaction", time.Now(), "Test", "Test Payee", true, time.Now().Format("2006-01-02"), "test-user")
+		INSERT INTO transactions (id, amount, description, date, type, payTo, paid, paidDate, enteredBy, optional)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, "test-id", 100.50, "Test Transaction", time.Now(), "Test", "Test Payee", true, time.Now().Format("2006-01-02"), "test-user", false)
 	if err != nil {
 		t.Fatal(err)
 	}
