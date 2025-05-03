@@ -6,13 +6,36 @@ import (
 	"net/http"
 
 	"bennwallet/backend/database"
+	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
 
 	"github.com/gorilla/mux"
 )
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
-	rows, err := database.DB.Query("SELECT id, username, name FROM users")
+	// Get user ID from authentication context
+	userID := middleware.GetUserIDFromContext(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
+	// Check if the user is an admin
+	var isAdmin bool
+	err := database.DB.QueryRow("SELECT isAdmin FROM users WHERE id = ?", userID).Scan(&isAdmin)
+	if err != nil {
+		http.Error(w, "Failed to check user permissions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Only admins can see all users
+	if !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	// Update query to include all fields
+	rows, err := database.DB.Query("SELECT id, username, name, status, isAdmin, role FROM users")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -22,11 +45,32 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 	var users []models.User
 	for rows.Next() {
 		var u models.User
-		err := rows.Scan(&u.ID, &u.Username, &u.Name)
+		var status, role sql.NullString
+		var isAdmin sql.NullBool
+
+		err := rows.Scan(&u.ID, &u.Username, &u.Name, &status, &isAdmin, &role)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Set default values if nulls
+		if status.Valid {
+			u.Status = status.String
+		} else {
+			u.Status = "approved" // Default status
+		}
+
+		if isAdmin.Valid {
+			u.IsAdmin = isAdmin.Bool
+		}
+
+		if role.Valid {
+			u.Role = role.String
+		} else {
+			u.Role = "user" // Default role
+		}
+
 		users = append(users, u)
 	}
 
@@ -35,11 +79,23 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetUserByUsername(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from authentication context to verify authorization
+	userID := middleware.GetUserIDFromContext(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
 	vars := mux.Vars(r)
 	username := vars["username"]
 
 	var user models.User
-	err := database.DB.QueryRow("SELECT id, username, name FROM users WHERE username = ?", username).Scan(&user.ID, &user.Username, &user.Name)
+	var status, role sql.NullString
+	var isAdmin sql.NullBool
+
+	err := database.DB.QueryRow("SELECT id, username, name, status, isAdmin, role FROM users WHERE username = ?", username).Scan(
+		&user.ID, &user.Username, &user.Name, &status, &isAdmin, &role)
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "User not found", http.StatusNotFound)
@@ -47,6 +103,23 @@ func GetUserByUsername(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Set default values if nulls
+	if status.Valid {
+		user.Status = status.String
+	} else {
+		user.Status = "approved" // Default status
+	}
+
+	if isAdmin.Valid {
+		user.IsAdmin = isAdmin.Bool
+	}
+
+	if role.Valid {
+		user.Role = role.String
+	} else {
+		user.Role = "user" // Default role
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -76,13 +149,31 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	var userID string
 	err := database.DB.QueryRow("SELECT id FROM users WHERE id = ?", request.FirebaseID).Scan(&userID)
 
+	// Check if this is one of our default admins
+	isDefaultAdmin := false
+	for _, name := range models.DefaultAdmins {
+		if request.Name == name {
+			isDefaultAdmin = true
+			break
+		}
+	}
+
+	// Determine role based on default admin status
+	role := "user"
+	if isDefaultAdmin {
+		role = "admin"
+	}
+
 	if err == sql.ErrNoRows {
 		// User doesn't exist, create a new one
 		_, err = database.DB.Exec(
-			"INSERT INTO users (id, username, name) VALUES (?, ?, ?)",
+			"INSERT INTO users (id, username, name, status, isAdmin, role) VALUES (?, ?, ?, ?, ?, ?)",
 			request.FirebaseID,
 			request.Email,
 			request.Name,
+			"approved",
+			isDefaultAdmin,
+			role,
 		)
 
 		if err != nil {
@@ -94,6 +185,19 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
+	} else if isDefaultAdmin {
+		// User exists, but we need to ensure they're an admin if they're a default admin
+		_, err = database.DB.Exec(
+			"UPDATE users SET isAdmin = ?, role = ? WHERE id = ?",
+			true,
+			"admin",
+			request.FirebaseID,
+		)
+
+		if err != nil {
+			http.Error(w, "Failed to update user privileges: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Return success with user ID

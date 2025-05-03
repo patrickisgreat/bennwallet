@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
 	"bennwallet/backend/services"
 )
@@ -166,11 +167,7 @@ func (h *YNABHandler) SyncYNABCategories(w http.ResponseWriter, r *http.Request)
 
 // getUserIDFromContext extracts the user ID from the request context
 func getUserIDFromContext(r *http.Request) string {
-	userID, ok := r.Context().Value("user_id").(string)
-	if !ok {
-		return ""
-	}
-	return userID
+	return middleware.GetUserIDFromContext(r)
 }
 
 // ensureYNABConfigTable ensures the YNAB config table exists

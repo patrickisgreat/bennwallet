@@ -14,4 +14,5 @@ type Transaction struct {
 	PaidDate        string    `json:"paidDate,omitempty"`
 	EnteredBy       string    `json:"enteredBy"`
 	Optional        bool      `json:"optional"`
+	UserID          string    `json:"userId,omitempty"`
 }

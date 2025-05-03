@@ -34,7 +34,8 @@ func setupTransactionTestDB() {
 			paid BOOLEAN NOT NULL DEFAULT 0,
 			paidDate TEXT,
 			enteredBy TEXT NOT NULL,
-			optional BOOLEAN NOT NULL DEFAULT 0
+			optional BOOLEAN NOT NULL DEFAULT 0,
+			userId TEXT
 		)
 	`)
 	if err != nil {
@@ -66,6 +67,8 @@ func TestAddTransaction(t *testing.T) {
 	jsonBody, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest("POST", "/transactions", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
+	// Add mock authentication
+	req = MockAuthContext(req, "test-user-id")
 	w := httptest.NewRecorder()
 
 	// Execute
@@ -106,6 +109,17 @@ func TestAddTransaction(t *testing.T) {
 	if storedDateStr != expectedDateStr {
 		t.Errorf("Expected transaction date %s, got %s", expectedDateStr, storedDateStr)
 	}
+
+	// Verify user ID was set from auth context
+	var userID string
+	err = database.DB.QueryRow("SELECT userId FROM transactions WHERE description = ?", reqBody.Description).Scan(&userID)
+	if err != nil {
+		t.Fatalf("Error checking transaction userId: %v", err)
+	}
+
+	if userID != "test-user-id" {
+		t.Errorf("Expected userId 'test-user-id', got '%s'", userID)
+	}
 }
 
 func TestGetTransactions(t *testing.T) {
@@ -114,15 +128,17 @@ func TestGetTransactions(t *testing.T) {
 
 	// First add a test transaction
 	_, err := database.DB.Exec(`
-		INSERT INTO transactions (id, amount, description, date, type, payTo, paid, paidDate, enteredBy, optional)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, "test-id", 100.50, "Test Transaction", time.Now(), "Test", "Test Payee", true, time.Now().Format("2006-01-02"), "test-user", false)
+		INSERT INTO transactions (id, amount, description, date, type, payTo, paid, paidDate, enteredBy, optional, userId)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, "test-id", 100.50, "Test Transaction", time.Now(), "Test", "Test Payee", true, time.Now().Format("2006-01-02"), "test-user", false, "test-user-id")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Setup
 	req := httptest.NewRequest("GET", "/transactions", nil)
+	// Add mock authentication
+	req = MockAuthContext(req, "test-user-id")
 	w := httptest.NewRecorder()
 
 	// Execute

@@ -49,6 +49,8 @@ func TestAddCategory(t *testing.T) {
 	jsonBody, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest("POST", "/categories", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
+	// Add mock authentication
+	req = MockAuthContext(req, "test-user-id")
 	w := httptest.NewRecorder()
 
 	// Execute
@@ -85,13 +87,15 @@ func TestGetCategories(t *testing.T) {
 	_, err := database.DB.Exec(`
 		INSERT INTO categories (name, description, user_id, color)
 		VALUES (?, ?, ?, ?)
-	`, "Test Category", "Test Description", "test-user", "#FF0000")
+	`, "Test Category", "Test Description", "test-user-id", "#FF0000")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Setup request with userId query parameter
-	req := httptest.NewRequest("GET", "/categories?userId=test-user", nil)
+	req := httptest.NewRequest("GET", "/categories", nil)
+	// Add mock authentication
+	req = MockAuthContext(req, "test-user-id")
 	w := httptest.NewRecorder()
 
 	// Execute

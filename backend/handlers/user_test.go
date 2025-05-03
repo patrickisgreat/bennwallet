@@ -21,20 +21,30 @@ func setupTestDB() {
 	}
 	database.DB = db
 
-	// Create users table
+	// Create users table with all fields
 	_, err = db.Exec(`
 		CREATE TABLE users (
 			id TEXT PRIMARY KEY,
 			username TEXT UNIQUE NOT NULL,
-			name TEXT
+			name TEXT,
+			status TEXT DEFAULT 'approved',
+			isAdmin BOOLEAN DEFAULT 0,
+			role TEXT DEFAULT 'user'
 		)
 	`)
 	if err != nil {
 		panic(err)
 	}
 
-	// Insert test data
-	_, err = db.Exec("INSERT INTO users (id, username, name) VALUES (?, ?, ?)", "test1", "testuser", "Test User")
+	// Insert test data including admin user
+	_, err = db.Exec("INSERT INTO users (id, username, name, status, isAdmin, role) VALUES (?, ?, ?, ?, ?, ?)",
+		"test1", "testuser", "Test User", "approved", 0, "user")
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = db.Exec("INSERT INTO users (id, username, name, status, isAdmin, role) VALUES (?, ?, ?, ?, ?, ?)",
+		"admin1", "Sarah", "Sarah Admin", "approved", 1, "admin")
 	if err != nil {
 		panic(err)
 	}
@@ -48,6 +58,9 @@ func TestGetUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Add mock authentication as admin
+	req = MockAuthContext(req, "admin1")
 
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(GetUsers)
@@ -64,13 +77,44 @@ func TestGetUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(users) != 1 {
-		t.Errorf("expected 1 user, got %d", len(users))
+	if len(users) != 2 {
+		t.Errorf("expected 2 users, got %d", len(users))
 	}
 
-	if users[0].Username != "testuser" {
-		t.Errorf("unexpected username: got %v want %v",
-			users[0].Username, "testuser")
+	// Find the non-admin user
+	var foundTestUser bool
+	for _, user := range users {
+		if user.Username == "testuser" {
+			foundTestUser = true
+			if user.Role != "user" {
+				t.Errorf("expected role 'user', got '%s'", user.Role)
+			}
+			if user.IsAdmin {
+				t.Errorf("expected IsAdmin to be false")
+			}
+		}
+	}
+
+	// Find the admin user
+	var foundAdminUser bool
+	for _, user := range users {
+		if user.Username == "Sarah" {
+			foundAdminUser = true
+			if user.Role != "admin" {
+				t.Errorf("expected role 'admin', got '%s'", user.Role)
+			}
+			if !user.IsAdmin {
+				t.Errorf("expected IsAdmin to be true")
+			}
+		}
+	}
+
+	if !foundTestUser {
+		t.Errorf("did not find the test user in the results")
+	}
+
+	if !foundAdminUser {
+		t.Errorf("did not find the admin user in the results")
 	}
 }
 
@@ -85,6 +129,9 @@ func TestGetUserByUsername(t *testing.T) {
 
 	// Add username to request context
 	req = mux.SetURLVars(req, map[string]string{"username": "testuser"})
+
+	// Add mock authentication
+	req = MockAuthContext(req, "test1")
 
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(GetUserByUsername)
@@ -105,6 +152,14 @@ func TestGetUserByUsername(t *testing.T) {
 		t.Errorf("handler returned unexpected username: got %v want %v",
 			user.Username, "testuser")
 	}
+
+	if user.Status != "approved" {
+		t.Errorf("expected Status 'approved', got '%s'", user.Status)
+	}
+
+	if user.Role != "user" {
+		t.Errorf("expected Role 'user', got '%s'", user.Role)
+	}
 }
 
 func TestGetUserByUsername_NotFound(t *testing.T) {
@@ -118,6 +173,9 @@ func TestGetUserByUsername_NotFound(t *testing.T) {
 
 	// Add username to request context
 	req = mux.SetURLVars(req, map[string]string{"username": "nonexistent"})
+
+	// Add mock authentication
+	req = MockAuthContext(req, "test1")
 
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(GetUserByUsername)
