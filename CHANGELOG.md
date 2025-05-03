@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/patrickisgreat/bennwallet/compare/v1.0.3...v1.0.4) (2025-05-03)
+
+### Bug Fixes
+
+* destroy pr env ([3a7966c](https://github.com/patrickisgreat/bennwallet/commit/3a7966c863fab30561e71dbea7572daab25fd897))
+* remove custom domain setup and fix mount configuration in workflows ([3dd8988](https://github.com/patrickisgreat/bennwallet/commit/3dd8988ef60275f3237d34ced528fb85ace429a3))
+
 ## [1.0.3](https://github.com/patrickisgreat/bennwallet/compare/v1.0.2...v1.0.3) (2025-05-03)
 
 ### Bug Fixes
