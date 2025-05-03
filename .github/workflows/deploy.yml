@@ -2,9 +2,9 @@ name: Test, Build and Deploy to Production
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   GO_VERSION: '1.24'
@@ -23,7 +23,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      
+
       - name: Go Mod Cache
         uses: actions/cache@v4
         with:
@@ -99,7 +99,7 @@ jobs:
         timeout-minutes: 3
         run: npm run test:ci
         env:
-          DEBUG: "vitest:*"
+          DEBUG: 'vitest:*'
           VITEST_MAX_THREADS: 1
 
       - name: Upload coverage to Codecov
@@ -128,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-    
+
     steps:
       - uses: actions/checkout@v4
 
@@ -140,7 +140,7 @@ jobs:
 
       - name: Set up Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
-        
+
       - name: Check if prod app exists
         id: check-app
         continue-on-error: true
@@ -159,19 +159,14 @@ jobs:
       - name: Check and create required volumes
         run: |
           echo "Checking for required volumes..."
-          
-          # Get the count of existing volumes
-          VOLUME_COUNT=$(flyctl volumes list --app ${{ env.FLY_PROD_APP_NAME }} | grep -c bennwallet_prod_data || echo 0)
-          echo "Found $VOLUME_COUNT existing volumes"
-          
-          # Create volumes until we have 2 (as required by the error message)
-          while [ $VOLUME_COUNT -lt 2 ]; do
-            echo "Creating volume bennwallet_prod_data in sjc region (volume #$((VOLUME_COUNT+1)))..."
-            flyctl volumes create bennwallet_prod_data --app ${{ env.FLY_PROD_APP_NAME }} --region sjc --size 1
-            VOLUME_COUNT=$((VOLUME_COUNT+1))
-          done
-          
-          echo "Volumes ready: $VOLUME_COUNT volume(s) exist"
+
+          # Create 2 volumes in the sjc region as required
+          echo "Creating volume bennwallet_prod_data in sjc region..."
+          flyctl volume create bennwallet_prod_data -r sjc -n 2 --size 1 --app ${{ env.FLY_PROD_APP_NAME }} || true
+
+          # List current volumes to verify
+          echo "Current volumes:"
+          flyctl volumes list --app ${{ env.FLY_PROD_APP_NAME }}
 
       - name: Create production fly.toml
         run: |
@@ -208,9 +203,12 @@ jobs:
             cpus = 1
             memory_mb = 1024
             
-          [mounts]
+          [[mounts]]
             source = "bennwallet_prod_data"
             destination = "/data"
+            
+            [mounts.options]
+              size = "1"
           EOF
 
       - name: Deploy to Fly.io Production
@@ -220,4 +218,4 @@ jobs:
 
       - name: Add Custom Domain
         run: |
-          flyctl certs add ${{ env.PROD_DOMAIN }} --app ${{ env.FLY_PROD_APP_NAME }} 
+          flyctl certs add ${{ env.PROD_DOMAIN }} --app ${{ env.FLY_PROD_APP_NAME }}
