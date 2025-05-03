@@ -4,6 +4,8 @@ import {
   syncToYNAB,
   CategoryTotal,
   fetchUniqueTransactionFields,
+  fetchYNABCategories,
+  CategoryGroup,
 } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { ReportFilter as ReportFilterType } from '../types/report';
@@ -20,6 +22,9 @@ function ReportsPage() {
     payTo: [],
     enteredBy: [],
   });
+  const [categoryGroups, setCategoryGroups] = useState<CategoryGroup[]>([]);
+  const [allCategories, setAllCategories] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
 
   // Initialize filter with current month
   const currentDate = new Date();
@@ -57,6 +62,7 @@ function ReportsPage() {
   useEffect(() => {
     if (currentUser && authChecked) {
       loadReportData();
+      loadCategoryData();
     }
   }, [currentUser, authChecked]);
 
@@ -86,6 +92,29 @@ function ReportsPage() {
       loadUniqueFields();
     }
   }, [currentUser]);
+
+  const loadCategoryData = async () => {
+    try {
+      console.log('Fetching YNAB categories...');
+      const groups = await fetchYNABCategories();
+      console.log('Retrieved category groups:', groups);
+      setCategoryGroups(groups);
+
+      // Extract all category names for the dropdown
+      const categories: string[] = [];
+      groups.forEach(group => {
+        console.log(`Group: ${group.name} has ${group.categories.length} categories`);
+        group.categories.forEach(cat => {
+          categories.push(cat.name);
+        });
+      });
+
+      console.log('All available categories:', categories);
+      setAllCategories(categories);
+    } catch (err) {
+      console.error('Error loading YNAB categories:', err);
+    }
+  };
 
   const loadReportData = async () => {
     if (!currentUser) {
@@ -137,10 +166,25 @@ function ReportsPage() {
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
-    setFilter(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value,
-    }));
+
+    if (type === 'checkbox') {
+      setFilter(prev => ({
+        ...prev,
+        [name]: (e.target as HTMLInputElement).checked,
+      }));
+    } else if (name === 'transactionDateMonth' || name === 'transactionDateYear') {
+      // Convert month and year to numbers or null
+      const numValue = value === '' ? null : parseInt(value, 10);
+      setFilter(prev => ({
+        ...prev,
+        [name]: numValue,
+      }));
+    } else {
+      setFilter(prev => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -217,6 +261,40 @@ function ReportsPage() {
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-6">Reports</h1>
 
+      {/* Debug panel for category structure */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="mb-6">
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            className="text-gray-500 text-sm underline"
+          >
+            {showDebug ? 'Hide' : 'Show'} Debug Info
+          </button>
+
+          {showDebug && (
+            <div className="mt-2 p-4 bg-gray-100 rounded text-xs overflow-auto max-h-64">
+              <h3 className="font-bold">YNAB Category Structure:</h3>
+              {categoryGroups.length > 0 ? (
+                <ul className="ml-4 mt-2">
+                  {categoryGroups.map(group => (
+                    <li key={group.id} className="mb-2">
+                      <strong>{group.name}</strong> ({group.categories.length} categories)
+                      <ul className="ml-4">
+                        {group.categories.map(cat => (
+                          <li key={cat.id}>{cat.name}</li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-red-500">No category groups loaded</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
         <h2 className="text-xl font-semibold mb-4">YNAB Categories Split</h2>
 
@@ -242,6 +320,23 @@ function ReportsPage() {
                 onChange={handleFilterChange}
                 className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <select
+                name="category"
+                value={filter.category}
+                onChange={handleFilterChange}
+                className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+              >
+                <option value="">All Categories</option>
+                {allCategories.map(category => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
