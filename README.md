@@ -84,6 +84,34 @@ bennwallet/
 
 6. Open your browser and navigate to `http://localhost:5173`
 
+### Development Workflow
+
+When developing for BennWallet, the following checks run automatically before each commit:
+
+1. **Frontend Checks**:
+   - ESLint for code quality
+   - Prettier for code formatting
+   - TypeScript type checking
+   - Unit tests
+
+2. **Backend Checks**:
+   - Go formatting (gofmt)
+   - Go tests
+
+These checks help maintain code quality and prevent bugs from being introduced. You can run these checks manually:
+
+```bash
+# Frontend checks
+npm run lint        # Run ESLint
+npm run check-types # Run TypeScript type checking
+npm test           # Run unit tests
+
+# Backend checks
+cd backend
+go fmt ./...       # Format Go code
+go test ./...      # Run Go tests
+```
+
 ### Building for Production
 
 1. Build the frontend:

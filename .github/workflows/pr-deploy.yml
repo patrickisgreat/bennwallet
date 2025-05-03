@@ -5,6 +5,10 @@ on:
     types: [opened, reopened, synchronize]
     branches: [ main ]
 
+permissions:
+  issues: write
+  pull-requests: write
+
 env:
   GO_VERSION: '1.24'
   NODE_VERSION: '20'
