@@ -156,6 +156,23 @@ jobs:
         run: |
           flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal
 
+      - name: Check and create required volumes
+        run: |
+          echo "Checking for required volumes..."
+          
+          # Get the count of existing volumes
+          VOLUME_COUNT=$(flyctl volumes list --app ${{ env.FLY_PROD_APP_NAME }} | grep -c bennwallet_prod_data || echo 0)
+          echo "Found $VOLUME_COUNT existing volumes"
+          
+          # Create volumes until we have 2 (as required by the error message)
+          while [ $VOLUME_COUNT -lt 2 ]; do
+            echo "Creating volume bennwallet_prod_data in sjc region (volume #$((VOLUME_COUNT+1)))..."
+            flyctl volumes create bennwallet_prod_data --app ${{ env.FLY_PROD_APP_NAME }} --region sjc --size 1
+            VOLUME_COUNT=$((VOLUME_COUNT+1))
+          done
+          
+          echo "Volumes ready: $VOLUME_COUNT volume(s) exist"
+
       - name: Create production fly.toml
         run: |
           cat > fly.toml << EOF
