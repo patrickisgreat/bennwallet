@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# Run the conventional commit message validator
+if [ -f ".githooks/commit-msg" ]; then
+  ./.githooks/commit-msg "$1"
+else
+  echo "⚠️ Warning: commit-msg validator not found at .githooks/commit-msg"
+fi 

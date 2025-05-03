@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"math/rand"
 	"net/http"
 	"time"
@@ -14,11 +15,35 @@ import (
 )
 
 func GetTransactions(w http.ResponseWriter, r *http.Request) {
-	query := `
-		SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy 
-		FROM transactions 
-		WHERE 1=1
-	`
+	// First check if the optional column exists
+	var hasOptionalColumn bool
+	err := database.DB.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('transactions') 
+		WHERE name = 'optional'
+	`).Scan(&hasOptionalColumn)
+
+	if err != nil {
+		log.Printf("Error checking for optional column: %v", err)
+		hasOptionalColumn = false
+	}
+
+	// Base query with the appropriate columns
+	var query string
+	if hasOptionalColumn {
+		query = `
+			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy, optional 
+			FROM transactions 
+			WHERE 1=1
+		`
+	} else {
+		query = `
+			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy 
+			FROM transactions 
+			WHERE 1=1
+		`
+	}
+
 	args := []interface{}{}
 
 	// Parse query parameters
@@ -54,7 +79,16 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		var t models.Transaction
 		var paidDate sql.NullString
 		var transactionDate sql.NullTime
-		err := rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+
+		var err error
+		if hasOptionalColumn {
+			err = rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
+		} else {
+			err = rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+			// Set default value for optional
+			t.Optional = false
+		}
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -78,20 +112,52 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// First check if the optional column exists
+	var hasOptionalColumn bool
+	err := database.DB.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('transactions') 
+		WHERE name = 'optional'
+	`).Scan(&hasOptionalColumn)
+
+	if err != nil {
+		log.Printf("Error checking for optional column: %v", err)
+		hasOptionalColumn = false
+	}
+
 	var t models.Transaction
 	var paidDate sql.NullString
 	var transactionDate sql.NullTime
-	err := database.DB.QueryRow(`
-		SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy 
-		FROM transactions 
-		WHERE id = ?
-	`, id).Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
 
-	if err != nil {
-		if err == sql.ErrNoRows {
+	var query string
+	if hasOptionalColumn {
+		query = `
+			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy, optional 
+			FROM transactions 
+			WHERE id = ?
+		`
+	} else {
+		query = `
+			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy 
+			FROM transactions 
+			WHERE id = ?
+		`
+	}
+
+	var err2 error
+	if hasOptionalColumn {
+		err2 = database.DB.QueryRow(query, id).Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
+	} else {
+		err2 = database.DB.QueryRow(query, id).Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+		// Set default value for optional
+		t.Optional = false
+	}
+
+	if err2 != nil {
+		if err2 == sql.ErrNoRows {
 			http.Error(w, "Transaction not found", http.StatusNotFound)
 		} else {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err2.Error(), http.StatusInternalServerError)
 		}
 		return
 	}
@@ -133,9 +199,9 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = database.DB.Exec(`
-		INSERT INTO transactions (id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, t.ID, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy)
+		INSERT INTO transactions (id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy, optional)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, t.ID, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy, t.Optional)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -159,9 +225,9 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 
 	_, err = database.DB.Exec(`
 		UPDATE transactions 
-		SET amount = ?, description = ?, date = ?, transaction_date = ?, type = ?, payTo = ?, paid = ?, paidDate = ?, enteredBy = ?
+		SET amount = ?, description = ?, date = ?, transaction_date = ?, type = ?, payTo = ?, paid = ?, paidDate = ?, enteredBy = ?, optional = ?
 		WHERE id = ?
-	`, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy, id)
+	`, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy, t.Optional, id)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
