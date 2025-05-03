@@ -1,3 +1,9 @@
+## [1.1.0](https://github.com/patrickisgreat/bennwallet/compare/v1.0.5...v1.1.0) (2025-05-03)
+
+### Features
+
+* user permissions and protections for data including admin rights for default users ([1f45d56](https://github.com/patrickisgreat/bennwallet/commit/1f45d56f164c60d30ed364e00a8df3fcea7f77d1))
+
 ## [1.0.5](https://github.com/patrickisgreat/bennwallet/compare/v1.0.4...v1.0.5) (2025-05-03)
 
 ### Bug Fixes
