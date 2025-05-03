@@ -3,7 +3,10 @@ name: Destroy PR Environment
 on:
   pull_request:
     types: [closed]
-    branches: [ main ]
+    branches: [main]
+permissions:
+  issues: write
+  pull-requests: write
 
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -19,7 +22,7 @@ jobs:
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
           echo "APP_NAME=bennwallet-pr-${PR_NUMBER}" >> $GITHUB_ENV
-      
+
       - name: Check if app exists
         id: check-app
         continue-on-error: true
@@ -46,4 +49,4 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `🧹 PR environment for bennwallet-pr-${{ github.event.pull_request.number }} has been destroyed.`
-            }) 
+            })
