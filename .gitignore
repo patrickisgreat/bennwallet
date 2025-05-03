@@ -8,6 +8,11 @@ build/
 .env.*
 *.local
 
+# Service account credentials
+*-service-account.json
+service-account*.json
+*firebase-adminsdk*.json
+
 # Database files
 *.db
 *.sqlite

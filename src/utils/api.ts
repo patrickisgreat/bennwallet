@@ -1,29 +1,38 @@
 import axios, { InternalAxiosRequestConfig } from 'axios';
 import { Transaction } from '../types/transaction';
+import { auth } from '../firebase/firebase';
 
 // Set the API base URL based on environment
-const API_BASE_URL = import.meta.env.PROD 
-  ? window.location.origin  // In production, API and frontend are on same domain
-  : 'http://localhost:8080'; // In development, use dedicated backend port
+const API_BASE_URL = import.meta.env.PROD
+  ? window.location.origin // In production, API and frontend are on same domain
+  : '/api'; // In development, use the Vite proxy which is configured in vite.config.ts
 
 export const api = axios.create({
-    baseURL: API_BASE_URL,
-    headers: {
-        'Content-Type': 'application/json',
-    },
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
 
-// Add request interceptor to include user ID in all requests
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-    const userId = localStorage.getItem('userId');
-    // Only add userId for authenticated endpoints
-    if (userId && !config.url?.includes('/users/')) {
-        config.params = {
-            ...config.params,
-            userId,
-        };
+// Add a request interceptor to include the auth token in all requests
+api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+  try {
+    // Get the current user and auth token
+    const user = auth.currentUser;
+
+    if (user) {
+      // Get the ID token
+      const token = await user.getIdToken();
+
+      // Add the token to the Authorization header
+      config.headers['Authorization'] = `Bearer ${token}`;
     }
+
     return config;
+  } catch (error) {
+    console.error('Error getting auth token:', error);
+    return config;
+  }
 });
 
 interface BackendTransaction {
@@ -53,7 +62,7 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
     paid: tx.paid,
     paidDate: tx.paidDate,
     enteredBy: tx.enteredBy,
-    optional: tx.optional
+    optional: tx.optional,
   };
 }
 
@@ -70,7 +79,7 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
     paid: tx.paid || false,
     paidDate: tx.paidDate,
     enteredBy: tx.enteredBy as 'Sarah' | 'Patrick',
-    optional: tx.optional || false
+    optional: tx.optional || false,
   };
 }
 
@@ -78,9 +87,10 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
 export interface TransactionFilterParams {
   startDate?: string;
   endDate?: string;
+  txStartDate?: string;
+  txEndDate?: string;
   payTo?: string;
   enteredBy?: string;
-  category?: string;
   paid?: boolean;
 }
 
@@ -104,20 +114,23 @@ export async function createTransaction(transaction: Transaction): Promise<boole
   }
 }
 
-export async function updateTransaction(id: string, updates: Partial<Transaction>): Promise<boolean> {
+export async function updateTransaction(
+  id: string,
+  updates: Partial<Transaction>
+): Promise<boolean> {
   try {
     // First fetch the existing transaction to get all fields
     const response = await api.get(`/transactions/${id}`);
     if (!response.data) {
       throw new Error('Transaction not found');
     }
-    
+
     // Convert backend to frontend format
     const existingTx = toFrontendTransaction(response.data);
-    
+
     // Merge the updates with the existing transaction
     const mergedTx = { ...existingTx, ...updates };
-    
+
     // Update with the merged data
     await api.put(`/transactions/${id}`, toBackendTransaction(mergedTx));
     return true;
@@ -179,13 +192,13 @@ export interface YNABConfig {
 export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTotal[]> {
   try {
     console.log('Raw filter sent to API:', filter);
-    
+
     const userId = localStorage.getItem('userId');
     if (!userId) {
       console.warn('No userId found in localStorage - user may not be fully authenticated yet');
       return [];
     }
-    
+
     // Format dates to ensure they're in the expected format for SQLite (YYYY-MM-DD)
     const formatDate = (dateStr?: string) => {
       if (!dateStr) return undefined;
@@ -193,12 +206,12 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
         const date = new Date(dateStr);
         // Simple YYYY-MM-DD format that matches our SQLite dates
         return date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-      } catch (e) {
+      } catch {
         console.warn('Invalid date format:', dateStr);
         return undefined;
       }
     };
-    
+
     // Send request to the API
     const requestBody = {
       startDate: formatDate(filter.startDate),
@@ -206,36 +219,37 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       category: filter.category || null,
       payTo: filter.payTo || null,
       enteredBy: filter.enteredBy || null,
-      paid: filter.paid
+      paid: filter.paid,
     };
-    
+
     console.log('Sending POST request with body:', requestBody);
-    
+
     // Use POST method with explicit headers and body
     const response = await api.post('/reports/ynab-splits', requestBody, {
       headers: {
-        'Content-Type': 'application/json'
-      }
+        'Content-Type': 'application/json',
+      },
     });
     console.log('Raw response from API:', response);
-    
+
     if (!response.data) {
       console.log('API returned null or undefined');
       return [];
     }
-    
+
     // Ensure we're returning an array
     return Array.isArray(response.data) ? response.data : [];
-  } catch (error: any) {
+  } catch (error: Error | unknown) {
     console.error('Error fetching YNAB splits from API:', error);
-    if (error.response) {
+    if (error && typeof error === 'object' && 'response' in error) {
       // The request was made and the server responded with a status code
       // that falls out of the range of 2xx
-      console.error('Response data:', error.response.data);
-      console.error('Response status:', error.response.status);
-      console.error('Response headers:', error.response.headers);
+      const axiosError = error as { response: { data: unknown; status: number; headers: unknown } };
+      console.error('Response data:', axiosError.response.data);
+      console.error('Response status:', axiosError.response.status);
+      console.error('Response headers:', axiosError.response.headers);
     }
-    
+
     throw error; // Propagate error to caller
   }
 }
@@ -245,14 +259,14 @@ export async function syncToYNAB(request: YNABSyncRequest): Promise<void> {
   try {
     const response = await api.post('/ynab/sync', request, {
       headers: {
-        'Content-Type': 'application/json'
-      }
+        'Content-Type': 'application/json',
+      },
     });
-    
+
     if (response.status !== 200) {
       throw new Error(`YNAB sync failed with status ${response.status}`);
     }
-    
+
     return;
   } catch (error) {
     console.error('Error syncing to YNAB:', error);
@@ -262,7 +276,7 @@ export async function syncToYNAB(request: YNABSyncRequest): Promise<void> {
 
 export async function fetchYNABConfig(): Promise<YNABConfig | null> {
   try {
-    const response = await api.get('/api/ynab/config');
+    const response = await api.get('/ynab/config');
     console.log('Raw YNAB config response:', response);
     console.log('YNAB config response data:', response.data);
     return response.data;
@@ -279,7 +293,7 @@ export async function updateYNABConfig(config: {
   syncFrequency?: number;
 }): Promise<boolean> {
   try {
-    await api.put('/api/ynab/config', config);
+    await api.put('/ynab/config', config);
     return true;
   } catch (error) {
     console.error('Error updating YNAB configuration:', error);
@@ -289,10 +303,10 @@ export async function updateYNABConfig(config: {
 
 export async function syncYNABCategories(): Promise<boolean> {
   try {
-    await api.post('/api/ynab/sync/categories');
+    await api.post('/ynab/sync/categories');
     return true;
   } catch (error) {
     console.error('Error syncing YNAB categories:', error);
     return false;
   }
-} 
+}
