@@ -1,3 +1,9 @@
+## [1.0.2](https://github.com/patrickisgreat/bennwallet/compare/v1.0.1...v1.0.2) (2025-05-03)
+
+### Bug Fixes
+
+* remove .env ([214234d](https://github.com/patrickisgreat/bennwallet/commit/214234d49c5ef304fe3cdecf9efeba07bbb71c13))
+
 ## [1.0.1](https://github.com/patrickisgreat/bennwallet/compare/v1.0.0...v1.0.1) (2025-05-03)
 
 ### Bug Fixes
