@@ -193,44 +193,27 @@ func TestGetUserIDFromContext(t *testing.T) {
 }
 
 func TestInitializeFirebase_WithPlaceholderFile(t *testing.T) {
-	// Create a temporary service account file with placeholders
-	tempFile := "temp-service-account.json"
-	defer os.Remove(tempFile)
+	// Save and reset original env vars
+	originalJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	defer os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", originalJSON)
 
-	err := os.WriteFile(tempFile, []byte(`{"private_key": "REPLACE_WITH_ACTUAL_PRIVATE_KEY"}`), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-
-	// Temporarily rename the file
-	originalFile := "service-account.json"
-	if _, err := os.Stat(originalFile); err == nil {
-		// Backup the original file if it exists
-		if err := os.Rename(originalFile, originalFile+".bak"); err != nil {
-			t.Fatalf("Failed to backup original file: %v", err)
-		}
-		defer os.Rename(originalFile+".bak", originalFile)
-	}
-
-	// Move temp file to service-account.json
-	if err := os.Rename(tempFile, originalFile); err != nil {
-		t.Fatalf("Failed to move temp file: %v", err)
-	}
+	// Clear environment variable to simulate dev mode
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
 
 	// Reset firebaseAuth
 	originalAuth := firebaseAuth
 	firebaseAuth = nil
 	defer func() { firebaseAuth = originalAuth }()
 
-	// Initialize Firebase with placeholder file
-	err = InitializeFirebase()
+	// Initialize Firebase - should go into dev mode
+	err := InitializeFirebase()
 	if err != nil {
-		t.Errorf("InitializeFirebase should not return error with placeholder file: %v", err)
+		t.Errorf("InitializeFirebase should not return error in dev mode: %v", err)
 	}
 
 	// Check that Firebase is in dev mode (firebaseAuth is nil)
 	if firebaseAuth != nil {
-		t.Error("Expected firebaseAuth to be nil with placeholder file")
+		t.Error("Expected firebaseAuth to be nil in dev mode")
 	}
 }
 
