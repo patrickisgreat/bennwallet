@@ -112,7 +112,7 @@ func SyncYNABCategories(userID string, budgetID string) error {
 	// Retry the database transaction up to 3 times
 	var dbErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		dbErr = processCategoriesTransaction(userID, categoryResponse, totalCategories)
+		dbErr = processCategoriesTransaction(userID, categoryResponse)
 		if dbErr == nil {
 			break
 		}
@@ -136,7 +136,7 @@ func SyncYNABCategories(userID string, budgetID string) error {
 }
 
 // processCategoriesTransaction handles the database transaction part of category syncing
-func processCategoriesTransaction(userID string, categoryResponse models.YNABCategoryResponse, totalCategories int) error {
+func processCategoriesTransaction(userID string, categoryResponse models.YNABCategoryResponse) error {
 	// Begin transaction
 	tx, err := database.DB.Begin()
 	if err != nil {

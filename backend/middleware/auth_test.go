@@ -9,9 +9,20 @@ import (
 	"os"
 	"testing"
 
-	firebase "firebase.google.com/go"
+	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
 	"google.golang.org/api/option"
+)
+
+// Define the function variables that will be mocked
+var (
+	firebaseInitApp = func(ctx context.Context, config *firebase.Config, opts ...option.ClientOption) (*firebase.App, error) {
+		return nil, fmt.Errorf("default mock - should be overridden in tests")
+	}
+
+	firebaseGetAuth = func(app *firebase.App, ctx context.Context) (*auth.Client, error) {
+		return nil, fmt.Errorf("default mock - should be overridden in tests")
+	}
 )
 
 // mockFirebaseAuth is a simple type that allows us to set firebaseAuth to a non-nil value
@@ -224,36 +235,34 @@ func TestInitializeFirebase_WithPlaceholderFile(t *testing.T) {
 }
 
 func TestInitializeFirebase_WithJSONEnv(t *testing.T) {
-	// Save original env var and restore afterwards
-	originalValue := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-	defer os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", originalValue)
+	// Save original env vars and restore afterwards
+	originalJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	originalBase64 := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64")
+	originalRaw := os.Getenv("FIREBASE_SERVICE_ACCOUNT")
+	defer func() {
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", originalJSON)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", originalBase64)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT", originalRaw)
+	}()
 
-	// Mock a valid service account JSON
-	validJSON := `{
-		"type": "service_account",
-		"project_id": "test-project",
-		"private_key_id": "test-key-id",
-		"private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC5hGDnBww8HOzD\neQGu9WkqCV0EUL9Y5x/+4m7F4LSLkUfU9A+tQe9RvgMMZi6wuVLqEUjXf9YXGRxj\nBIPR7K0pLFYXOrRczRVJV5ABfDxU+bzN1KOlLWGMq9ybPvbOO+I25lkeYkXgTWbk\n4MaATl0m6EOThOQnXOuEKc7Q82W8JmWS1VaQYEqq+lWz7n/QHCNR9+XHnxWS0WCX\njmLdzbIJcukgz4uCiAXMXHQojf4BYBIQ+yKNnacbqwYr5EgQDpZJU55e1f7WUlnj\nVDKM0K82AhDzAkVTFI2Z2i9ZYvyj9j0CQyGb12Ryl1Z8Rif+ZOhv0Dzj4Cw2yU0s\nQpXtcf9NAgMBAAECggEABK2SuYbFBhZY+FLJ4KMr0CuDXIW8cwkKKqPrJ3p6d4SC\nV6w+98OQF/QZ+8jnHY1XWZ8HXx8lCToBZJf4NR2AnfLjFI5R/EU4L9hO+lOSNj7F\nHLYiMo0xwALnUkXsNqVlbQ3I2NWr4YvbWwfg8pPXlGAJAA/j9ZmkX8RoLYCFT9WG\nkQOPDvgKY16rV+45+nh0+t4SeobISIYNMO8L41ovrDYZIGK5WTLVjdNzjCMePJcA\nyMGixI+YEBDpSaA5d+mAYRLucmYdURR/Jv0zD7J/zEhG5wQ3Ks3rCHjWBM9SjALo\nt0aSOZx0MzlDHpDX7aKQM11Zke4K6xhTZOJnkdIYwQKBgQDnuN1mR98YN08+dqwP\nJ43cTQzk/bAwf3E1mV7A+Xeb+qMt5cguATXRZyP0Sj9m8tBm34NHXzFLHKGOGpF3\nQXxDiGUb/4g1zrR8S8Jm3p5CWVZlHScfLbH+vnAUwK0MZ9CaNfV12O3oBxgAC2Zb\nELb5EvOvtcgUYSgUUJMWaRD1wQKBgQDM5NWXj/3kGgOXQsgHwLJt4qTQGP6XN2VX\nc9Y+lN7V8M/UL7AeIsaMnCahTdXHPEQXlJgytXHpiwAQHxUxnfQnEZzGCxNOJDzm\nXj5S2q1enUjxzXK53DLgO+UsgHVi5glw8GolbjoS7hGLBNP4iIEFPeeHGnXbkNQF\nlBQLu1G/TQKBgQDR/wQk8RaY4JVJYi6lnEO1WMR32gKtTMX7wTGThWpXCwhCFoLM\nl1zt2dKN6jfUHVyIJscK80UXI3uQZnGXl/lv4hAF5sJTpQiogqTmuMeKsTDybLZm\nSBz5gJM64QGnKQNnvt6p4XTvn+JpQQKGYUPWD/BuHSDqB0EdvB27HlEGwQKBgFGo\nSSwYUYw47Ye7WtS+9rJTQAI2/hczjK3yIBLdqF/vYCRW7vV8S/tDoU1GvXTQGPIH\nQOPeVCYxKL2aP+gw3VaHtY7Q/0FVOyEHDZgbXTUJsXSgGHGgdbo+KWQQ5JvdIemU\nhnvF6J7p2vzwnDpG6uNYH7YmFwSLLnECCY5L4RG9AoGAFMHT6W0Ld83xx/bx1UFW\n6cRvxeA8fcqaNF0e3vfIcm1O+GfKhqXDBWqkxNjePyI2ICdPnQGv1TWrJwfFBjUP\nvDYsWOjEiqVJD+hA0vAm/Bc6+o7NvDMV9fMJEw8kJzKmPBh8XkkA0lIwFgUBDxRG\nfgXAHlTTQE2dxcELSDAdqwI=\n-----END PRIVATE KEY-----\n",
-		"client_email": "firebase-adminsdk-test@test-project.iam.gserviceaccount.com",
-		"client_id": "123456789",
-		"auth_uri": "https://accounts.google.com/o/oauth2/auth",
-		"token_uri": "https://oauth2.googleapis.com/token",
-		"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-		"client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-test%40test-project.iam.gserviceaccount.com"
-	}`
+	// Clear other env vars first to ensure they're not used
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", "")
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT", "")
 
-	// Set the env var for testing
-	os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", validJSON)
-
-	// Mock firebase initialization
+	// Save the original firebaseAuth value and mock functions
+	originalAuth := firebaseAuth
 	originalInitApp := firebaseInitApp
 	originalGetAuth := firebaseGetAuth
 	defer func() {
+		firebaseAuth = originalAuth
 		firebaseInitApp = originalInitApp
 		firebaseGetAuth = originalGetAuth
 	}()
 
-	// Patches for the Firebase functions so they don't actually try to connect
+	// Make sure firebaseAuth is nil before the test
+	firebaseAuth = nil
+
+	// Mock the Firebase functions - must be done before setting the environment variable
 	firebaseInitApp = func(ctx context.Context, config *firebase.Config, opts ...option.ClientOption) (*firebase.App, error) {
 		return &firebase.App{}, nil
 	}
@@ -261,6 +270,17 @@ func TestInitializeFirebase_WithJSONEnv(t *testing.T) {
 	firebaseGetAuth = func(app *firebase.App, ctx context.Context) (*auth.Client, error) {
 		return &auth.Client{}, nil
 	}
+
+	// Create a simpler valid JSON without a complex private key
+	validJSON := `{
+		"type": "service_account",
+		"project_id": "test-project",
+		"private_key_id": "test-key-id",
+		"client_email": "firebase-adminsdk-test@test-project.iam.gserviceaccount.com"
+	}`
+
+	// Set the env var for testing
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", validJSON)
 
 	// Test the initialization
 	err := InitializeFirebase()
@@ -363,22 +383,43 @@ func TestInitializeFirebase_WithRawJSONEnv(t *testing.T) {
 }
 
 func TestInitializeFirebase_WithInvalidJSONEnv(t *testing.T) {
-	// Save original env var and restore afterwards
-	originalValue := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-	defer os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", originalValue)
+	// Save original env vars and restore afterwards
+	originalJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	originalBase64 := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64")
+	originalRaw := os.Getenv("FIREBASE_SERVICE_ACCOUNT")
+	defer func() {
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", originalJSON)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", originalBase64)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT", originalRaw)
+	}()
+
+	// Clear ALL env vars to ensure they're not used
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", "")
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT", "")
 
 	// Set an invalid JSON string
 	os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", "this is not valid JSON")
 
-	// Mock firebase initialization
+	// Mock firebase initialization with a function that returns an error
 	originalInitApp := firebaseInitApp
+	originalGetAuth := firebaseGetAuth
 	defer func() {
 		firebaseInitApp = originalInitApp
+		firebaseGetAuth = originalGetAuth
 	}()
 
 	firebaseInitApp = func(ctx context.Context, config *firebase.Config, opts ...option.ClientOption) (*firebase.App, error) {
 		return nil, fmt.Errorf("invalid credentials")
 	}
+
+	// Save the original firebaseAuth value
+	originalAuth := firebaseAuth
+	defer func() {
+		firebaseAuth = originalAuth
+	}()
+
+	// Make sure firebaseAuth is nil before the test
+	firebaseAuth = nil
 
 	// Test the initialization with invalid JSON
 	err := InitializeFirebase()
