@@ -122,14 +122,14 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
 	payTo := r.URL.Query().Get("payTo")
 	if payTo != "" {
-		query += " AND payTo = ?"
-		args = append(args, payTo)
+		query += " AND payTo LIKE ?"
+		args = append(args, "%"+payTo+"%")
 	}
 
 	enteredBy := r.URL.Query().Get("enteredBy")
 	if enteredBy != "" {
-		query += " AND enteredBy = ?"
-		args = append(args, enteredBy)
+		query += " AND enteredBy LIKE ?"
+		args = append(args, "%"+enteredBy+"%")
 	}
 
 	paid := r.URL.Query().Get("paid")
@@ -797,9 +797,61 @@ func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
 
 	// Add user ID filter if the column exists
 	if hasUserIdColumn {
-		payToQuery += " AND (userId = ? OR userId IS NULL)"
-		enteredByQuery += " AND (userId = ? OR userId IS NULL)"
-		args = append(args, userID)
+		// Check if the user is in the approved sharing group (Sarah and Patrick)
+		var isApprovedUser bool
+		err := database.DB.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM users 
+				WHERE id = ? AND 
+				(name = 'Patrick' OR name = 'Sarah' OR 
+				 username = 'patrick' OR username = 'sarah' OR
+				 id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+				 id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
+				 username = 'sarah.elizabeth.wallis@gmail.com')
+			)
+		`, userID).Scan(&isApprovedUser)
+
+		if err != nil {
+			log.Printf("Error checking if user is approved for sharing: %v", err)
+			isApprovedUser = false
+		}
+
+		if isApprovedUser {
+			// If the user is Patrick or Sarah, they can see all transactions
+			// from both of them or any legacy transactions without userId
+			payToQuery += ` AND (
+				userId = ? OR 
+				userId IS NULL OR 
+				userId IN (
+					SELECT id FROM users 
+					WHERE name = 'Patrick' OR name = 'Sarah' OR 
+						  username = 'patrick' OR username = 'sarah' OR
+						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+						  id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
+						  username = 'sarah.elizabeth.wallis@gmail.com'
+				)
+			)`
+			enteredByQuery += ` AND (
+				userId = ? OR 
+				userId IS NULL OR 
+				userId IN (
+					SELECT id FROM users 
+					WHERE name = 'Patrick' OR name = 'Sarah' OR 
+						  username = 'patrick' OR username = 'sarah' OR
+						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+						  id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
+						  username = 'sarah.elizabeth.wallis@gmail.com'
+				)
+			)`
+			args = append(args, userID)
+			log.Printf("Fetching ALL shared unique fields for approved user %s", userID)
+		} else {
+			// For other users, only show their own transactions
+			payToQuery += " AND (userId = ?)"
+			enteredByQuery += " AND (userId = ?)"
+			args = append(args, userID)
+			log.Printf("Fetching only personal unique fields for user %s", userID)
+		}
 	}
 
 	// Add ORDER BY to make the results more predictable
