@@ -19,10 +19,20 @@ var firebaseAuth *auth.Client
 
 // InitializeFirebase initializes the Firebase Admin SDK
 func InitializeFirebase() error {
+	log.Println("Starting Firebase initialization...")
+
+	// Debug: Check which environment variables are available
+	hasJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON") != ""
+	hasBase64 := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64") != ""
+	hasEnv := os.Getenv("FIREBASE_SERVICE_ACCOUNT") != ""
+
+	log.Printf("Firebase env vars present: JSON=%v, Base64=%v, Raw=%v", hasJSON, hasBase64, hasEnv)
+
 	// First check for direct JSON Firebase credentials in environment variables (production)
 	firebaseCredentialsJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 	if firebaseCredentialsJSON != "" {
 		log.Println("Using JSON Firebase credentials from environment")
+		log.Printf("Credentials JSON length: %d", len(firebaseCredentialsJSON))
 
 		// Initialize Firebase with credentials JSON directly
 		opt := option.WithCredentialsJSON([]byte(firebaseCredentialsJSON))
