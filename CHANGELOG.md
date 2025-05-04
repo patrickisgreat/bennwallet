@@ -1,3 +1,9 @@
+## [1.2.9](https://github.com/patrickisgreat/bennwallet/compare/v1.2.8...v1.2.9) (2025-05-04)
+
+### Bug Fixes
+
+* **reports:** implement better name matching for Firebase integration ([771526b](https://github.com/patrickisgreat/bennwallet/commit/771526b0a817698efce67ae8e8bcc683b1b5af6d))
+
 ## [1.2.8](https://github.com/patrickisgreat/bennwallet/compare/v1.2.7...v1.2.8) (2025-05-04)
 
 ### Bug Fixes
