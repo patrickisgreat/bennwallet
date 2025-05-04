@@ -86,8 +86,7 @@ function TransactionsPage() {
     // When filter changes, reload transactions from backend
     loadTransactions();
 
-    // Also apply client-side filtering
-    applyFilters();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const loadTransactions = async () => {
@@ -187,18 +186,43 @@ function TransactionsPage() {
       });
     }
 
+    // Helper function to match names with flexibility
+    const matchesName = (value: string, searchTerm: string) => {
+      if (!value) return false;
+      const valueLower = value.toLowerCase();
+      const searchLower = searchTerm.toLowerCase();
+
+      // Direct match
+      if (valueLower === searchLower) return true;
+
+      // Contains match
+      if (valueLower.includes(searchLower)) return true;
+
+      // Special case for "Sarah" and "Sarah Elizabeth Wallis"
+      if (
+        searchLower === 'sarah' &&
+        (valueLower.includes('sarah') || valueLower === 'sarah elizabeth wallis')
+      )
+        return true;
+
+      // Special case for "Patrick" and "Patrick Bennett"
+      if (
+        searchLower === 'patrick' &&
+        (valueLower.includes('patrick') || valueLower === 'patrick bennett')
+      )
+        return true;
+
+      return false;
+    };
+
     // Filter by payTo
     if (filter.payTo) {
-      filtered = filtered.filter(
-        tx => tx.payTo && tx.payTo.toLowerCase().includes(filter.payTo.toLowerCase())
-      );
+      filtered = filtered.filter(tx => matchesName(tx.payTo, filter.payTo));
     }
 
     // Filter by enteredBy
     if (filter.enteredBy) {
-      filtered = filtered.filter(
-        tx => tx.enteredBy && tx.enteredBy.toLowerCase().includes(filter.enteredBy.toLowerCase())
-      );
+      filtered = filtered.filter(tx => matchesName(tx.enteredBy, filter.enteredBy));
     }
 
     // Filter by paid status
@@ -642,11 +666,15 @@ function TransactionsPage() {
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 >
                   <option value="">All</option>
-                  {uniqueFields.payTo.map(name => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
+                  <option value="Sarah">Sarah</option>
+                  <option value="Patrick">Patrick</option>
+                  {uniqueFields.payTo
+                    .filter(name => name !== 'Sarah' && name !== 'Patrick')
+                    .map(name => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
                 </select>
               </div>
 
@@ -659,11 +687,15 @@ function TransactionsPage() {
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 >
                   <option value="">All</option>
-                  {uniqueFields.enteredBy.map(name => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
+                  <option value="Sarah">Sarah</option>
+                  <option value="Patrick">Patrick</option>
+                  {uniqueFields.enteredBy
+                    .filter(name => name !== 'Sarah' && name !== 'Patrick')
+                    .map(name => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
                 </select>
               </div>
             </div>
