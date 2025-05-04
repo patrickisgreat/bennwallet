@@ -1,3 +1,9 @@
+## [1.2.8](https://github.com/patrickisgreat/bennwallet/compare/v1.2.7...v1.2.8) (2025-05-04)
+
+### Bug Fixes
+
+* **filters:** improve name matching for Pay To and Entered By fields ([b95ddfe](https://github.com/patrickisgreat/bennwallet/commit/b95ddfe2f5f341607dc2e8e235ad2d55f851bc5c))
+
 ## [1.2.7](https://github.com/patrickisgreat/bennwallet/compare/v1.2.6...v1.2.7) (2025-05-04)
 
 ### Bug Fixes
