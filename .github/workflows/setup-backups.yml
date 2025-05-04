@@ -64,7 +64,10 @@ jobs:
 
       - name: Install sqlite3 in production app
         run: |
-          flyctl ssh console -a bennwallet-prod -C "apt-get update && apt-get install -y sqlite3"
+          # Run apt-get update first
+          flyctl ssh console -a bennwallet-prod -C "apt-get update"
+          # Then install sqlite3
+          flyctl ssh console -a bennwallet-prod -C "apt-get install -y sqlite3"
 
       - name: Set up daily cron backup job
         run: |
@@ -77,8 +80,10 @@ jobs:
           ENDSSH
 
           # Install the crontab
-          flyctl ssh console -a bennwallet-prod -C "crontab /tmp/crontab.txt && echo 'Cron job installed'"
+          flyctl ssh console -a bennwallet-prod -C "crontab /tmp/crontab.txt"
+          flyctl ssh console -a bennwallet-prod -C "echo 'Cron job installed'"
 
       - name: Verify setup
         run: |
-          flyctl ssh console -a bennwallet-prod -C "crontab -l && echo 'Cron is set up correctly'"
+          flyctl ssh console -a bennwallet-prod -C "crontab -l"
+          flyctl ssh console -a bennwallet-prod -C "echo 'Cron is set up correctly'"
