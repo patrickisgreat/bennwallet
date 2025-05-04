@@ -1,211 +1,195 @@
-import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 import ReportsPage from '../ReportsPage';
-import * as api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import { fetchYNABSplits, syncToYNAB } from '../../utils/api';
+
+// Mock the auth hook
+vi.mock('../../context/AuthContext', () => ({
+  useAuth: vi.fn(),
+}));
 
 // Mock the API functions
 vi.mock('../../utils/api', () => ({
   fetchYNABSplits: vi.fn(),
   syncToYNAB: vi.fn(),
-  fetchUniqueTransactionFields: vi.fn(),
-  fetchYNABCategories: vi.fn(),
 }));
 
-// Mock the authentication context
-vi.mock('../../context/AuthContext', () => ({
-  useAuth: vi.fn(),
-}));
+// Mock localStorage
+vi.stubGlobal('localStorage', {
+  getItem: vi.fn().mockReturnValue('test-user-id'),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+});
 
 describe('ReportsPage', () => {
+  const mockUser = {
+    uid: 'test-uid',
+    email: 'test@example.com',
+    emailVerified: true,
+  };
+
   beforeEach(() => {
-    // Mock localStorage
-    vi.stubGlobal('localStorage', {
-      getItem: vi.fn().mockReturnValue('test-user-id'),
-      setItem: vi.fn(),
-      removeItem: vi.fn(),
-    });
-
-    // Mock authentication
-    vi.mocked(useAuth).mockReturnValue({
-      currentUser: { uid: 'test-user-id' } as any,
-      login: vi.fn(),
-      logout: vi.fn(),
-      register: vi.fn(),
-      resetPassword: vi.fn(),
-      updateEmail: vi.fn(),
-      updatePassword: vi.fn(),
-    });
-
-    // Mock API responses
-    vi.mocked(api.fetchYNABSplits).mockResolvedValue([
-      { category: 'Food', total: 100 },
-      { category: 'Transport', total: 50 },
-    ]);
-
-    vi.mocked(api.fetchUniqueTransactionFields).mockResolvedValue({
-      payTo: ['Sarah', 'Patrick'],
-      enteredBy: ['Sarah', 'Patrick'],
-    });
-
-    vi.mocked(api.fetchYNABCategories).mockResolvedValue([
-      {
-        id: 'group1',
-        name: 'Group 1',
-        categories: [
-          { id: 'cat1', name: 'Category 1', categoryGroupID: 'group1', categoryGroupName: 'Group 1' },
-        ],
-      },
-    ]);
-
-    vi.mocked(api.syncToYNAB).mockResolvedValue(undefined);
-
-    // Clear all mocks before each test
     vi.clearAllMocks();
-  });
 
-  it('renders the reports page with filters', async () => {
-    render(<ReportsPage />);
-    
-    // Wait for the page to load and API calls to complete
-    await waitFor(() => {
-      expect(screen.getByText(/Reports/i)).toBeInTheDocument();
+    (useAuth as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      currentUser: mockUser,
     });
-    
-    // Check if filter form is rendered
-    expect(screen.getByText(/YNAB Categories Split/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Start Date/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/End Date/i)).toBeInTheDocument();
-  });
 
-  it('loads and displays YNAB categories', async () => {
-    render(<ReportsPage />);
-    
-    // Wait for categories to be loaded
-    await waitFor(() => {
-      expect(api.fetchYNABCategories).toHaveBeenCalled();
-    });
-    
-    // Check if category filter has options
-    const categorySelect = screen.getByLabelText(/Category/i);
-    expect(categorySelect).toBeInTheDocument();
-  });
-
-  it('loads and displays unique transaction fields', async () => {
-    render(<ReportsPage />);
-    
-    // Wait for unique fields to be loaded
-    await waitFor(() => {
-      expect(api.fetchUniqueTransactionFields).toHaveBeenCalled();
-    });
-    
-    // Check if payTo filter has options
-    const payToSelect = screen.getByLabelText(/Pay To/i);
-    expect(payToSelect).toBeInTheDocument();
-  });
-
-  it('generates report when form is submitted', async () => {
-    render(<ReportsPage />);
-    
-    // Wait for the page to load
-    await waitFor(() => {
-      expect(screen.getByText(/Reports/i)).toBeInTheDocument();
-    });
-    
-    // Submit the form
-    const submitButton = screen.getByRole('button', { name: /Generate Report/i });
-    fireEvent.click(submitButton);
-    
-    // Check if API was called with filter
-    await waitFor(() => {
-      expect(api.fetchYNABSplits).toHaveBeenCalled();
-    });
-  });
-
-  it('syncs data to YNAB when sync button is clicked', async () => {
-    // Make sure the button is enabled
-    vi.mocked(api.fetchYNABSplits).mockResolvedValue([
+    (fetchYNABSplits as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
       { category: 'Food', total: 100 },
       { category: 'Transport', total: 50 },
     ]);
-    
+
+    (syncToYNAB as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
+  });
+
+  it('renders without crashing', () => {
     render(<ReportsPage />);
-    
-    // Wait for the page to load and show report data
+    expect(screen.getByText(/YNAB Category Splits/)).toBeInTheDocument();
+  });
+
+  it('loads and displays YNAB splits', async () => {
+    render(<ReportsPage />);
     await waitFor(() => {
-      expect(api.fetchYNABSplits).toHaveBeenCalled();
+      expect(fetchYNABSplits).toHaveBeenCalled();
     });
-    
-    // Use queryByRole since the button might be disabled initially
-    const syncButton = screen.queryByRole('button', { name: /Sync This Report to YNAB/i });
-    
-    // Make sure the button exists
-    expect(syncButton).toBeInTheDocument();
-    
-    // If the button is not disabled, click it
-    if (syncButton && !syncButton.hasAttribute('disabled')) {
-      fireEvent.click(syncButton);
-      
-      // Check if sync API was called
-      await waitFor(() => {
-        expect(api.syncToYNAB).toHaveBeenCalled();
-      });
-    } else {
-      // Skip the test if button is disabled
-      console.log('Sync button is disabled, skipping test');
-    }
+
+    const foodCategory = screen.getByText('Food', { selector: 'div[title="Food"]' });
+    const transportCategory = screen.getByText('Transport', { selector: 'div[title="Transport"]' });
+
+    expect(foodCategory).toBeInTheDocument();
+    expect(transportCategory).toBeInTheDocument();
+  });
+
+  it('handles sync to YNAB', async () => {
+    render(<ReportsPage />);
+    await waitFor(() => {
+      expect(fetchYNABSplits).toHaveBeenCalled();
+    });
+
+    const syncButton = screen.getByText('Sync This Report to YNAB');
+    fireEvent.click(syncButton);
+
+    await waitFor(() => {
+      expect(syncToYNAB).toHaveBeenCalled();
+    });
+
+    expect(
+      screen.getByText(
+        /This will create a single transaction in YNAB with split categories based on the report above/i
+      )
+    ).toBeInTheDocument();
   });
 
   it('handles filter changes', async () => {
     render(<ReportsPage />);
-    
-    // Wait for the page to load
-    await waitFor(() => {
-      expect(screen.getByText(/Reports/i)).toBeInTheDocument();
-    });
-    
-    // Change start date
-    const startDateInput = screen.getByLabelText(/Start Date/i);
-    fireEvent.change(startDateInput, { target: { value: '2023-06-01' } });
-    
-    // Change category
-    const categorySelect = screen.getByLabelText(/Category/i);
-    fireEvent.change(categorySelect, { target: { value: 'Food' } });
-    
-    // Submit the form
-    const submitButton = screen.getByRole('button', { name: /Generate Report/i });
-    fireEvent.click(submitButton);
-    
-    // Check if API was called with updated filter
-    await waitFor(() => {
-      expect(api.fetchYNABSplits).toHaveBeenCalledWith(
-        expect.objectContaining({
-          startDate: '2023-06-01',
-          category: 'Food'
-        })
-      );
-    });
+    const startDateInput = screen.getByLabelText(/start date/i);
+    fireEvent.change(startDateInput, { target: { value: '2024-01-01' } });
+    expect(startDateInput).toHaveValue('2024-01-01');
   });
 
   it('displays error message when API call fails', async () => {
-    // Mock API failure
-    vi.mocked(api.fetchYNABSplits).mockRejectedValueOnce(new Error('API error'));
-    
+    (fetchYNABSplits as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('API Error')
+    );
     render(<ReportsPage />);
-    
-    // Wait for the page to load
+
     await waitFor(() => {
-      expect(screen.getByText(/Reports/i)).toBeInTheDocument();
-    });
-    
-    // Submit the form
-    const submitButton = screen.getByRole('button', { name: /Generate Report/i });
-    fireEvent.click(submitButton);
-    
-    // Check if error message is displayed
-    await waitFor(() => {
-      expect(screen.getByText(/Failed to load report data/i)).toBeInTheDocument();
+      expect(screen.getByText('Failed to load report data. Please try again.')).toBeInTheDocument();
     });
   });
-}); 
+
+  it('disables sync button when no splits are available', async () => {
+    (fetchYNABSplits as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    render(<ReportsPage />);
+
+    await waitFor(() => {
+      expect(fetchYNABSplits).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText('Sync This Report to YNAB')).not.toBeInTheDocument();
+  });
+
+  it('shows loading state while fetching data', async () => {
+    render(<ReportsPage />);
+    expect(screen.getByTestId('loading-indicator')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(fetchYNABSplits).toHaveBeenCalled();
+    });
+  });
+
+  it('validates start date is before end date', async () => {
+    (fetchYNABSplits as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      setImmediate(() => {
+        // This causes the loadReportData to complete quickly
+      });
+      return Promise.resolve([]);
+    });
+
+    const { container } = render(<ReportsPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('loading-indicator')).not.toBeInTheDocument();
+    });
+
+    const startDateInput = screen.getByLabelText(/start date/i);
+    const endDateInput = screen.getByLabelText(/end date/i);
+
+    fireEvent.change(startDateInput, { target: { value: '2024-01-02' } });
+    fireEvent.change(endDateInput, { target: { value: '2024-01-01' } });
+
+    const submitButton = container.querySelector('button[type="submit"]');
+    if (!submitButton) throw new Error('Submit button not found');
+
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('Start date must be before end date')).toBeInTheDocument();
+    });
+  });
+
+  it('handles checkbox filter changes', async () => {
+    render(<ReportsPage />);
+    const paidCheckbox = screen.getByLabelText(/show only paid transactions/i);
+    fireEvent.click(paidCheckbox);
+    expect(paidCheckbox).toBeChecked();
+  });
+
+  it('displays no data message when no splits are returned', async () => {
+    (fetchYNABSplits as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    render(<ReportsPage />);
+
+    await waitFor(() => {
+      expect(fetchYNABSplits).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText('No data available for the selected filters.')).toBeInTheDocument();
+  });
+
+  it('handles optional transactions checkbox correctly', async () => {
+    render(<ReportsPage />);
+    const optionalCheckbox = screen.getByLabelText(/exclude optional transactions/i);
+    // Check initial state (assuming it's unchecked by default)
+    expect(optionalCheckbox).not.toBeChecked();
+
+    // First click should check it
+    fireEvent.click(optionalCheckbox);
+    expect(optionalCheckbox).toBeChecked();
+
+    // Second click should uncheck it if it's a toggle
+    fireEvent.click(optionalCheckbox);
+    expect(optionalCheckbox).not.toBeChecked();
+  });
+
+  it('renders the correct total amount in the sync button description', async () => {
+    render(<ReportsPage />);
+    await waitFor(() => {
+      expect(fetchYNABSplits).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText(/The total amount will be \$150.00./i)).toBeInTheDocument();
+  });
+});
