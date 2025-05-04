@@ -1,3 +1,9 @@
+## [1.2.5](https://github.com/patrickisgreat/bennwallet/compare/v1.2.4...v1.2.5) (2025-05-04)
+
+### Bug Fixes
+
+* user permissions ([79bef30](https://github.com/patrickisgreat/bennwallet/commit/79bef3010908cbf9a5a64fb3410b9cfbd0b7dce9))
+
 ## [1.2.4](https://github.com/patrickisgreat/bennwallet/compare/v1.2.3...v1.2.4) (2025-05-04)
 
 ### Bug Fixes
