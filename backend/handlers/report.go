@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"bennwallet/backend/database"
@@ -135,9 +136,22 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Added Category filter: %s", request.Category)
 	}
 	if request.PayTo != "" {
-		query += " AND payTo LIKE ?"
-		args = append(args, "%"+request.PayTo+"%")
-		log.Printf("Added PayTo LIKE filter: '%s' (as %%%s%%)", request.PayTo, request.PayTo)
+		query += " AND (payTo LIKE ? OR payTo LIKE ? OR payTo LIKE ?)"
+		search := "%" + request.PayTo + "%"
+		// Special case for Sarah
+		if strings.ToLower(request.PayTo) == "sarah" {
+			args = append(args, search, "%Sarah Elizabeth Wallis%", "%sarah.elizabeth.wallis@gmail.com%")
+			log.Printf("Added PayTo LIKE filter for Sarah with 3 patterns")
+		} else if strings.ToLower(request.PayTo) == "patrick" {
+			// Special case for Patrick
+			args = append(args, search, "%Patrick Bennett%", "%patrick.bennett@gmail.com%")
+			log.Printf("Added PayTo LIKE filter for Patrick with 3 patterns")
+		} else {
+			// Just use the normal search
+			query = strings.Replace(query, "(payTo LIKE ? OR payTo LIKE ? OR payTo LIKE ?)", "payTo LIKE ?", 1)
+			args = append(args, search)
+			log.Printf("Added PayTo LIKE filter: '%s' (as %s)", request.PayTo, search)
+		}
 
 		// Debug: Check if any rows actually match this condition
 		var matchCount int
@@ -150,9 +164,22 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if request.EnteredBy != "" {
-		query += " AND enteredBy LIKE ?"
-		args = append(args, "%"+request.EnteredBy+"%")
-		log.Printf("Added EnteredBy LIKE filter: '%s' (as %%%s%%)", request.EnteredBy, request.EnteredBy)
+		query += " AND (enteredBy LIKE ? OR enteredBy LIKE ? OR enteredBy LIKE ?)"
+		search := "%" + request.EnteredBy + "%"
+		// Special case for Sarah
+		if strings.ToLower(request.EnteredBy) == "sarah" {
+			args = append(args, search, "%Sarah Elizabeth Wallis%", "%sarah.elizabeth.wallis@gmail.com%")
+			log.Printf("Added EnteredBy LIKE filter for Sarah with 3 patterns")
+		} else if strings.ToLower(request.EnteredBy) == "patrick" {
+			// Special case for Patrick
+			args = append(args, search, "%Patrick Bennett%", "%patrick.bennett@gmail.com%")
+			log.Printf("Added EnteredBy LIKE filter for Patrick with 3 patterns")
+		} else {
+			// Just use the normal search
+			query = strings.Replace(query, "(enteredBy LIKE ? OR enteredBy LIKE ? OR enteredBy LIKE ?)", "enteredBy LIKE ?", 1)
+			args = append(args, search)
+			log.Printf("Added EnteredBy LIKE filter: '%s' (as %s)", request.EnteredBy, search)
+		}
 
 		// Debug: Check if any rows actually match this condition
 		var matchCount int
