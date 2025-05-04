@@ -1,3 +1,10 @@
+## [1.2.3](https://github.com/patrickisgreat/bennwallet/compare/v1.2.2...v1.2.3) (2025-05-04)
+
+### Bug Fixes
+
+* a few more tweaks ([0951fd8](https://github.com/patrickisgreat/bennwallet/commit/0951fd8ca5c4f78181f313b7dc13909b88f3033c))
+* pr deploy ([61186d2](https://github.com/patrickisgreat/bennwallet/commit/61186d218cc0467e7c7e19685ebb4ac099d9cf4f))
+
 ## [1.2.2](https://github.com/patrickisgreat/bennwallet/compare/v1.2.1...v1.2.2) (2025-05-04)
 
 ### Bug Fixes
