@@ -46,11 +46,11 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# runtime deps: libsqlite3 & CA bundle
+# runtime deps: add sqlite3 CLI and cron for backups
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libsqlite3-0 ca-certificates && \
+      libsqlite3-0 ca-certificates sqlite3 cron gzip && \
     rm -rf /var/lib/apt/lists/*
-
+    
 # mountpoint for the Fly volume
 RUN mkdir -p /data
 
