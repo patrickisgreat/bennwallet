@@ -135,13 +135,13 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Added Category filter: %s", request.Category)
 	}
 	if request.PayTo != "" {
-		query += " AND payTo = ?"
-		args = append(args, request.PayTo)
+		query += " AND payTo LIKE ?"
+		args = append(args, "%"+request.PayTo+"%")
 		log.Printf("Added PayTo filter: %s", request.PayTo)
 	}
 	if request.EnteredBy != "" {
-		query += " AND enteredBy = ?"
-		args = append(args, request.EnteredBy)
+		query += " AND enteredBy LIKE ?"
+		args = append(args, "%"+request.EnteredBy+"%")
 		log.Printf("Added EnteredBy filter: %s", request.EnteredBy)
 	}
 

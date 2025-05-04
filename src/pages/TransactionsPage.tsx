@@ -2,7 +2,12 @@ import { useState, useEffect } from 'react';
 import AddTransactionForm from '../components/AddTransactionForm';
 import TransactionTable from '../components/TransactionTable';
 import { Transaction } from '../types/transaction';
-import { fetchTransactions, updateTransaction, deleteTransaction, createTransaction } from '../utils/api';
+import {
+  fetchTransactions,
+  updateTransaction,
+  deleteTransaction,
+  createTransaction,
+} from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useUser } from '../context/UserContext';
 import React from 'react';
@@ -31,7 +36,7 @@ function TransactionsPage() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  
+
   // Initialize filter with appropriate defaults based on user
   const [filter, setFilter] = useState<TransactionFilter>(() => {
     // Get saved filter from localStorage if available
@@ -39,9 +44,11 @@ function TransactionsPage() {
     if (savedFilter) {
       return JSON.parse(savedFilter);
     }
-    
+
     // First day of current month
-    const startDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const startDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+      .toISOString()
+      .split('T')[0];
     // Today
     const endDate = new Date().toISOString().split('T')[0];
 
@@ -50,7 +57,7 @@ function TransactionsPage() {
     // If Sarah is logged in, show transactions entered by Patrick for Sarah to pay
     const userName = user?.name || '';
     const isPatrick = userName.toLowerCase().includes('patrick');
-    
+
     return {
       startDate,
       endDate,
@@ -58,25 +65,25 @@ function TransactionsPage() {
       txEndDate: '',
       payTo: isPatrick ? 'Patrick' : 'Sarah',
       enteredBy: isPatrick ? 'Sarah' : 'Patrick',
-      paid: false
+      paid: false,
     };
   });
 
   useEffect(() => {
     loadTransactions();
   }, []);
-  
+
   useEffect(() => {
     // Save filter to localStorage whenever it changes
     localStorage.setItem('transactionFilter', JSON.stringify(filter));
-    
+
     // Apply filter to transactions
     applyFilters();
   }, [filter, transactions]);
 
   const loadTransactions = async () => {
     if (!currentUser) return;
-    
+
     setLoading(true);
     try {
       const data = await fetchTransactions();
@@ -90,67 +97,71 @@ function TransactionsPage() {
       setLoading(false);
     }
   };
-  
+
   const applyFilters = () => {
     console.log('Raw transactions before filtering:', transactions);
     let filtered = [...transactions];
-    
+
     // Filter by entered date range
     if (filter.startDate) {
       console.log(`Filtering by entered start date: ${filter.startDate}`);
       // For start date, set time to beginning of day
       const startDate = new Date(filter.startDate + 'T00:00:00');
-      
+
       filtered = filtered.filter(tx => {
         const txDate = new Date(tx.entered);
         console.log(`Comparing entered date ${tx.entered} (${txDate}) >= ${startDate}`);
         return txDate >= startDate;
       });
     }
-    
+
     if (filter.endDate) {
       console.log(`Filtering by entered end date: ${filter.endDate}`);
       // For end date, set time to end of day
       const endDate = new Date(filter.endDate + 'T23:59:59');
-      
+
       filtered = filtered.filter(tx => {
         const txDate = new Date(tx.entered);
         console.log(`Comparing entered date ${tx.entered} (${txDate}) <= ${endDate}`);
         return txDate <= endDate;
       });
     }
-    
+
     // Filter by transaction date range
     if (filter.txStartDate) {
       console.log(`Filtering by transaction start date: ${filter.txStartDate}`);
       const txStartDate = new Date(filter.txStartDate + 'T00:00:00');
-      
+
       filtered = filtered.filter(tx => {
         const txDate = new Date(tx.transactionDate);
         return txDate >= txStartDate;
       });
     }
-    
+
     if (filter.txEndDate) {
       console.log(`Filtering by transaction end date: ${filter.txEndDate}`);
       const txEndDate = new Date(filter.txEndDate + 'T23:59:59');
-      
+
       filtered = filtered.filter(tx => {
         const txDate = new Date(tx.transactionDate);
         return txDate <= txEndDate;
       });
     }
-    
+
     // Filter by payTo
     if (filter.payTo) {
-      filtered = filtered.filter(tx => tx.payTo === filter.payTo);
+      filtered = filtered.filter(
+        tx => tx.payTo && tx.payTo.toLowerCase().includes(filter.payTo.toLowerCase())
+      );
     }
-    
+
     // Filter by enteredBy
     if (filter.enteredBy) {
-      filtered = filtered.filter(tx => tx.enteredBy === filter.enteredBy);
+      filtered = filtered.filter(
+        tx => tx.enteredBy && tx.enteredBy.toLowerCase().includes(filter.enteredBy.toLowerCase())
+      );
     }
-    
+
     // Filter by paid status
     if (filter.paid !== undefined) {
       filtered = filtered.filter(tx => tx.paid === filter.paid);
@@ -159,9 +170,9 @@ function TransactionsPage() {
     console.log('Filtering transactions:', {
       total: transactions.length,
       filtered: filtered.length,
-      filters: filter
+      filters: filter,
     });
-    
+
     setFilteredTransactions(filtered);
   };
 
@@ -174,9 +185,7 @@ function TransactionsPage() {
     try {
       const success = await updateTransaction(id, updates);
       if (success) {
-        setTransactions(prev => 
-          prev.map(tx => tx.id === id ? { ...tx, ...updates } : tx)
-        );
+        setTransactions(prev => prev.map(tx => (tx.id === id ? { ...tx, ...updates } : tx)));
       } else {
         setError('Failed to update transaction');
       }
@@ -190,7 +199,7 @@ function TransactionsPage() {
     if (!window.confirm('Are you sure you want to delete this transaction?')) {
       return;
     }
-    
+
     try {
       const success = await deleteTransaction(id);
       if (success) {
@@ -219,21 +228,21 @@ function TransactionsPage() {
   const handleCancelEdit = () => {
     setEditingTransaction(null);
   };
-  
+
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    
+
     if (name === 'paid') {
       // Handle checkbox for paid status
-      setFilter(prev => ({ 
-        ...prev, 
-        [name]: (e.target as HTMLInputElement).checked
+      setFilter(prev => ({
+        ...prev,
+        [name]: (e.target as HTMLInputElement).checked,
       }));
     } else {
       setFilter(prev => ({ ...prev, [name]: value }));
     }
   };
-  
+
   const clearFilters = () => {
     setFilter({
       startDate: '',
@@ -242,14 +251,14 @@ function TransactionsPage() {
       txEndDate: '',
       payTo: '',
       enteredBy: '',
-      paid: undefined
+      paid: undefined,
     });
   };
 
   const handleBulkDelete = async (ids: string[]) => {
     setLoading(true);
     let failedCount = 0;
-    
+
     for (const id of ids) {
       try {
         const success = await deleteTransaction(id);
@@ -261,11 +270,11 @@ function TransactionsPage() {
         failedCount++;
       }
     }
-    
+
     if (failedCount > 0) {
       setError(`Failed to delete ${failedCount} transaction(s). Please try again.`);
     }
-    
+
     await loadTransactions();
     setLoading(false);
   };
@@ -290,7 +299,7 @@ function TransactionsPage() {
         'Paid',
         'Paid Date',
         'Entered By',
-        'Optional'
+        'Optional',
       ];
 
       // Format transactions for CSV
@@ -299,7 +308,7 @@ function TransactionsPage() {
         const enteredDate = new Date(tx.entered).toLocaleDateString();
         const txDate = new Date(tx.transactionDate).toLocaleDateString();
         const paidDate = tx.paidDate ? new Date(tx.paidDate).toLocaleDateString() : '';
-        
+
         return [
           tx.id,
           enteredDate,
@@ -311,25 +320,22 @@ function TransactionsPage() {
           tx.paid ? 'Yes' : 'No',
           paidDate,
           tx.enteredBy,
-          tx.optional ? 'Yes' : 'No'
+          tx.optional ? 'Yes' : 'No',
         ];
       });
 
       // Combine headers and rows
-      const csvContent = [
-        headers.join(','),
-        ...csvRows.map(row => row.join(','))
-      ].join('\n');
+      const csvContent = [headers.join(','), ...csvRows.map(row => row.join(','))].join('\n');
 
       // Create a blob and download link
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      
+
       // Set filename with current date
       const today = new Date().toISOString().split('T')[0];
       const fileName = `transactions_${today}.csv`;
-      
+
       // Set up and trigger download
       link.setAttribute('href', url);
       link.setAttribute('download', fileName);
@@ -352,70 +358,81 @@ function TransactionsPage() {
     if (!file || !currentUser) return;
 
     setIsUploading(true);
-    
+
     try {
       const text = await file.text();
       const rows = text.split('\n');
       const headers = rows[0].split(',');
-      
+
       // Get indices for each required field
       const dateIndex = headers.findIndex(h => h.toLowerCase().includes('date'));
       const amountIndex = headers.findIndex(h => h.toLowerCase().includes('amount'));
-      const payToIndex = headers.findIndex(h => h.toLowerCase().includes('pay to') || h.toLowerCase().includes('payto'));
+      const payToIndex = headers.findIndex(
+        h => h.toLowerCase().includes('pay to') || h.toLowerCase().includes('payto')
+      );
       const categoryIndex = headers.findIndex(h => h.toLowerCase().includes('category'));
-      const noteIndex = headers.findIndex(h => h.toLowerCase().includes('note') || h.toLowerCase().includes('description'));
+      const noteIndex = headers.findIndex(
+        h => h.toLowerCase().includes('note') || h.toLowerCase().includes('description')
+      );
       const optionalIndex = headers.findIndex(h => h.toLowerCase().includes('optional'));
-      
+
       // Validate required columns
       if (dateIndex === -1 || amountIndex === -1 || payToIndex === -1 || categoryIndex === -1) {
         setError('CSV file must contain date, amount, payTo, and category columns');
         setIsUploading(false);
         return;
       }
-      
+
       let successCount = 0;
       let failedCount = 0;
-      
+
       // Process each row (skip header)
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i].trim();
         if (!row) continue; // Skip empty rows
-        
+
         const values = row.split(',');
-        
+
         if (values.length < Math.max(dateIndex, amountIndex, payToIndex, categoryIndex) + 1) {
           console.warn(`Row ${i} has insufficient columns, skipping`);
           failedCount++;
           continue;
         }
-        
+
         // Extract values
         const enteredDateValue = values[dateIndex].trim();
         const amountValue = parseFloat(values[amountIndex].replace('$', '').trim());
         const payToValue = values[payToIndex].trim() as 'Sarah' | 'Patrick';
         const categoryValue = values[categoryIndex].trim();
         const noteValue = noteIndex !== -1 && values[noteIndex] ? values[noteIndex].trim() : '';
-        const optionalValue = optionalIndex !== -1 && values[optionalIndex] ? 
-          values[optionalIndex].toLowerCase().trim() === 'true' ||
-          values[optionalIndex].trim() === '1' : false;
-        
+        const optionalValue =
+          optionalIndex !== -1 && values[optionalIndex]
+            ? values[optionalIndex].toLowerCase().trim() === 'true' ||
+              values[optionalIndex].trim() === '1'
+            : false;
+
         // Look for transaction date in separate column or use entered date
-        const txDateIndex = headers.findIndex(h => h.toLowerCase().includes('transaction date') || h.toLowerCase().includes('tx date'));
-        const transactionDateValue = (txDateIndex !== -1 && values[txDateIndex]) 
-          ? values[txDateIndex].trim() 
-          : enteredDateValue; // Default to entered date if tx date not found
-        
+        const txDateIndex = headers.findIndex(
+          h => h.toLowerCase().includes('transaction date') || h.toLowerCase().includes('tx date')
+        );
+        const transactionDateValue =
+          txDateIndex !== -1 && values[txDateIndex] ? values[txDateIndex].trim() : enteredDateValue; // Default to entered date if tx date not found
+
         // Validate values
-        if (!enteredDateValue || isNaN(amountValue) || amountValue <= 0 ||
-            !['Sarah', 'Patrick'].includes(payToValue) || !categoryValue) {
+        if (
+          !enteredDateValue ||
+          isNaN(amountValue) ||
+          amountValue <= 0 ||
+          !['Sarah', 'Patrick'].includes(payToValue) ||
+          !categoryValue
+        ) {
           console.warn(`Row ${i} has invalid data, skipping`);
           failedCount++;
           continue;
         }
-        
+
         // Create transaction
         try {
-          const now = new Date();
           const newTransaction: Transaction = {
             id: uuidv4(),
             entered: new Date(enteredDateValue).toISOString(),
@@ -426,9 +443,9 @@ function TransactionsPage() {
             category: categoryValue,
             paid: false,
             enteredBy: user?.name || 'User',
-            optional: optionalValue
+            optional: optionalValue,
           };
-          
+
           const success = await createTransaction(newTransaction);
           if (success) {
             successCount++;
@@ -440,11 +457,13 @@ function TransactionsPage() {
           failedCount++;
         }
       }
-      
+
       // Show results
       if (successCount > 0) {
-        alert(`Successfully imported ${successCount} transaction(s).` + 
-              (failedCount > 0 ? ` Failed to import ${failedCount} transaction(s).` : ''));
+        alert(
+          `Successfully imported ${successCount} transaction(s).` +
+            (failedCount > 0 ? ` Failed to import ${failedCount} transaction(s).` : '')
+        );
         loadTransactions();
       } else if (failedCount > 0) {
         setError(`Failed to import ${failedCount} transaction(s). Please check the CSV format.`);
@@ -462,20 +481,20 @@ function TransactionsPage() {
       }
     }
   };
-  
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">Transactions</h1>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={exportToCSV}
             disabled={loading || filteredTransactions.length === 0}
             className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:bg-gray-400"
           >
             Export CSV
           </button>
-          <button 
+          <button
             onClick={handleCSVUpload}
             disabled={isUploading}
             className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:bg-gray-400"
@@ -489,7 +508,7 @@ function TransactionsPage() {
             onChange={processCSVFile}
             className="hidden"
           />
-          <button 
+          <button
             onClick={loadTransactions}
             className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded hover:bg-indigo-200"
           >
@@ -497,31 +516,25 @@ function TransactionsPage() {
           </button>
         </div>
       </div>
-      
+
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
           {error}
-          <button 
-            className="float-right font-bold"
-            onClick={() => setError(null)}
-          >
+          <button className="float-right font-bold" onClick={() => setError(null)}>
             &times;
           </button>
         </div>
       )}
-      
+
       {/* Filters */}
       <div className="bg-white p-4 rounded shadow mb-4">
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-lg font-medium">Filters</h2>
-          <button 
-            onClick={clearFilters}
-            className="text-sm text-indigo-600 hover:text-indigo-800"
-          >
+          <button onClick={clearFilters} className="text-sm text-indigo-600 hover:text-indigo-800">
             Clear All
           </button>
         </div>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
             <h3 className="font-medium text-gray-700 mb-2">Entry Date</h3>
@@ -536,7 +549,7 @@ function TransactionsPage() {
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 />
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">End</label>
                 <input
@@ -549,7 +562,7 @@ function TransactionsPage() {
               </div>
             </div>
           </div>
-          
+
           <div>
             <h3 className="font-medium text-gray-700 mb-2">Transaction Date</h3>
             <div className="grid grid-cols-2 gap-2">
@@ -563,7 +576,7 @@ function TransactionsPage() {
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 />
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">End</label>
                 <input
@@ -576,7 +589,7 @@ function TransactionsPage() {
               </div>
             </div>
           </div>
-          
+
           <div>
             <h3 className="font-medium text-gray-700 mb-2">Other Filters</h3>
             <div className="grid grid-cols-2 gap-2">
@@ -593,7 +606,7 @@ function TransactionsPage() {
                   <option value="Patrick">Patrick</option>
                 </select>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Entered By</label>
                 <select
@@ -610,7 +623,7 @@ function TransactionsPage() {
             </div>
           </div>
         </div>
-        
+
         <div className="flex items-center">
           <label className="flex items-center text-sm font-medium text-gray-700">
             <input
@@ -624,14 +637,14 @@ function TransactionsPage() {
           </label>
         </div>
       </div>
-      
+
       <AddTransactionForm
         onAdd={handleAddTransaction}
         editingTransaction={editingTransaction}
         onEditSubmit={handleEditSubmit}
         cancelEdit={handleCancelEdit}
       />
-      
+
       {loading ? (
         <div className="text-center py-4">Loading transactions...</div>
       ) : (
@@ -647,4 +660,4 @@ function TransactionsPage() {
   );
 }
 
-export default TransactionsPage; 
+export default TransactionsPage;
