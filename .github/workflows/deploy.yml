@@ -210,6 +210,24 @@ jobs:
               size = "1"
           EOF
 
+      - name: Set Firebase credentials in Fly.io
+        run: |
+          echo "Setting Firebase credentials in Fly.io secrets..."
+          
+          # Write the credentials to a file with proper quoting
+          # Using variable substitution with single quotes to preserve JSON structure
+          cat > /tmp/firebase-credentials.json << 'EOT'
+          ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          EOT
+          
+          # Set the secret from the file
+          flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
+          
+          # Clean up
+          rm /tmp/firebase-credentials.json
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
       - name: Deploy to Fly.io Production
         run: flyctl deploy --remote-only --app ${{ env.FLY_PROD_APP_NAME }}
         env:
