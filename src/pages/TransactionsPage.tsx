@@ -105,10 +105,10 @@ function TransactionsPage() {
         paid: filter.paid,
       };
 
-      // Only include parameters that have values
+      // Only include parameters that have values - EXCLUDE empty strings
       const apiParams: Record<string, string | boolean | undefined> = {};
       Object.entries(filterParams).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== '') {
           apiParams[key] = value;
         }
       });
@@ -188,7 +188,9 @@ function TransactionsPage() {
 
     // Helper function to match names with flexibility
     const matchesName = (value: string, searchTerm: string) => {
-      if (!value) return false;
+      if (!searchTerm) return true; // If no search term, match all
+      if (!value) return false; // If no value but a search term, no match
+
       const valueLower = value.toLowerCase();
       const searchLower = searchTerm.toLowerCase();
 
@@ -315,7 +317,7 @@ function TransactionsPage() {
       txEndDate: '',
       payTo: '',
       enteredBy: '',
-      paid: undefined,
+      paid: false,
     });
   };
 
