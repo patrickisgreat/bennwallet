@@ -151,13 +151,15 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a special case for Sarah's email
 	isSarahEmail := request.Email == "sarah.elizabeth.wallis@gmail.com"
+	// Check if this is Sarah's known Firebase UID
+	isSarahUID := request.FirebaseID == "4fWxBBh9NYhMlwop2SJGt1ZzzI22"
 
 	// Check if user already exists by Firebase ID
 	var userID string
 	err := database.DB.QueryRow("SELECT id FROM users WHERE id = ?", request.FirebaseID).Scan(&userID)
 
-	// If user doesn't exist by Firebase ID, but it's Sarah's email, we need to handle migration
-	if err == sql.ErrNoRows && isSarahEmail {
+	// If user doesn't exist by Firebase ID, but it's Sarah's email or UID, we need to handle migration
+	if err == sql.ErrNoRows && (isSarahEmail || isSarahUID) {
 		// Check if Sarah's legacy account exists (with ID=1)
 		var legacyExists bool
 		err = database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = '1' AND name = 'Sarah')").Scan(&legacyExists)
@@ -198,7 +200,11 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	// Check if this is one of our default admins
 	isDefaultAdmin := false
 	for _, name := range models.DefaultAdmins {
-		if request.Name == name || strings.Contains(request.Name, name) || isSarahEmail || request.Email == "patrickisgreat@gmail.com" {
+		if request.Name == name ||
+			strings.Contains(request.Name, name) ||
+			isSarahEmail ||
+			isSarahUID ||
+			request.Email == "patrickisgreat@gmail.com" {
 			isDefaultAdmin = true
 			break
 		}
@@ -284,14 +290,14 @@ func CreateOrUpdateFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Creating or updating user with Firebase UID %s, email %s", firebaseUID, userRequest.Email)
 
 	// Special handling for Sarah's email to grant proper permissions
-	isSpecialUser := userRequest.Email == "sarah.elizabeth.wallis@gmail.com"
+	isSpecialUser := userRequest.Email == "sarah.elizabeth.wallis@gmail.com" || firebaseUID == "4fWxBBh9NYhMlwop2SJGt1ZzzI22"
 
 	// Default to approved status
 	status := "approved"
 
-	// Check if this is Sarah or another recognized admin by email
+	// Check if this is Sarah or another recognized admin by email or UID
 	isAdmin := false
-	if isSpecialUser || userRequest.Email == "patrickisgreat@gmail.com" {
+	if isSpecialUser || userRequest.Email == "patrickisgreat@gmail.com" || firebaseUID == "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2" {
 		isAdmin = true
 		log.Printf("Recognized special user %s with email %s", userRequest.Name, userRequest.Email)
 	}
