@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"bennwallet/backend/database"
@@ -204,5 +205,74 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"id": userID,
+	})
+}
+
+// CreateOrUpdateFirebaseUser creates a new user account with the Firebase UID
+// No linking with existing accounts is attempted
+func CreateOrUpdateFirebaseUser(w http.ResponseWriter, r *http.Request) {
+	// Get the Firebase user ID from the request context
+	firebaseUID := middleware.GetUserIDFromContext(r)
+	if firebaseUID == "" {
+		http.Error(w, "Unauthorized: No Firebase UID found", http.StatusUnauthorized)
+		return
+	}
+
+	// Parse the request body to get the user details
+	var userRequest struct {
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		Username string `json:"username,omitempty"` // Optional
+	}
+
+	err := json.NewDecoder(r.Body).Decode(&userRequest)
+	if err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// If no username is provided, use the email
+	if userRequest.Username == "" {
+		userRequest.Username = userRequest.Email
+	}
+
+	log.Printf("Creating or updating user with Firebase UID %s", firebaseUID)
+
+	// Check if this user already exists
+	var existingID string
+	err = database.DB.QueryRow("SELECT id FROM users WHERE id = ?", firebaseUID).Scan(&existingID)
+	if err == nil {
+		// User exists, update the record
+		_, err = database.DB.Exec(
+			"UPDATE users SET name = ?, username = ? WHERE id = ?",
+			userRequest.Name, userRequest.Username, firebaseUID)
+
+		if err != nil {
+			http.Error(w, "Failed to update user: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Updated existing user %s", firebaseUID)
+	} else {
+		// Create a new user record with this Firebase UID
+		_, err = database.DB.Exec(
+			"INSERT INTO users (id, username, name, status) VALUES (?, ?, ?, ?)",
+			firebaseUID, userRequest.Username, userRequest.Name, "approved")
+
+		if err != nil {
+			http.Error(w, "Failed to create user: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Created new user with Firebase UID %s", firebaseUID)
+	}
+
+	// Return the user info
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(models.User{
+		ID:       firebaseUID,
+		Username: userRequest.Username,
+		Name:     userRequest.Name,
+		Status:   "approved",
 	})
 }
