@@ -23,7 +23,7 @@ BennWallet is a full-stack web application designed to help couples or roommates
 ### Backend
 
 - Go (Golang)
-- Gorilla Mux for routing
+- Gorilla Mux for routings
 - SQLite for database
 - JWT for authentication
 
