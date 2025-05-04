@@ -75,8 +75,46 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 
 	// Add user ID filter if the column exists
 	if hasUserIdColumn {
-		query += " AND (userId = ? OR userId IS NULL)"
-		args = append(args, userID)
+		// Check if the user is in the approved sharing group (Sarah and Patrick)
+		var isApprovedUser bool
+		err := database.DB.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM users 
+				WHERE id = ? AND 
+				(name = 'Patrick' OR name = 'Sarah' OR 
+				 username = 'patrick' OR username = 'sarah' OR
+				 id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+				 username = 'sarah.elizabeth.wallis@gmail.com')
+			)
+		`, userID).Scan(&isApprovedUser)
+
+		if err != nil {
+			log.Printf("Error checking if user is approved for sharing: %v", err)
+			isApprovedUser = false
+		}
+
+		if isApprovedUser {
+			// If the user is Patrick or Sarah, they can see all transactions
+			// from both of them or any legacy transactions without userId
+			query += ` AND (
+				userId = ? OR 
+				userId IS NULL OR 
+				userId IN (
+					SELECT id FROM users 
+					WHERE name = 'Patrick' OR name = 'Sarah' OR 
+						  username = 'patrick' OR username = 'sarah' OR
+						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+						  username = 'sarah.elizabeth.wallis@gmail.com'
+				)
+			)`
+			args = append(args, userID)
+			log.Printf("Fetching ALL shared transactions for approved user %s", userID)
+		} else {
+			// For other users, only show their own transactions
+			query += " AND (userId = ?)"
+			args = append(args, userID)
+			log.Printf("Fetching only personal transactions for user %s", userID)
+		}
 	}
 
 	// Parse query parameters
@@ -212,32 +250,123 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 
 	// Add user ID check if the column exists
 	if hasUserIdColumn {
-		query += " AND (userId = ? OR userId IS NULL)"
-	}
+		// Check if the user is in the approved sharing group (Sarah and Patrick)
+		var isApprovedUser bool
+		err := database.DB.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM users 
+				WHERE id = ? AND 
+				(name = 'Patrick' OR name = 'Sarah' OR 
+				 username = 'patrick' OR username = 'sarah' OR
+				 id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+				 username = 'sarah.elizabeth.wallis@gmail.com')
+			)
+		`, userID).Scan(&isApprovedUser)
 
-	var err2 error
-	if hasOptionalColumn && hasUserIdColumn {
-		err2 = database.DB.QueryRow(query, id, userID).Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
-		if userId.Valid {
-			t.UserID = userId.String
+		if err != nil {
+			log.Printf("Error checking if user is approved for sharing: %v", err)
+			isApprovedUser = false
 		}
-	} else if hasOptionalColumn {
-		err2 = database.DB.QueryRow(query, id).Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
-		// Set default value for optional
-		t.Optional = false
-	} else {
-		err2 = database.DB.QueryRow(query, id).Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
-		// Set default value for optional
-		t.Optional = false
-	}
 
-	if err2 != nil {
-		if err2 == sql.ErrNoRows {
-			http.Error(w, "Transaction not found", http.StatusNotFound)
+		if isApprovedUser {
+			// If the user is Patrick or Sarah, they can see all transactions
+			// from both of them or any legacy transactions without userId
+			query += ` AND (
+				userId = ? OR 
+				userId IS NULL OR 
+				userId IN (
+					SELECT id FROM users 
+					WHERE name = 'Patrick' OR name = 'Sarah' OR 
+						  username = 'patrick' OR username = 'sarah' OR
+						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+						  username = 'sarah.elizabeth.wallis@gmail.com'
+				)
+			)`
+
+			// Create parameter list based on available columns
+			args := []interface{}{id, userID}
+
+			if hasOptionalColumn && hasUserIdColumn {
+				err = database.DB.QueryRow(query, args...).Scan(
+					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
+			} else if hasOptionalColumn {
+				err = database.DB.QueryRow(query, args...).Scan(
+					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
+			} else {
+				err = database.DB.QueryRow(query, args...).Scan(
+					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+			}
+
+			if err != nil {
+				if err == sql.ErrNoRows {
+					http.Error(w, "Transaction not found", http.StatusNotFound)
+				} else {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				return
+			}
+
+			if userId.Valid {
+				t.UserID = userId.String
+			}
 		} else {
-			http.Error(w, err2.Error(), http.StatusInternalServerError)
+			// For other users, only show their own transactions
+			query += " AND (userId = ?)"
+
+			// Create parameter list based on available columns
+			args := []interface{}{id, userID}
+
+			if hasOptionalColumn && hasUserIdColumn {
+				err = database.DB.QueryRow(query, args...).Scan(
+					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
+			} else if hasOptionalColumn {
+				err = database.DB.QueryRow(query, args...).Scan(
+					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
+			} else {
+				err = database.DB.QueryRow(query, args...).Scan(
+					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+			}
+
+			if err != nil {
+				if err == sql.ErrNoRows {
+					http.Error(w, "Transaction not found", http.StatusNotFound)
+				} else {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				return
+			}
+
+			if userId.Valid {
+				t.UserID = userId.String
+			}
 		}
-		return
+	} else {
+		// No userId column, just query by ID
+		args := []interface{}{id}
+		if hasOptionalColumn {
+			err = database.DB.QueryRow(query, args...).Scan(
+				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
+		} else {
+			err = database.DB.QueryRow(query, args...).Scan(
+				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+		}
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "Transaction not found", http.StatusNotFound)
+			} else {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
 	}
 
 	if paidDate.Valid {
@@ -286,6 +415,11 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 
 	// Set the user ID from the authentication context
 	t.UserID = userID
+
+	// If EnteredBy is not explicitly provided, use the user ID
+	if t.EnteredBy == "" {
+		t.EnteredBy = userID
+	}
 
 	// Check if the optional column exists
 	var hasOptionalColumn bool
