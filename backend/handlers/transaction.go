@@ -124,12 +124,70 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	if payTo != "" {
 		query += " AND payTo LIKE ?"
 		args = append(args, "%"+payTo+"%")
+		log.Printf("Added PayTo LIKE filter: '%s' (as %%%s%%)", payTo, payTo)
+
+		// Debug: Check if any rows actually match this condition
+		var matchCount int
+		countQuery := "SELECT COUNT(*) FROM transactions WHERE payTo LIKE ?"
+		err := database.DB.QueryRow(countQuery, "%"+payTo+"%").Scan(&matchCount)
+		if err != nil {
+			log.Printf("Error checking PayTo match count: %v", err)
+		} else {
+			log.Printf("PayTo filter would match %d transactions", matchCount)
+
+			// Log the actual payTo values that exist in the database
+			rows, err := database.DB.Query("SELECT DISTINCT payTo FROM transactions WHERE payTo IS NOT NULL")
+			if err != nil {
+				log.Printf("Error querying distinct payTo values: %v", err)
+			} else {
+				defer rows.Close()
+				var values []string
+				for rows.Next() {
+					var val string
+					if err := rows.Scan(&val); err != nil {
+						log.Printf("Error scanning payTo value: %v", err)
+					} else {
+						values = append(values, val)
+					}
+				}
+				log.Printf("Actual payTo values in database: %v", values)
+			}
+		}
 	}
 
 	enteredBy := r.URL.Query().Get("enteredBy")
 	if enteredBy != "" {
 		query += " AND enteredBy LIKE ?"
 		args = append(args, "%"+enteredBy+"%")
+		log.Printf("Added EnteredBy LIKE filter: '%s' (as %%%s%%)", enteredBy, enteredBy)
+
+		// Debug: Check if any rows actually match this condition
+		var matchCount int
+		countQuery := "SELECT COUNT(*) FROM transactions WHERE enteredBy LIKE ?"
+		err := database.DB.QueryRow(countQuery, "%"+enteredBy+"%").Scan(&matchCount)
+		if err != nil {
+			log.Printf("Error checking EnteredBy match count: %v", err)
+		} else {
+			log.Printf("EnteredBy filter would match %d transactions", matchCount)
+
+			// Log the actual enteredBy values that exist in the database
+			rows, err := database.DB.Query("SELECT DISTINCT enteredBy FROM transactions WHERE enteredBy IS NOT NULL")
+			if err != nil {
+				log.Printf("Error querying distinct enteredBy values: %v", err)
+			} else {
+				defer rows.Close()
+				var values []string
+				for rows.Next() {
+					var val string
+					if err := rows.Scan(&val); err != nil {
+						log.Printf("Error scanning enteredBy value: %v", err)
+					} else {
+						values = append(values, val)
+					}
+				}
+				log.Printf("Actual enteredBy values in database: %v", values)
+			}
+		}
 	}
 
 	paid := r.URL.Query().Get("paid")

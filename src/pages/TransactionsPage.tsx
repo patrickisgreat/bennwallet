@@ -7,6 +7,7 @@ import {
   updateTransaction,
   deleteTransaction,
   createTransaction,
+  fetchUniqueTransactionFields,
 } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useUser } from '../context/UserContext';
@@ -36,6 +37,10 @@ function TransactionsPage() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [uniqueFields, setUniqueFields] = useState<{ payTo: string[]; enteredBy: string[] }>({
+    payTo: [],
+    enteredBy: [],
+  });
 
   // Initialize filter with appropriate defaults based on user
   const [filter, setFilter] = useState<TransactionFilter>(() => {
@@ -71,22 +76,46 @@ function TransactionsPage() {
 
   useEffect(() => {
     loadTransactions();
+    loadUniqueFields();
   }, []);
 
   useEffect(() => {
     // Save filter to localStorage whenever it changes
     localStorage.setItem('transactionFilter', JSON.stringify(filter));
 
-    // Apply filter to transactions
+    // When filter changes, reload transactions from backend
+    loadTransactions();
+
+    // Also apply client-side filtering
     applyFilters();
-  }, [filter, transactions]);
+  }, [filter]);
 
   const loadTransactions = async () => {
     if (!currentUser) return;
 
     setLoading(true);
     try {
-      const data = await fetchTransactions();
+      // Create API filter parameters from the current filter
+      const filterParams = {
+        startDate: filter.startDate || undefined,
+        endDate: filter.endDate || undefined,
+        txStartDate: filter.txStartDate || undefined,
+        txEndDate: filter.txEndDate || undefined,
+        payTo: filter.payTo || undefined,
+        enteredBy: filter.enteredBy || undefined,
+        paid: filter.paid,
+      };
+
+      // Only include parameters that have values
+      const apiParams: Record<string, string | boolean | undefined> = {};
+      Object.entries(filterParams).forEach(([key, value]) => {
+        if (value !== undefined) {
+          apiParams[key] = value;
+        }
+      });
+
+      console.log('Fetching transactions with API params:', apiParams);
+      const data = await fetchTransactions(apiParams);
       setTransactions(data);
       applyFilters();
       setError(null);
@@ -95,6 +124,16 @@ function TransactionsPage() {
       setError('Failed to load transactions. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadUniqueFields = async () => {
+    try {
+      const fields = await fetchUniqueTransactionFields();
+      console.log('Loaded unique fields:', fields);
+      setUniqueFields(fields);
+    } catch (err) {
+      console.error('Error loading unique transaction fields:', err);
     }
   };
 
@@ -239,6 +278,7 @@ function TransactionsPage() {
         [name]: (e.target as HTMLInputElement).checked,
       }));
     } else {
+      console.log(`Changing filter ${name} to ${value}`);
       setFilter(prev => ({ ...prev, [name]: value }));
     }
   };
@@ -602,8 +642,11 @@ function TransactionsPage() {
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 >
                   <option value="">All</option>
-                  <option value="Sarah">Sarah</option>
-                  <option value="Patrick">Patrick</option>
+                  {uniqueFields.payTo.map(name => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -616,8 +659,11 @@ function TransactionsPage() {
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 >
                   <option value="">All</option>
-                  <option value="Sarah">Sarah</option>
-                  <option value="Patrick">Patrick</option>
+                  {uniqueFields.enteredBy.map(name => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

@@ -96,7 +96,27 @@ export interface TransactionFilterParams {
 
 export async function fetchTransactions(params?: TransactionFilterParams): Promise<Transaction[]> {
   try {
-    const response = await api.get('/transactions', { params });
+    console.log('Fetching transactions with params:', params);
+
+    // Create a new object for query parameters that can have string values
+    const queryParams: Record<string, string | undefined> = {};
+
+    // Copy all params to the new object, converting as needed
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) {
+          if (typeof value === 'boolean') {
+            queryParams[key] = value ? 'true' : 'false';
+          } else {
+            queryParams[key] = value;
+          }
+        }
+      });
+    }
+
+    console.log('Sending query params:', queryParams);
+    const response = await api.get('/transactions', { params: queryParams });
+    console.log('Transactions response:', response.data);
     return Array.isArray(response.data) ? response.data.map(toFrontendTransaction) : [];
   } catch (error) {
     console.error('Error fetching transactions:', error);
@@ -194,6 +214,15 @@ export interface YNABConfig {
 export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTotal[]> {
   try {
     console.log('Raw filter sent to API:', filter);
+    console.log('Filter values: ', {
+      startDate: filter.startDate,
+      endDate: filter.endDate,
+      category: filter.category,
+      payTo: filter.payTo,
+      enteredBy: filter.enteredBy,
+      paid: filter.paid,
+      optional: filter.optional,
+    });
 
     const userId = localStorage.getItem('userId');
     if (!userId) {
@@ -232,9 +261,10 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       optional: filter.optional,
       transactionDateMonth: parseIntOrNull(filter.transactionDateMonth),
       transactionDateYear: parseIntOrNull(filter.transactionDateYear),
+      userId: userId, // Add userId to the request
     };
 
-    console.log('Sending POST request with body:', requestBody);
+    console.log('Final request body sent to API:', JSON.stringify(requestBody, null, 2));
 
     // Use POST method with explicit headers and body
     const response = await api.post('/reports/ynab-splits', requestBody, {
@@ -243,6 +273,7 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       },
     });
     console.log('Raw response from API:', response);
+    console.log('Response data:', JSON.stringify(response.data, null, 2));
 
     if (!response.data) {
       console.log('API returned null or undefined');

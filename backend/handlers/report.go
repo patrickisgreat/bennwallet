@@ -137,12 +137,32 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 	if request.PayTo != "" {
 		query += " AND payTo LIKE ?"
 		args = append(args, "%"+request.PayTo+"%")
-		log.Printf("Added PayTo filter: %s", request.PayTo)
+		log.Printf("Added PayTo LIKE filter: '%s' (as %%%s%%)", request.PayTo, request.PayTo)
+
+		// Debug: Check if any rows actually match this condition
+		var matchCount int
+		countQuery := "SELECT COUNT(*) FROM transactions WHERE payTo LIKE ?"
+		err := database.DB.QueryRow(countQuery, "%"+request.PayTo+"%").Scan(&matchCount)
+		if err != nil {
+			log.Printf("Error checking PayTo match count: %v", err)
+		} else {
+			log.Printf("PayTo filter would match %d transactions", matchCount)
+		}
 	}
 	if request.EnteredBy != "" {
 		query += " AND enteredBy LIKE ?"
 		args = append(args, "%"+request.EnteredBy+"%")
-		log.Printf("Added EnteredBy filter: %s", request.EnteredBy)
+		log.Printf("Added EnteredBy LIKE filter: '%s' (as %%%s%%)", request.EnteredBy, request.EnteredBy)
+
+		// Debug: Check if any rows actually match this condition
+		var matchCount int
+		countQuery := "SELECT COUNT(*) FROM transactions WHERE enteredBy LIKE ?"
+		err := database.DB.QueryRow(countQuery, "%"+request.EnteredBy+"%").Scan(&matchCount)
+		if err != nil {
+			log.Printf("Error checking EnteredBy match count: %v", err)
+		} else {
+			log.Printf("EnteredBy filter would match %d transactions", matchCount)
+		}
 	}
 
 	// Handle paid filter (default to true if not specified)
