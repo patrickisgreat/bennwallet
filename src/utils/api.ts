@@ -1,4 +1,4 @@
-import axios, { InternalAxiosRequestConfig } from 'axios';
+import axios, { InternalAxiosRequestConfig, AxiosError } from 'axios';
 import { Transaction } from '../types/transaction';
 import { auth } from '../firebase/firebase';
 
@@ -151,13 +151,15 @@ export async function deleteTransaction(id: string): Promise<boolean> {
 }
 
 export interface ReportFilter {
-  startDate?: string;
-  endDate?: string;
+  startDate: string;
+  endDate: string;
   category?: string;
   payTo?: string;
   enteredBy?: string;
   paid?: boolean;
   optional?: boolean;
+  transactionDateMonth?: number;
+  transactionDateYear?: number;
 }
 
 export interface CategoryTotal {
@@ -212,6 +214,13 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       }
     };
 
+    // Convert month and year to integers or null
+    const parseIntOrNull = (value: string | number | undefined | null): number | null => {
+      if (value === '' || value === undefined || value === null) return null;
+      const parsed = parseInt(String(value), 10);
+      return isNaN(parsed) ? null : parsed;
+    };
+
     // Send request to the API
     const requestBody = {
       startDate: formatDate(filter.startDate),
@@ -220,6 +229,9 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
       payTo: filter.payTo || null,
       enteredBy: filter.enteredBy || null,
       paid: filter.paid,
+      optional: filter.optional,
+      transactionDateMonth: parseIntOrNull(filter.transactionDateMonth),
+      transactionDateYear: parseIntOrNull(filter.transactionDateYear),
     };
 
     console.log('Sending POST request with body:', requestBody);
@@ -308,5 +320,103 @@ export async function syncYNABCategories(): Promise<boolean> {
   } catch (error) {
     console.error('Error syncing YNAB categories:', error);
     return false;
+  }
+}
+
+export interface UniqueTransactionFields {
+  payTo: string[];
+  enteredBy: string[];
+}
+
+export async function fetchUniqueTransactionFields(): Promise<UniqueTransactionFields> {
+  try {
+    console.log('API base URL:', api.defaults.baseURL);
+    const url = '/transactions/unique-fields';
+    console.log('Fetching unique fields from:', url);
+    const response = await api.get(url);
+    console.log('Unique fields response:', response.data);
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    console.error('Error fetching unique transaction fields:', axiosError);
+    if (axiosError.response) {
+      console.error('Response status:', axiosError.response.status);
+      console.error('Response data:', axiosError.response.data);
+    }
+    return { payTo: [], enteredBy: [] };
+  }
+}
+
+export interface YNABCategory {
+  id: string;
+  name: string;
+  categoryGroupID: string;
+  categoryGroupName: string;
+}
+
+export interface CategoryGroup {
+  id: string;
+  name: string;
+  categories: YNABCategory[];
+}
+
+export async function fetchYNABCategories(): Promise<CategoryGroup[]> {
+  console.log('📋 BEGIN fetchYNABCategories');
+  try {
+    const userId = localStorage.getItem('userId');
+    console.log('📋 User ID from localStorage:', userId);
+
+    if (!userId) {
+      console.warn('📋 No userId found in localStorage - user may not be fully authenticated');
+      return [];
+    }
+
+    const url = `/ynab/categories?userId=${userId}`;
+    console.log('📋 Fetching categories from URL:', url);
+    console.log('📋 API base URL:', api.defaults.baseURL);
+
+    console.log(
+      '📋 Making request with headers:',
+      JSON.stringify({
+        Authorization: 'Bearer ***', // Not showing actual token for security
+      })
+    );
+
+    try {
+      const response = await api.get(url);
+      console.log('📋 Categories response status:', response.status);
+      console.log('📋 Raw categories response:', response);
+      console.log('📋 Categories data type:', typeof response.data);
+      console.log('📋 Categories data is array?', Array.isArray(response.data));
+      console.log(
+        '📋 Categories data length:',
+        Array.isArray(response.data) ? response.data.length : 'N/A'
+      );
+
+      // Log first item if exists, for debugging
+      if (Array.isArray(response.data) && response.data.length > 0) {
+        console.log('📋 First category group sample:', JSON.stringify(response.data[0]));
+      }
+
+      if (!response.data || !Array.isArray(response.data)) {
+        console.warn('📋 Invalid or empty YNAB categories response');
+        return [];
+      }
+
+      console.log('📋 END fetchYNABCategories - Success');
+      return response.data;
+    } catch (error: unknown) {
+      const requestError = error as AxiosError;
+      console.error('📋 Request error details:', requestError);
+      if (requestError.response) {
+        console.error('📋 Response status:', requestError.response.status);
+        console.error('📋 Response data:', requestError.response.data);
+      }
+      throw error;
+    }
+  } catch (error) {
+    console.error('📋 Error fetching YNAB categories:', error);
+    console.error('📋 END fetchYNABCategories - Failed');
+    return [];
   }
 }

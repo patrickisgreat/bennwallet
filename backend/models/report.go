@@ -9,6 +9,9 @@ type ReportFilter struct {
 	Paid      *bool  `json:"paid,omitempty"`
 	Optional  *bool  `json:"optional,omitempty"`
 	UserId    string `json:"userId,omitempty"`
+	// New fields for transaction date filtering
+	TransactionDateMonth *int `json:"transactionDateMonth,omitempty"` // 1-12 for month
+	TransactionDateYear  *int `json:"transactionDateYear,omitempty"`  // Full year (e.g., 2024)
 }
 
 type CategoryTotal struct {
