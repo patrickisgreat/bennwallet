@@ -1,3 +1,16 @@
+## [1.2.1](https://github.com/patrickisgreat/bennwallet/compare/v1.2.0...v1.2.1) (2025-05-04)
+
+### Bug Fixes
+
+* blomp ([2b8f6ac](https://github.com/patrickisgreat/bennwallet/commit/2b8f6ac99c032396ed45afcee08c966edeceecf8))
+* bloop ([65c80e6](https://github.com/patrickisgreat/bennwallet/commit/65c80e64ebdfd4637089a543fe95a1cabfdcb2d1))
+* deployments ([6e29197](https://github.com/patrickisgreat/bennwallet/commit/6e291972d57d1c4cbc4434548dcdf96505c7e708))
+* hpoeful ([22ce951](https://github.com/patrickisgreat/bennwallet/commit/22ce951d9f8a27fdc495a8b69ad4363787b15e61))
+* json handling in workflows ([fdea671](https://github.com/patrickisgreat/bennwallet/commit/fdea67176c3975d330a8f5ad0277f00610bb56ca))
+* logging etc ([fa4f9a2](https://github.com/patrickisgreat/bennwallet/commit/fa4f9a2ba9979b965b3540970fabb79a7c6b44ee))
+* service account refs ([8258775](https://github.com/patrickisgreat/bennwallet/commit/8258775233640967a4fec00c6dc502212a2fce06))
+* some errors in prod ([e3c371c](https://github.com/patrickisgreat/bennwallet/commit/e3c371c44f20c841893f595cb6cb9314e1df06b1))
+
 ## [1.2.0](https://github.com/patrickisgreat/bennwallet/compare/v1.1.1...v1.2.0) (2025-05-03)
 
 ### Features
