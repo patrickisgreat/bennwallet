@@ -2,10 +2,27 @@ package middleware
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	firebase "firebase.google.com/go/v4"
+	"firebase.google.com/go/v4/auth"
+	"google.golang.org/api/option"
+)
+
+// Define the function variables that will be mocked
+var (
+	firebaseInitApp = func(ctx context.Context, config *firebase.Config, opts ...option.ClientOption) (*firebase.App, error) {
+		return nil, fmt.Errorf("default mock - should be overridden in tests")
+	}
+
+	firebaseGetAuth = func(app *firebase.App, ctx context.Context) (*auth.Client, error) {
+		return nil, fmt.Errorf("default mock - should be overridden in tests")
+	}
 )
 
 // mockFirebaseAuth is a simple type that allows us to set firebaseAuth to a non-nil value
@@ -214,5 +231,237 @@ func TestInitializeFirebase_WithPlaceholderFile(t *testing.T) {
 	// Check that Firebase is in dev mode (firebaseAuth is nil)
 	if firebaseAuth != nil {
 		t.Error("Expected firebaseAuth to be nil with placeholder file")
+	}
+}
+
+func TestInitializeFirebase_WithJSONEnv(t *testing.T) {
+	// Save original env vars and restore afterwards
+	originalJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	originalBase64 := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64")
+	originalRaw := os.Getenv("FIREBASE_SERVICE_ACCOUNT")
+	defer func() {
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", originalJSON)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", originalBase64)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT", originalRaw)
+	}()
+
+	// Clear other env vars first to ensure they're not used
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", "")
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT", "")
+
+	// Save the original firebaseAuth value and mock functions
+	originalAuth := firebaseAuth
+	originalInitApp := firebaseInitApp
+	originalGetAuth := firebaseGetAuth
+	defer func() {
+		firebaseAuth = originalAuth
+		firebaseInitApp = originalInitApp
+		firebaseGetAuth = originalGetAuth
+	}()
+
+	// Make sure firebaseAuth is nil before the test
+	firebaseAuth = nil
+
+	// Mock the Firebase functions - must be done before setting the environment variable
+	firebaseInitApp = func(ctx context.Context, config *firebase.Config, opts ...option.ClientOption) (*firebase.App, error) {
+		return &firebase.App{}, nil
+	}
+
+	firebaseGetAuth = func(app *firebase.App, ctx context.Context) (*auth.Client, error) {
+		return &auth.Client{}, nil
+	}
+
+	// Create a simpler valid JSON without a complex private key
+	validJSON := `{
+		"type": "service_account",
+		"project_id": "test-project",
+		"private_key_id": "test-key-id",
+		"client_email": "firebase-adminsdk-test@test-project.iam.gserviceaccount.com"
+	}`
+
+	// Set the env var for testing
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", validJSON)
+
+	// Test the initialization
+	err := InitializeFirebase()
+	if err != nil {
+		t.Errorf("InitializeFirebase with JSON env failed: %v", err)
+	}
+
+	// Verify global auth client was set
+	if firebaseAuth == nil {
+		t.Error("Firebase auth client was not initialized")
+	}
+}
+
+func TestInitializeFirebase_WithBase64Env(t *testing.T) {
+	// Save original env var and restore afterwards
+	originalValue := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64")
+	defer os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", originalValue)
+
+	// Create a sample JSON and encode it to base64
+	validJSON := `{"type":"service_account","project_id":"test-project"}`
+	encoded := base64.StdEncoding.EncodeToString([]byte(validJSON))
+
+	// Set the env var for testing
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", encoded)
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", "") // Clear this to ensure it's not used
+
+	// Mock firebase initialization
+	originalInitApp := firebaseInitApp
+	originalGetAuth := firebaseGetAuth
+	defer func() {
+		firebaseInitApp = originalInitApp
+		firebaseGetAuth = originalGetAuth
+	}()
+
+	firebaseInitApp = func(ctx context.Context, config *firebase.Config, opts ...option.ClientOption) (*firebase.App, error) {
+		return &firebase.App{}, nil
+	}
+
+	firebaseGetAuth = func(app *firebase.App, ctx context.Context) (*auth.Client, error) {
+		return &auth.Client{}, nil
+	}
+
+	// Test the initialization
+	err := InitializeFirebase()
+	if err != nil {
+		t.Errorf("InitializeFirebase with Base64 env failed: %v", err)
+	}
+
+	// Verify global auth client was set
+	if firebaseAuth == nil {
+		t.Error("Firebase auth client was not initialized with Base64 credentials")
+	}
+}
+
+func TestInitializeFirebase_WithRawJSONEnv(t *testing.T) {
+	// Save original env vars and restore afterwards
+	originalJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	originalBase64 := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64")
+	originalRaw := os.Getenv("FIREBASE_SERVICE_ACCOUNT")
+	defer func() {
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", originalJSON)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", originalBase64)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT", originalRaw)
+	}()
+
+	// Clear other env vars to ensure they're not used
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", "")
+
+	// Set the env var for testing
+	validJSON := `{"type":"service_account","project_id":"test-project"}`
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT", validJSON)
+
+	// Mock firebase initialization
+	originalInitApp := firebaseInitApp
+	originalGetAuth := firebaseGetAuth
+	defer func() {
+		firebaseInitApp = originalInitApp
+		firebaseGetAuth = originalGetAuth
+	}()
+
+	firebaseInitApp = func(ctx context.Context, config *firebase.Config, opts ...option.ClientOption) (*firebase.App, error) {
+		return &firebase.App{}, nil
+	}
+
+	firebaseGetAuth = func(app *firebase.App, ctx context.Context) (*auth.Client, error) {
+		return &auth.Client{}, nil
+	}
+
+	// Test the initialization
+	err := InitializeFirebase()
+	if err != nil {
+		t.Errorf("InitializeFirebase with raw JSON env failed: %v", err)
+	}
+
+	// Verify global auth client was set
+	if firebaseAuth == nil {
+		t.Error("Firebase auth client was not initialized with raw JSON credentials")
+	}
+}
+
+func TestInitializeFirebase_WithInvalidJSONEnv(t *testing.T) {
+	// Save original env vars and restore afterwards
+	originalJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	originalBase64 := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64")
+	originalRaw := os.Getenv("FIREBASE_SERVICE_ACCOUNT")
+	defer func() {
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", originalJSON)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", originalBase64)
+		os.Setenv("FIREBASE_SERVICE_ACCOUNT", originalRaw)
+	}()
+
+	// Clear ALL env vars to ensure they're not used
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_BASE64", "")
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT", "")
+
+	// Set an invalid JSON string
+	os.Setenv("FIREBASE_SERVICE_ACCOUNT_JSON", "this is not valid JSON")
+
+	// Mock firebase initialization with a function that returns an error
+	originalInitApp := firebaseInitApp
+	originalGetAuth := firebaseGetAuth
+	defer func() {
+		firebaseInitApp = originalInitApp
+		firebaseGetAuth = originalGetAuth
+	}()
+
+	firebaseInitApp = func(ctx context.Context, config *firebase.Config, opts ...option.ClientOption) (*firebase.App, error) {
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
+	// Save the original firebaseAuth value
+	originalAuth := firebaseAuth
+	defer func() {
+		firebaseAuth = originalAuth
+	}()
+
+	// Make sure firebaseAuth is nil before the test
+	firebaseAuth = nil
+
+	// Test the initialization with invalid JSON
+	err := InitializeFirebase()
+	if err == nil {
+		t.Error("InitializeFirebase should have failed with invalid JSON")
+	}
+}
+
+func TestAuthMiddleware_NoFirebaseAuth(t *testing.T) {
+	// Save and clear the firebase auth client
+	savedAuth := firebaseAuth
+	firebaseAuth = nil
+	defer func() {
+		firebaseAuth = savedAuth
+	}()
+
+	// Setup test HTTP server
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID := GetUserIDFromContext(r)
+		if userID != "admin-user-1" {
+			t.Errorf("Expected user ID admin-user-1, got %s", userID)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Apply middleware
+	middleware := AuthMiddleware(handler)
+
+	// Create test request
+	req, err := http.NewRequest("GET", "/test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create response recorder
+	rr := httptest.NewRecorder()
+
+	// Serve the request
+	middleware.ServeHTTP(rr, req)
+
+	// Check status code
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("Handler returned wrong status code: got %v, want %v", status, http.StatusOK)
 	}
 }

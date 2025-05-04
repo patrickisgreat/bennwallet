@@ -1,0 +1,84 @@
+name: Setup Database Backups
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/setup-backups.yml'
+    branches:
+      - main
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+jobs:
+  setup-backups:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create backup script
+        run: |
+          cat > backup.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          # Configuration
+          BACKUP_DIR="/data/backups"
+          DB_FILE="/data/bennwallet.db"  # Adjust this path to your actual database location
+          TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+          BACKUP_FILE="${BACKUP_DIR}/${TIMESTAMP}_bennwallet.db"
+          MAX_BACKUPS=7  # Keep a week of backups
+
+          # Ensure backup directory exists
+          mkdir -p $BACKUP_DIR
+
+          # Create the backup using sqlite3 with write-ahead log mode enabled
+          echo "Creating backup of ${DB_FILE} to ${BACKUP_FILE}..."
+          sqlite3 $DB_FILE "PRAGMA wal_checkpoint(FULL);"
+          sqlite3 $DB_FILE ".backup '${BACKUP_FILE}'"
+
+          # Compress the backup
+          echo "Compressing backup..."
+          gzip -f $BACKUP_FILE
+
+          # Cleanup old backups
+          echo "Cleaning up old backups, keeping latest ${MAX_BACKUPS}..."
+          ls -tp $BACKUP_DIR/*_bennwallet.db.gz | grep -v '/$' | tail -n +$((MAX_BACKUPS+1)) | xargs -I {} rm -- {} || true
+
+          echo "Backup completed: ${BACKUP_FILE}.gz"
+          EOF
+
+          chmod +x backup.sh
+
+      - name: Set up Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Install backup script on production app
+        run: |
+          flyctl ssh sftp shell -a bennwallet-prod << 'ENDSSH'
+          mkdir -p /data/scripts
+          put backup.sh /data/scripts/
+          chmod +x /data/scripts/backup.sh
+          ENDSSH
+
+      - name: Install sqlite3 in production app
+        run: |
+          flyctl ssh console -a bennwallet-prod -- bash -c "apt-get update && apt-get install -y sqlite3"
+
+      - name: Set up daily cron backup job
+        run: |
+          # Create a simple cron file that runs the backup script daily at 3 AM UTC
+          echo "0 3 * * * /data/scripts/backup.sh >> /data/backups/backup.log 2>&1" > crontab.txt
+
+          # Copy crontab file to the server
+          flyctl ssh sftp shell -a bennwallet-prod << 'ENDSSH'
+          put crontab.txt /tmp/crontab.txt
+          ENDSSH
+
+          # Install the crontab
+          flyctl ssh console -a bennwallet-prod -- bash -c "crontab /tmp/crontab.txt && echo 'Cron job installed'"
+
+      - name: Verify setup
+        run: |
+          flyctl ssh console -a bennwallet-prod -- bash -c "crontab -l && echo 'Cron is set up correctly'"
