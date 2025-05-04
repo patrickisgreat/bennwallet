@@ -84,6 +84,7 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 				(name = 'Patrick' OR name = 'Sarah' OR 
 				 username = 'patrick' OR username = 'sarah' OR
 				 id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+				 id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
 				 username = 'sarah.elizabeth.wallis@gmail.com')
 			)
 		`, userID).Scan(&isApprovedUser)
@@ -104,6 +105,7 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 					WHERE name = 'Patrick' OR name = 'Sarah' OR 
 						  username = 'patrick' OR username = 'sarah' OR
 						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+						  id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
 						  username = 'sarah.elizabeth.wallis@gmail.com'
 				)
 			)`
@@ -259,6 +261,7 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 				(name = 'Patrick' OR name = 'Sarah' OR 
 				 username = 'patrick' OR username = 'sarah' OR
 				 id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+				 id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
 				 username = 'sarah.elizabeth.wallis@gmail.com')
 			)
 		`, userID).Scan(&isApprovedUser)
@@ -279,6 +282,7 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 					WHERE name = 'Patrick' OR name = 'Sarah' OR 
 						  username = 'patrick' OR username = 'sarah' OR
 						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
+						  id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
 						  username = 'sarah.elizabeth.wallis@gmail.com'
 				)
 			)`
