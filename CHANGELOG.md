@@ -1,3 +1,9 @@
+## [1.2.7](https://github.com/patrickisgreat/bennwallet/compare/v1.2.6...v1.2.7) (2025-05-04)
+
+### Bug Fixes
+
+* transactions permissions ([75b6f7b](https://github.com/patrickisgreat/bennwallet/commit/75b6f7b46adc9febf982c2202e50c5a07eaf7d72))
+
 ## [1.2.6](https://github.com/patrickisgreat/bennwallet/compare/v1.2.5...v1.2.6) (2025-05-04)
 
 ### Bug Fixes
