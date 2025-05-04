@@ -32,10 +32,18 @@ func NewServer(db *sql.DB) *Server {
 func (s *Server) RegisterRoutes() {
 	// ... existing routes ...
 
+	// Add a route for linking Firebase UID with username
+	s.router.HandleFunc("/users/link-firebase", s.LinkFirebaseUser).Methods("POST")
+
 	// YNAB configuration endpoints
 	s.router.HandleFunc("/ynab/config", s.authenticate(s.GetYNABConfig)).Methods("GET")
 	s.router.HandleFunc("/ynab/config", s.authenticate(s.UpdateYNABConfig)).Methods("PUT")
 	s.router.HandleFunc("/ynab/sync/categories", s.authenticate(s.SyncYNABCategories)).Methods("POST")
+}
+
+// LinkFirebaseUser handles POST /users/link-firebase
+func (s *Server) LinkFirebaseUser(w http.ResponseWriter, r *http.Request) {
+	handlers.CreateOrUpdateFirebaseUser(w, r)
 }
 
 // GetYNABConfig handles GET /ynab/config

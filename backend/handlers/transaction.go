@@ -75,8 +75,13 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 
 	// Add user ID filter if the column exists
 	if hasUserIdColumn {
-		query += " AND (userId = ? OR userId IS NULL)"
-		args = append(args, userID)
+		// For maximum compatibility, we will show:
+		// 1. Transactions with the user's ID (Firebase UID)
+		// 2. Transactions with NULL userId (legacy/shared transactions)
+		// 3. All shared transactions (where enteredBy is not the current user)
+		query += " AND (userId = ? OR userId IS NULL OR enteredBy != ?)"
+		args = append(args, userID, userID)
+		log.Printf("Fetching transactions for user %s with shared access", userID)
 	}
 
 	// Parse query parameters
@@ -286,6 +291,11 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 
 	// Set the user ID from the authentication context
 	t.UserID = userID
+
+	// If EnteredBy is not explicitly provided, use the user ID
+	if t.EnteredBy == "" {
+		t.EnteredBy = userID
+	}
 
 	// Check if the optional column exists
 	var hasOptionalColumn bool
