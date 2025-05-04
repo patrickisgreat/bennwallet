@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   GO_VERSION: '1.24'
@@ -140,6 +141,21 @@ jobs:
       - name: Set up Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: Set Firebase credentials in Fly.io
+        run: |
+          echo "Setting Firebase credentials in Fly.io secrets..."
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > /tmp/firebase-credentials.json
+          if command -v jq &> /dev/null; then
+            cat /tmp/firebase-credentials.json | jq . > /tmp/formatted-credentials.json
+            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/formatted-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
+            rm /tmp/formatted-credentials.json
+          else
+            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
+          fi
+          rm /tmp/firebase-credentials.json
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
       - name: Check if prod app exists
         id: check-app
         continue-on-error: true
@@ -213,4 +229,5 @@ jobs:
       - name: Deploy to Fly.io Production
         run: flyctl deploy --remote-only --app ${{ env.FLY_PROD_APP_NAME }}
         env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           NODE_ENV: production
