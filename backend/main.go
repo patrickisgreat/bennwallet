@@ -184,4 +184,26 @@ func registerRoutes(r *mux.Router) {
 	protectedRouter.HandleFunc("/ynab/config", handlers.GetYNABConfig).Methods("GET")
 	protectedRouter.HandleFunc("/ynab/config", handlers.UpdateYNABConfig).Methods("PUT")
 	protectedRouter.HandleFunc("/ynab/sync/categories", handlers.SyncYNABCategories).Methods("POST")
+
+	// Permission management routes
+	protectedRouter.HandleFunc("/permissions", handlers.GetUserPermissions).Methods("GET")
+	protectedRouter.HandleFunc("/permissions", handlers.GrantPermission).Methods("POST")
+	protectedRouter.HandleFunc("/permissions", handlers.RevokePermission).Methods("DELETE")
+	protectedRouter.HandleFunc("/roles", handlers.SetUserRole).Methods("POST")
+	protectedRouter.HandleFunc("/roles/{userId}", handlers.GetUserRole).Methods("GET")
+
+	// Saved filters routes
+	protectedRouter.HandleFunc("/filters", handlers.GetSavedFilters).Methods("GET")
+	protectedRouter.HandleFunc("/filters", handlers.CreateSavedFilter).Methods("POST")
+	protectedRouter.HandleFunc("/filters/{id}", handlers.GetSavedFilter).Methods("GET")
+	protectedRouter.HandleFunc("/filters/{id}", handlers.UpdateSavedFilter).Methods("PUT")
+	protectedRouter.HandleFunc("/filters/{id}", handlers.DeleteSavedFilter).Methods("DELETE")
+
+	// Custom reports routes
+	protectedRouter.HandleFunc("/reports/custom", handlers.GetCustomReports).Methods("GET")
+	protectedRouter.HandleFunc("/reports/custom", handlers.CreateCustomReport).Methods("POST")
+	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.GetCustomReport).Methods("GET")
+	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.UpdateCustomReport).Methods("PUT")
+	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.DeleteCustomReport).Methods("DELETE")
+	protectedRouter.HandleFunc("/reports/custom/{id}/run", handlers.RunCustomReport).Methods("POST")
 }

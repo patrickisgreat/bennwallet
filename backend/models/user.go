@@ -28,6 +28,3 @@ type Permission struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	ExpiresAt      time.Time `json:"expiresAt,omitempty"` // Optional expiration date
 }
-
-// ResourceCategories is a resource type not defined in constants.go
-const ResourceCategories = "categories"
