@@ -1,3 +1,14 @@
+## [1.3.0](https://github.com/patrickisgreat/bennwallet/compare/v1.2.9...v1.3.0) (2025-05-06)
+
+### Features
+
+* implements roles and permissions with admin panel ([e7ffebb](https://github.com/patrickisgreat/bennwallet/commit/e7ffebbc1999c1f47eba701f6f5f91dd1ec3e430))
+
+### Bug Fixes
+
+* maybe ([5e332a7](https://github.com/patrickisgreat/bennwallet/commit/5e332a78fd069b3129df4fb9770bdd87164b1d62))
+* **reports:** add detailed diagnostic logging for transaction filter issues ([ebbc41b](https://github.com/patrickisgreat/bennwallet/commit/ebbc41b5c8157b7310c31f6864b5ba8194dc1bbd))
+
 ## [1.2.9](https://github.com/patrickisgreat/bennwallet/compare/v1.2.8...v1.2.9) (2025-05-04)
 
 ### Bug Fixes
