@@ -17,6 +17,23 @@ import (
 )
 
 func main() {
+	// Check if we're running in reset mode
+	resetDb := os.Getenv("RESET_DB") == "true"
+	isPR := os.Getenv("PR_DEPLOYMENT") == "true"
+	isDevEnv := os.Getenv("APP_ENV") == "development"
+
+	if resetDb {
+		log.Println("Running in database reset mode")
+	}
+
+	if isPR {
+		log.Println("Running in PR deployment mode")
+	}
+
+	if isDevEnv {
+		log.Println("Running in development environment")
+	}
+
 	// Initialize encryption
 	encryptionKey := os.Getenv("ENCRYPTION_KEY")
 	if encryptionKey == "" {
@@ -36,6 +53,12 @@ func main() {
 	err = database.SeedDefaultUsers()
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// If running in reset mode, exit after database setup is complete
+	if resetDb {
+		log.Println("Database reset and seeded successfully. Exiting.")
+		return
 	}
 
 	// Load environment variables but don't do any database operations
