@@ -77,6 +77,7 @@ function TransactionsPage() {
   useEffect(() => {
     loadTransactions();
     loadUniqueFields();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

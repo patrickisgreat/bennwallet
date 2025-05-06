@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Transaction } from '../types/transaction';
-import { Category } from '../types/category';
 import { v4 as uuidv4 } from 'uuid';
 import { useUser } from '../context/UserContext';
-import { api, createTransaction } from '../utils/api';
+import { createTransaction } from '../utils/api';
 import HierarchicalCategorySelector from './HierarchicalCategorySelector';
 
 interface AddTransactionFormProps {
@@ -20,7 +19,7 @@ function AddTransactionForm({
   cancelEdit,
 }: AddTransactionFormProps) {
   const { currentUser } = useUser();
-  
+
   // Set default payTo based on current user
   const [payTo, setPayTo] = useState<'Sarah' | 'Patrick'>(
     currentUser?.name === 'Patrick' ? 'Patrick' : 'Sarah'
@@ -29,14 +28,34 @@ function AddTransactionForm({
   const [note, setNote] = useState('');
   const [category, setCategory] = useState('');
   const [optional, setOptional] = useState(false);
-  const [transactionDate, setTransactionDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [transactionDate, setTransactionDate] = useState<string>(
+    new Date().toISOString().split('T')[0]
+  );
   const [submitting, setSubmitting] = useState(false);
+
+  // First define the resetForm function before it's used
+  const resetForm = () => {
+    // Set payTo to current user's name when resetting the form
+    setPayTo(currentUser?.name === 'Patrick' ? 'Patrick' : 'Sarah');
+    setAmount('0.00');
+    setNote('');
+    setCategory('');
+    setOptional(false);
+    setTransactionDate(new Date().toISOString().split('T')[0]);
+  };
+
+  // Define loadCategories function before it's used
+  const loadCategories = async () => {
+    // Function is now empty but left in place to avoid breaking dependencies
+    // We no longer need this function since we're using the hierarchical selector
+    // that loads its own data
+  };
 
   useEffect(() => {
     if (currentUser) {
       loadCategories();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
   // Update payTo when currentUser changes
@@ -46,11 +65,6 @@ function AddTransactionForm({
       setPayTo(currentUser.name === 'Patrick' ? 'Patrick' : 'Sarah');
     }
   }, [currentUser, editingTransaction]);
-
-  const loadCategories = async () => {
-    // We no longer need this function since we're using the hierarchical selector
-    // that loads its own data
-  };
 
   useEffect(() => {
     if (editingTransaction) {
@@ -63,17 +77,8 @@ function AddTransactionForm({
     } else {
       resetForm();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingTransaction]);
-
-  const resetForm = () => {
-    // Set payTo to current user's name when resetting the form
-    setPayTo(currentUser?.name === 'Patrick' ? 'Patrick' : 'Sarah');
-    setAmount('0.00');
-    setNote('');
-    setCategory('');
-    setOptional(false);
-    setTransactionDate(new Date().toISOString().split('T')[0]);
-  };
 
   // Handle amount input change
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -87,15 +92,15 @@ function AddTransactionForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || submitting) return;
-    
+
     const parsedAmount = parseFloat(amount);
-    
+
     // Validate amount
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       alert('Please enter a valid amount');
       return;
     }
-    
+
     // Validate category
     if (!category) {
       alert('Please select a category');
@@ -109,7 +114,7 @@ function AddTransactionForm({
     }
 
     setSubmitting(true);
-    
+
     try {
       if (editingTransaction) {
         onEditSubmit(editingTransaction.id, {
@@ -118,7 +123,7 @@ function AddTransactionForm({
           note,
           category,
           optional,
-          transactionDate: new Date(transactionDate + 'T00:00:00').toISOString()
+          transactionDate: new Date(transactionDate + 'T00:00:00').toISOString(),
         });
       } else {
         const now = new Date();
@@ -132,12 +137,12 @@ function AddTransactionForm({
           category,
           paid: false,
           enteredBy: currentUser.name,
-          optional
+          optional,
         };
-        
+
         // First save to backend
         const success = await createTransaction(newTransaction);
-        
+
         if (success) {
           // Then update UI
           onAdd(newTransaction);
@@ -165,7 +170,7 @@ function AddTransactionForm({
           <label className="block text-sm font-medium text-gray-700 mb-1">Pay To</label>
           <select
             value={payTo}
-            onChange={(e) => setPayTo(e.target.value as 'Sarah' | 'Patrick')}
+            onChange={e => setPayTo(e.target.value as 'Sarah' | 'Patrick')}
             className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
           >
             <option value="Sarah">Sarah</option>
@@ -199,7 +204,7 @@ function AddTransactionForm({
           <input
             type="date"
             value={transactionDate}
-            onChange={(e) => setTransactionDate(e.target.value)}
+            onChange={e => setTransactionDate(e.target.value)}
             className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
             required
           />
@@ -217,7 +222,7 @@ function AddTransactionForm({
           <input
             type="text"
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={e => setNote(e.target.value)}
             className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
           />
         </div>
@@ -226,7 +231,7 @@ function AddTransactionForm({
             <input
               type="checkbox"
               checked={optional}
-              onChange={(e) => setOptional(e.target.checked)}
+              onChange={e => setOptional(e.target.checked)}
               className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2"
             />
             Mark as Optional Transaction
