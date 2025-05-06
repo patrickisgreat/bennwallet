@@ -1,0 +1,43 @@
+############################################
+# Fly.io configuration for PR-23
+############################################
+app            = "bennwallet-pr-23"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "development"
+  APP_ENV = "development"
+  PR_DEPLOYMENT = "true"
+  RESET_DB = "true"
+  PR_NUMBER = "23"
+
+[http_service]
+  internal_port        = 8080
+  force_https          = true
+  auto_start_machines  = true
+  auto_stop_machines   = true
+  min_machines_running = 0
+  processes            = ["app"]
+
+  [[http_service.checks]]
+    method        = "GET"
+    path          = "/health"
+    protocol      = "http"
+    interval      = "30s"
+    timeout       = "5s"
+    grace_period  = "10s"
+
+[[statics]]
+  guest_path = "/app/dist"
+  url_prefix = "/"
+
+[[mounts]]
+  source      = "bennwalletpr23_data"
+  destination = "/data"
+
+  [mounts.options]
+    size = "1"

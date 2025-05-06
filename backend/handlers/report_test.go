@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -10,8 +11,12 @@ import (
 	"time"
 
 	"bennwallet/backend/database"
+	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
 )
+
+// Define a constant for the test user ID
+const testUserID = "test-user-id"
 
 func setupReportTestDB() {
 	// Create a test database connection
@@ -20,6 +25,47 @@ func setupReportTestDB() {
 		panic(err)
 	}
 	database.DB = db
+
+	// Create users table first for foreign key support
+	_, err = db.Exec(`
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			username TEXT,
+			name TEXT,
+			status TEXT,
+			isAdmin BOOLEAN DEFAULT 0,
+			role TEXT DEFAULT 'user'
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+
+	// Insert test user
+	_, err = db.Exec(`
+		INSERT INTO users (id, username, name, isAdmin, role)
+		VALUES (?, ?, ?, ?, ?)
+	`, testUserID, "testuser", "Test User", true, "admin")
+	if err != nil {
+		panic(err)
+	}
+
+	// Create permissions table
+	_, err = db.Exec(`
+		CREATE TABLE permissions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			granted_user_id TEXT NOT NULL,
+			owner_user_id TEXT NOT NULL,
+			resource_type TEXT NOT NULL,
+			permission_type TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			expires_at TIMESTAMP,
+			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
 
 	// Create transactions table
 	_, err = db.Exec(`
@@ -66,23 +112,24 @@ func insertTestTransactions() {
 		paid        bool
 		enteredBy   string
 		optional    bool
+		userId      string
 	}{
-		{"tx1", 100.00, "Groceries 1", startDate, "Food", "Sarah", true, "Patrick", false},
-		{"tx2", 50.00, "Restaurant", midDate, "Food", "Patrick", true, "Sarah", false},
-		{"tx3", 200.00, "Rent", endDate, "Housing", "Sarah", true, "Sarah", false},
-		{"tx4", 75.00, "Groceries 2", midDate, "Food", "Sarah", true, "Patrick", false},
-		{"tx5", 150.00, "Utilities", midDate, "Housing", "Patrick", true, "Patrick", false},
-		{"tx6", 60.00, "Entertainment", endDate, "Fun", "Sarah", true, "Sarah", false},
-		{"tx7", 30.00, "Optional Expense", midDate, "Misc", "Patrick", true, "Sarah", true},
-		{"tx8", 80.00, "Unpaid Bill", midDate, "Bills", "Sarah", false, "Patrick", false},
+		{"tx1", 100.00, "Groceries 1", startDate, "Food", "Sarah", true, "Patrick", false, testUserID},
+		{"tx2", 50.00, "Restaurant", midDate, "Food", "Patrick", true, "Sarah", false, testUserID},
+		{"tx3", 200.00, "Rent", endDate, "Housing", "Sarah", true, "Sarah", false, testUserID},
+		{"tx4", 75.00, "Groceries 2", midDate, "Food", "Sarah", true, "Patrick", false, testUserID},
+		{"tx5", 150.00, "Utilities", midDate, "Housing", "Patrick", true, "Patrick", false, testUserID},
+		{"tx6", 60.00, "Entertainment", endDate, "Fun", "Sarah", true, "Sarah", false, testUserID},
+		{"tx7", 30.00, "Optional Expense", midDate, "Misc", "Patrick", true, "Sarah", true, testUserID},
+		{"tx8", 80.00, "Unpaid Bill", midDate, "Bills", "Sarah", false, "Patrick", false, testUserID},
 	}
 
 	for _, tx := range testTransactions {
 		_, err := database.DB.Exec(`
 			INSERT INTO transactions 
-			(id, amount, description, date, type, payTo, paid, enteredBy, optional)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, tx.id, tx.amount, tx.description, tx.date, tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.optional)
+			(id, amount, description, date, type, payTo, paid, enteredBy, optional, userId)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, tx.id, tx.amount, tx.description, tx.date, tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.optional, tx.userId)
 
 		if err != nil {
 			panic(err)
@@ -172,6 +219,10 @@ func TestGetYNABSplits(t *testing.T) {
 			requestBody, _ := json.Marshal(tc.filter)
 			req := httptest.NewRequest("POST", "/reports/ynab-splits", bytes.NewBuffer(requestBody))
 			req.Header.Set("Content-Type", "application/json")
+
+			// Add authentication context with test user ID
+			ctx := context.WithValue(req.Context(), middleware.UserIDKey, testUserID)
+			req = req.WithContext(ctx)
 
 			// Create response recorder
 			w := httptest.NewRecorder()

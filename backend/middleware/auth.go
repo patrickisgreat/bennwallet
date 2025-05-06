@@ -15,6 +15,12 @@ import (
 	"google.golang.org/api/option"
 )
 
+// Define context keys
+type contextKey string
+
+const UserIDKey contextKey = "user_id"
+const UserRoleKey contextKey = "user_role"
+
 var firebaseAuth *auth.Client
 
 // InitializeFirebase initializes the Firebase Admin SDK
@@ -128,8 +134,8 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			log.Println("Firebase auth not initialized, skipping token verification")
 
 			// In dev mode, default to the first admin user for testing
-			ctx := context.WithValue(r.Context(), "user_id", "admin-user-1")
-			ctx = context.WithValue(ctx, "user_role", "admin")
+			ctx := context.WithValue(r.Context(), UserIDKey, "admin-user-1")
+			ctx = context.WithValue(ctx, UserRoleKey, "admin")
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -161,7 +167,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 					// For backward compatibility, still allow access with just userId
 					// This should be removed after all clients are updated
 					log.Printf("Warning: Request using deprecated userId parameter: %s", userId)
-					ctx := context.WithValue(r.Context(), "user_id", userId)
+					ctx := context.WithValue(r.Context(), UserIDKey, userId)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
@@ -180,7 +186,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Add the user ID to the request context
-		ctx := context.WithValue(r.Context(), "user_id", token.UID)
+		ctx := context.WithValue(r.Context(), UserIDKey, token.UID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -216,7 +222,7 @@ func verifyToken(idToken string) (*auth.Token, error) {
 
 // GetUserIDFromContext retrieves the user ID from the request context
 func GetUserIDFromContext(r *http.Request) string {
-	userID, ok := r.Context().Value("user_id").(string)
+	userID, ok := r.Context().Value(UserIDKey).(string)
 	if !ok {
 		return ""
 	}
