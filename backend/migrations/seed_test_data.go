@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
+	"time"
 )
 
 // SeedTestData seeds test data for development and PR environments
@@ -25,6 +27,63 @@ func SeedTestData(db *sql.DB) error {
 	}
 
 	log.Println("Seeding test data for development/PR environment...")
+
+	// Add retry logic for database locks
+	maxRetries := 5
+	var err error
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			log.Printf("Retry attempt %d/%d after database lock...", attempt, maxRetries)
+			// Wait before retrying, with exponential backoff
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+
+		err = executeSeedDataWithTransaction(db)
+		if err == nil {
+			// Success!
+			log.Println("Test data seeded successfully on attempt", attempt)
+			return nil
+		}
+
+		lastErr = err
+		if strings.Contains(err.Error(), "database is locked") {
+			log.Printf("Database locked on attempt %d, will retry...", attempt)
+			continue
+		} else {
+			// For other errors, don't retry
+			break
+		}
+	}
+
+	return fmt.Errorf("failed to seed test data after %d attempts: %w", maxRetries, lastErr)
+}
+
+// executeSeedDataWithTransaction handles the actual seeding within a transaction
+func executeSeedDataWithTransaction(db *sql.DB) error {
+	// First check if userId column exists in transactions table
+	var userIdColumnExists bool
+	err := db.QueryRow(`
+		SELECT COUNT(*) > 0
+		FROM pragma_table_info('transactions')
+		WHERE name = 'userId'
+	`).Scan(&userIdColumnExists)
+
+	if err != nil {
+		log.Printf("Error checking for userId column: %v", err)
+		return fmt.Errorf("failed to check if userId column exists: %w", err)
+	}
+
+	// If the column doesn't exist, add it
+	if !userIdColumnExists {
+		log.Println("Adding userId column to transactions table...")
+		_, err = db.Exec(`ALTER TABLE transactions ADD COLUMN userId TEXT`)
+		if err != nil {
+			log.Printf("Error adding userId column: %v", err)
+			return fmt.Errorf("failed to add userId column: %w", err)
+		}
+	}
 
 	// Start a transaction for all operations
 	tx, err := db.Begin()
@@ -289,6 +348,5 @@ func SeedTestData(db *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Test data seeded successfully")
 	return nil
 }
