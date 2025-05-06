@@ -60,13 +60,22 @@ COPY --from=frontend /app/dist ./dist
 
 EXPOSE 8080
 ENV PORT=8080
-# Define YNAB API token and IDs as build args with empty defaults
+# Define environment variables with empty defaults
 ARG YNAB_API_TOKEN=""
 ARG YNAB_BUDGET_ID=""
 ARG YNAB_ACCOUNT_ID=""
+ARG APP_ENV=""
+ARG NODE_ENV=""
+ARG RESET_DB=""
+ARG PR_DEPLOYMENT=""
+
 # Pass them through as environment variables
 ENV YNAB_API_TOKEN=$YNAB_API_TOKEN
 ENV YNAB_BUDGET_ID=$YNAB_BUDGET_ID
 ENV YNAB_ACCOUNT_ID=$YNAB_ACCOUNT_ID
+ENV APP_ENV=$APP_ENV
+ENV NODE_ENV=$NODE_ENV
+ENV RESET_DB=$RESET_DB
+ENV PR_DEPLOYMENT=$PR_DEPLOYMENT
 
 CMD ["./bennwallet"]

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 )
 
 // RunMigrations executes all migrations in the correct order
@@ -65,5 +66,22 @@ func RunMigrations(db *sql.DB) error {
 	}
 
 	log.Println("All migrations completed")
+
+	// After all migrations are done, seed test data for dev/PR environments
+	// This is not part of the core migrations, so we don't track it in the migrations table
+	// Check environment variables to see if we should reset/seed data
+	if os.Getenv("RESET_DB") == "true" ||
+		os.Getenv("APP_ENV") == "development" ||
+		os.Getenv("PR_DEPLOYMENT") == "true" {
+
+		// Only run if not in production
+		if os.Getenv("APP_ENV") != "production" && os.Getenv("NODE_ENV") != "production" {
+			log.Println("Non-production environment detected. Running test data seeding...")
+			if err := SeedTestData(db); err != nil {
+				return fmt.Errorf("failed to seed test data: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
