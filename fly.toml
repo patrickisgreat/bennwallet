@@ -1,5 +1,5 @@
 ############################################
-# Fly.io configuration for “bennwallet”
+# Fly.io configuration for "bennwallet"
 ############################################
 app            = "bennwallet"
 primary_region = "sjc"                 # Silicon Valley
@@ -24,7 +24,7 @@ primary_region = "sjc"                 # Silicon Valley
   force_https          = true
   auto_start_machines  = true          # wake VMs on first request
   auto_stop_machines   = true          # suspend when idle
-  min_machines_running = 1             # keep one “warm” instance to avoid 429 loops
+  min_machines_running = 1             # keep one "warm" instance to avoid 429 loops
   processes            = ["app"]       # default process group
 
   [[http_service.checks]]              # simple health-check at /health

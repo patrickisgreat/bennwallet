@@ -17,29 +17,50 @@ import (
 )
 
 func main() {
-	// Check if we're running in reset mode
-	resetDb := os.Getenv("RESET_DB") == "true"
-	isPR := os.Getenv("PR_DEPLOYMENT") == "true"
-	isDevEnv := os.Getenv("APP_ENV") == "development"
-
-	if resetDb {
+	// Check if we're running in database reset mode
+	if os.Getenv("RESET_DB") == "true" {
 		log.Println("Running in database reset mode")
+
+		// In PR deployments with RESET_DB=true, completely reset the database
+		if os.Getenv("PR_DEPLOYMENT") == "true" {
+			log.Println("PR deployment with RESET_DB=true - completely recreating database")
+			dbPath := os.Getenv("DB_PATH")
+			if dbPath == "" {
+				dbPath = "/data/bennwallet.db"
+			}
+
+			// Check if file exists
+			_, err := os.Stat(dbPath)
+			if err == nil {
+				// Delete the database file
+				log.Printf("Deleting existing database file at %s", dbPath)
+				err = os.Remove(dbPath)
+				if err != nil {
+					log.Printf("Warning: Failed to delete database file: %v", err)
+				} else {
+					log.Println("Database file deleted successfully")
+				}
+			} else if !os.IsNotExist(err) {
+				log.Printf("Error checking database file: %v", err)
+			}
+		}
 	}
 
-	if isPR {
+	// Check if this is a PR deployment
+	if os.Getenv("PR_DEPLOYMENT") == "true" {
 		log.Println("Running in PR deployment mode")
 	}
 
-	if isDevEnv {
+	// Check environment
+	if os.Getenv("APP_ENV") != "production" && os.Getenv("NODE_ENV") != "production" {
 		log.Println("Running in development environment")
 	}
 
-	// Initialize encryption
+	// Use an encryption key from environment or generate a default one
 	encryptionKey := os.Getenv("ENCRYPTION_KEY")
 	if encryptionKey == "" {
-		// Generate a default key for development
 		log.Println("Warning: ENCRYPTION_KEY not set, using a default key. This is NOT secure for production!")
-		encryptionKey = "default-dev-encryption-key-32chars"
+		encryptionKey = "default-key-for-development-only"
 	}
 	security.InitializeEncryption(encryptionKey)
 
@@ -55,9 +76,21 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Run migrations with error handling for RESET_DB mode
+	if err := database.RunMigrations(); err != nil {
+		// For RESET_DB mode, don't exit with an error if migrations fail
+		// This allows the PR deploys to recover from database locks
+		if os.Getenv("RESET_DB") == "true" {
+			log.Printf("Warning: Migrations failed in RESET_DB mode: %v", err)
+			log.Println("Continuing with deployment despite migration errors")
+		} else {
+			log.Fatal(err)
+		}
+	}
+
 	// If running in reset mode, exit after database setup is complete
-	if resetDb {
-		log.Println("Database reset and seeded successfully. Exiting.")
+	if os.Getenv("RESET_DB") == "true" {
+		log.Println("Database reset attempted. Exiting.")
 		return
 	}
 
