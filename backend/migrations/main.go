@@ -35,6 +35,7 @@ func RunMigrations(db *sql.DB) error {
 		{"add_optional_field", AddOptionalField},
 		{"add_permissions_table", AddPermissionsTable},
 		{"update_users_for_permissions", UpdateUsersForPermissions},
+		{"update_permissions_system", UpdatePermissionsSystem},
 		// For development and PR environments, also seed test data
 		{"seed_test_data", SeedTestData},
 	}

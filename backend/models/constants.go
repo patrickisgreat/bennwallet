@@ -3,8 +3,10 @@ package models
 // Resource types
 const (
 	ResourceTransactions = "transactions"
-	ResourceReports      = "reports"
+	ResourceCategories   = "categories"
+	ResourceYnabConfig   = "ynab_config"
 	ResourceUsers        = "users"
+	ResourceReports      = "reports"
 	ResourceAll          = "all"
 )
 
@@ -12,5 +14,12 @@ const (
 const (
 	PermissionRead  = "read"
 	PermissionWrite = "write"
-	PermissionAdmin = "admin"
+	PermissionAll   = "all"
+)
+
+// User roles
+const (
+	RoleUser       = "user"
+	RoleAdmin      = "admin"
+	RoleSuperAdmin = "superadmin"
 )
