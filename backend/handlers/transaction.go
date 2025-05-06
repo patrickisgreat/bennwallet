@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -76,145 +77,48 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 
 	// Add user ID filter if the column exists
 	if hasUserIdColumn {
-		// Check if the user is in the approved sharing group (Sarah and Patrick)
-		var isApprovedUser bool
-		err := database.DB.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 FROM users 
-				WHERE id = ? AND 
-				(name = 'Patrick' OR name = 'Sarah' OR 
-				 username = 'patrick' OR username = 'sarah' OR
-				 id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
-				 id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
-				 username = 'sarah.elizabeth.wallis@gmail.com')
-			)
-		`, userID).Scan(&isApprovedUser)
-
+		// Get list of user IDs the current user can access using the permissions system
+		accessibleUsers, err := middleware.GetUserAccessibleResources(userID, models.ResourceTransactions, models.PermissionRead)
 		if err != nil {
-			log.Printf("Error checking if user is approved for sharing: %v", err)
-			isApprovedUser = false
-		}
-
-		if isApprovedUser {
-			// If the user is Patrick or Sarah, they can see all transactions
-			// from both of them or any legacy transactions without userId
-			query += ` AND (
-				userId = ? OR 
-				userId IS NULL OR 
-				userId IN (
-					SELECT id FROM users 
-					WHERE name = 'Patrick' OR name = 'Sarah' OR 
-						  username = 'patrick' OR username = 'sarah' OR
-						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
-						  id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
-						  username = 'sarah.elizabeth.wallis@gmail.com'
-				)
-			)`
-			args = append(args, userID)
-			log.Printf("Fetching ALL shared transactions for approved user %s", userID)
-		} else {
-			// For other users, only show their own transactions
+			log.Printf("Error getting accessible resources: %v", err)
+			// Fallback to showing only the user's own transactions
 			query += " AND (userId = ?)"
 			args = append(args, userID)
 			log.Printf("Fetching only personal transactions for user %s", userID)
+		} else if len(accessibleUsers) > 0 {
+			// Create placeholders for the SQL IN clause
+			placeholders := make([]string, len(accessibleUsers))
+			for i := range accessibleUsers {
+				placeholders[i] = "?"
+				args = append(args, accessibleUsers[i])
+			}
+
+			// Build query with IN clause and also include NULL userIds for backward compatibility
+			query += fmt.Sprintf(" AND (userId IN (%s) OR userId IS NULL)", strings.Join(placeholders, ","))
+			log.Printf("Fetching transactions for user %s and %d other accessible users", userID, len(accessibleUsers)-1)
+		} else {
+			// Fallback to showing only the user's own transactions
+			query += " AND (userId = ?)"
+			args = append(args, userID)
+			log.Printf("Fetching only personal transactions for user %s (no permissions found)", userID)
 		}
 	}
 
 	// Parse query parameters
 	payTo := r.URL.Query().Get("payTo")
 	if payTo != "" {
-		query += " AND (payTo LIKE ? OR payTo LIKE ? OR payTo LIKE ?)"
+		query += " AND payTo LIKE ?"
 		search := "%" + payTo + "%"
-		// Special case for Sarah
-		if strings.ToLower(payTo) == "sarah" {
-			args = append(args, search, "%Sarah Elizabeth Wallis%", "%sarah.elizabeth.wallis@gmail.com%")
-			log.Printf("Added PayTo LIKE filter for Sarah with 3 patterns")
-		} else if strings.ToLower(payTo) == "patrick" {
-			// Special case for Patrick
-			args = append(args, search, "%Patrick Bennett%", "%patrick.bennett@gmail.com%")
-			log.Printf("Added PayTo LIKE filter for Patrick with 3 patterns")
-		} else {
-			// Just use the normal search
-			query = strings.Replace(query, "(payTo LIKE ? OR payTo LIKE ? OR payTo LIKE ?)", "payTo LIKE ?", 1)
-			args = append(args, search)
-			log.Printf("Added PayTo LIKE filter: '%s' (as %s)", payTo, search)
-		}
-
-		// Debug: Check if any rows actually match this condition
-		var matchCount int
-		countQuery := "SELECT COUNT(*) FROM transactions WHERE payTo LIKE ?"
-		err := database.DB.QueryRow(countQuery, "%"+payTo+"%").Scan(&matchCount)
-		if err != nil {
-			log.Printf("Error checking PayTo match count: %v", err)
-		} else {
-			log.Printf("PayTo filter would match %d transactions", matchCount)
-
-			// Log the actual payTo values that exist in the database
-			rows, err := database.DB.Query("SELECT DISTINCT payTo FROM transactions WHERE payTo IS NOT NULL")
-			if err != nil {
-				log.Printf("Error querying distinct payTo values: %v", err)
-			} else {
-				defer rows.Close()
-				var values []string
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						log.Printf("Error scanning payTo value: %v", err)
-					} else {
-						values = append(values, val)
-					}
-				}
-				log.Printf("Actual payTo values in database: %v", values)
-			}
-		}
+		args = append(args, search)
+		log.Printf("Added PayTo LIKE filter: '%s' (as %s)", payTo, search)
 	}
 
 	enteredBy := r.URL.Query().Get("enteredBy")
 	if enteredBy != "" {
-		query += " AND (enteredBy LIKE ? OR enteredBy LIKE ? OR enteredBy LIKE ?)"
+		query += " AND enteredBy LIKE ?"
 		search := "%" + enteredBy + "%"
-		// Special case for Sarah
-		if strings.ToLower(enteredBy) == "sarah" {
-			args = append(args, search, "%Sarah Elizabeth Wallis%", "%sarah.elizabeth.wallis@gmail.com%")
-			log.Printf("Added EnteredBy LIKE filter for Sarah with 3 patterns")
-		} else if strings.ToLower(enteredBy) == "patrick" {
-			// Special case for Patrick
-			args = append(args, search, "%Patrick Bennett%", "%patrick.bennett@gmail.com%")
-			log.Printf("Added EnteredBy LIKE filter for Patrick with 3 patterns")
-		} else {
-			// Just use the normal search
-			query = strings.Replace(query, "(enteredBy LIKE ? OR enteredBy LIKE ? OR enteredBy LIKE ?)", "enteredBy LIKE ?", 1)
-			args = append(args, search)
-			log.Printf("Added EnteredBy LIKE filter: '%s' (as %s)", enteredBy, search)
-		}
-
-		// Debug: Check if any rows actually match this condition
-		var matchCount int
-		countQuery := "SELECT COUNT(*) FROM transactions WHERE enteredBy LIKE ?"
-		err := database.DB.QueryRow(countQuery, "%"+enteredBy+"%").Scan(&matchCount)
-		if err != nil {
-			log.Printf("Error checking EnteredBy match count: %v", err)
-		} else {
-			log.Printf("EnteredBy filter would match %d transactions", matchCount)
-
-			// Log the actual enteredBy values that exist in the database
-			rows, err := database.DB.Query("SELECT DISTINCT enteredBy FROM transactions WHERE enteredBy IS NOT NULL")
-			if err != nil {
-				log.Printf("Error querying distinct enteredBy values: %v", err)
-			} else {
-				defer rows.Close()
-				var values []string
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						log.Printf("Error scanning enteredBy value: %v", err)
-					} else {
-						values = append(values, val)
-					}
-				}
-				log.Printf("Actual enteredBy values in database: %v", values)
-			}
-		}
+		args = append(args, search)
+		log.Printf("Added EnteredBy LIKE filter: '%s' (as %s)", enteredBy, search)
 	}
 
 	paid := r.URL.Query().Get("paid")
@@ -337,103 +241,65 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 
 	// Add user ID check if the column exists
 	if hasUserIdColumn {
-		// Check if the user is in the approved sharing group (Sarah and Patrick)
-		var isApprovedUser bool
-		err := database.DB.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 FROM users 
-				WHERE id = ? AND 
-				(name = 'Patrick' OR name = 'Sarah' OR 
-				 username = 'patrick' OR username = 'sarah' OR
-				 id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
-				 id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
-				 username = 'sarah.elizabeth.wallis@gmail.com')
-			)
-		`, userID).Scan(&isApprovedUser)
+		// Check if the user has permission to view this transaction
+		// First, get the owner of the transaction
+		var transactionOwnerID sql.NullString
+		ownerErr := database.DB.QueryRow("SELECT userId FROM transactions WHERE id = ?", id).Scan(&transactionOwnerID)
 
-		if err != nil {
-			log.Printf("Error checking if user is approved for sharing: %v", err)
-			isApprovedUser = false
+		if ownerErr != nil && ownerErr != sql.ErrNoRows {
+			log.Printf("Error getting transaction owner: %v", ownerErr)
+			http.Error(w, "Error checking transaction access", http.StatusInternalServerError)
+			return
 		}
 
-		if isApprovedUser {
-			// If the user is Patrick or Sarah, they can see all transactions
-			// from both of them or any legacy transactions without userId
-			query += ` AND (
-				userId = ? OR 
-				userId IS NULL OR 
-				userId IN (
-					SELECT id FROM users 
-					WHERE name = 'Patrick' OR name = 'Sarah' OR 
-						  username = 'patrick' OR username = 'sarah' OR
-						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
-						  id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
-						  username = 'sarah.elizabeth.wallis@gmail.com'
-				)
-			)`
-
-			// Create parameter list based on available columns
-			args := []interface{}{id, userID}
-
-			if hasOptionalColumn && hasUserIdColumn {
-				err = database.DB.QueryRow(query, args...).Scan(
-					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
-			} else if hasOptionalColumn {
-				err = database.DB.QueryRow(query, args...).Scan(
-					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
-			} else {
-				err = database.DB.QueryRow(query, args...).Scan(
-					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
-			}
-
-			if err != nil {
-				if err == sql.ErrNoRows {
-					http.Error(w, "Transaction not found", http.StatusNotFound)
-				} else {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-				}
-				return
-			}
-
-			if userId.Valid {
-				t.UserID = userId.String
-			}
+		var resourceOwnerID string
+		if ownerErr == sql.ErrNoRows || !transactionOwnerID.Valid {
+			// Transaction doesn't exist or has no owner - allow access to continue with normal query
+			// This will be filtered properly in the next step
+			resourceOwnerID = userID // Default to the current user
 		} else {
-			// For other users, only show their own transactions
-			query += " AND (userId = ?)"
+			resourceOwnerID = transactionOwnerID.String
+		}
 
-			// Create parameter list based on available columns
-			args := []interface{}{id, userID}
+		// Check if the user has permission to access this transaction
+		hasAccess := middleware.CheckUserPermission(userID, resourceOwnerID, models.ResourceTransactions, models.PermissionRead)
 
-			if hasOptionalColumn && hasUserIdColumn {
-				err = database.DB.QueryRow(query, args...).Scan(
-					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
-			} else if hasOptionalColumn {
-				err = database.DB.QueryRow(query, args...).Scan(
-					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
+		if !hasAccess && userID != resourceOwnerID {
+			log.Printf("User %s does not have permission to access transaction %s owned by %s",
+				userID, id, resourceOwnerID)
+			http.Error(w, "Transaction not found", http.StatusNotFound)
+			return
+		}
+
+		// Build the query with access control
+		query += " AND (userId = ? OR userId IS NULL)"
+		args := []interface{}{id, resourceOwnerID}
+
+		if hasOptionalColumn && hasUserIdColumn {
+			err = database.DB.QueryRow(query, args...).Scan(
+				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
+		} else if hasOptionalColumn {
+			err = database.DB.QueryRow(query, args...).Scan(
+				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
+		} else {
+			err = database.DB.QueryRow(query, args...).Scan(
+				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
+				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+		}
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "Transaction not found", http.StatusNotFound)
 			} else {
-				err = database.DB.QueryRow(query, args...).Scan(
-					&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-					&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
+			return
+		}
 
-			if err != nil {
-				if err == sql.ErrNoRows {
-					http.Error(w, "Transaction not found", http.StatusNotFound)
-				} else {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-				}
-				return
-			}
-
-			if userId.Valid {
-				t.UserID = userId.String
-			}
+		if userId.Valid {
+			t.UserID = userId.String
 		}
 	} else {
 		// No userId column, just query by ID
@@ -882,60 +748,46 @@ func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
 
 	// Add user ID filter if the column exists
 	if hasUserIdColumn {
-		// Check if the user is in the approved sharing group (Sarah and Patrick)
-		var isApprovedUser bool
-		err := database.DB.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 FROM users 
-				WHERE id = ? AND 
-				(name = 'Patrick' OR name = 'Sarah' OR 
-				 username = 'patrick' OR username = 'sarah' OR
-				 id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
-				 id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
-				 username = 'sarah.elizabeth.wallis@gmail.com')
-			)
-		`, userID).Scan(&isApprovedUser)
-
+		// Get list of user IDs the current user can access using the permissions system
+		accessibleUsers, err := middleware.GetUserAccessibleResources(userID, models.ResourceTransactions, models.PermissionRead)
 		if err != nil {
-			log.Printf("Error checking if user is approved for sharing: %v", err)
-			isApprovedUser = false
-		}
-
-		if isApprovedUser {
-			// If the user is Patrick or Sarah, they can see all transactions
-			// from both of them or any legacy transactions without userId
-			payToQuery += ` AND (
-				userId = ? OR 
-				userId IS NULL OR 
-				userId IN (
-					SELECT id FROM users 
-					WHERE name = 'Patrick' OR name = 'Sarah' OR 
-						  username = 'patrick' OR username = 'sarah' OR
-						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
-						  id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
-						  username = 'sarah.elizabeth.wallis@gmail.com'
-				)
-			)`
-			enteredByQuery += ` AND (
-				userId = ? OR 
-				userId IS NULL OR 
-				userId IN (
-					SELECT id FROM users 
-					WHERE name = 'Patrick' OR name = 'Sarah' OR 
-						  username = 'patrick' OR username = 'sarah' OR
-						  id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2' OR
-						  id = '4fWxBBh9NYhMlwop2SJGt1ZzzI22' OR
-						  username = 'sarah.elizabeth.wallis@gmail.com'
-				)
-			)`
-			args = append(args, userID)
-			log.Printf("Fetching ALL shared unique fields for approved user %s", userID)
-		} else {
-			// For other users, only show their own transactions
+			log.Printf("Error getting accessible resources: %v", err)
+			// Fallback to showing only the user's own transactions
 			payToQuery += " AND (userId = ?)"
 			enteredByQuery += " AND (userId = ?)"
-			args = append(args, userID)
+			args = append(args, userID, userID) // Add twice for both queries
 			log.Printf("Fetching only personal unique fields for user %s", userID)
+		} else if len(accessibleUsers) > 0 {
+			// Create placeholders for the SQL IN clause
+			placeholders := make([]string, len(accessibleUsers))
+			for i := range accessibleUsers {
+				placeholders[i] = "?"
+			}
+
+			// Create args for both queries (need to duplicate)
+			payToArgs := make([]interface{}, len(accessibleUsers))
+			enteredByArgs := make([]interface{}, len(accessibleUsers))
+			for i, userId := range accessibleUsers {
+				payToArgs[i] = userId
+				enteredByArgs[i] = userId
+			}
+
+			// Build query with IN clause and also include NULL userIds for backward compatibility
+			inClause := fmt.Sprintf("(%s)", strings.Join(placeholders, ","))
+			payToQuery += fmt.Sprintf(" AND (userId IN %s OR userId IS NULL)", inClause)
+			enteredByQuery += fmt.Sprintf(" AND (userId IN %s OR userId IS NULL)", inClause)
+
+			// Combine args
+			args = append(args, payToArgs...)
+			args = append(args, enteredByArgs...)
+
+			log.Printf("Fetching unique fields for user %s and %d other accessible users", userID, len(accessibleUsers)-1)
+		} else {
+			// Fallback to showing only the user's own transactions
+			payToQuery += " AND (userId = ?)"
+			enteredByQuery += " AND (userId = ?)"
+			args = append(args, userID, userID) // Add twice for both queries
+			log.Printf("Fetching only personal unique fields for user %s (no permissions found)", userID)
 		}
 	}
 
