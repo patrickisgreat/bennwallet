@@ -1,3 +1,11 @@
+## [1.3.1](https://github.com/patrickisgreat/bennwallet/compare/v1.3.0...v1.3.1) (2025-05-06)
+
+### Bug Fixes
+
+* deployments to reset database and populate with test data ([ccc2efa](https://github.com/patrickisgreat/bennwallet/commit/ccc2efac93d7eafbc64942fc1c955f6d06d320c1))
+* tests ([0b4d5e4](https://github.com/patrickisgreat/bennwallet/commit/0b4d5e43b69e2c34dbfc6e5c7fbed65e670b44b0))
+* tests ([ba7f4fd](https://github.com/patrickisgreat/bennwallet/commit/ba7f4fd0404a15fed8e7c03f6a1ebb72b22f9890))
+
 ## [1.3.0](https://github.com/patrickisgreat/bennwallet/compare/v1.2.9...v1.3.0) (2025-05-06)
 
 ### Features
