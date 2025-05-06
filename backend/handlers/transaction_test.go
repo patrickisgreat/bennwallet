@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,16 +13,12 @@ import (
 )
 
 func setupTransactionTestDB() {
-	// Create a test database connection
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		panic(err)
-	}
-	database.DB = db
+	// Use our common test database setup
+	SetupTestDB()
 
 	// Create transactions table
-	_, err = db.Exec(`
-		CREATE TABLE transactions (
+	_, err := database.DB.Exec(`
+		CREATE TABLE IF NOT EXISTS transactions (
 			id TEXT PRIMARY KEY,
 			amount REAL NOT NULL,
 			description TEXT NOT NULL,
@@ -45,10 +40,7 @@ func setupTransactionTestDB() {
 
 func TestAddTransaction(t *testing.T) {
 	setupTransactionTestDB()
-	defer func() {
-		CleanupTestDB()
-		database.DB.Close()
-	}()
+	defer CleanupTestDB()
 
 	// Setup
 	now := time.Now()
@@ -70,8 +62,10 @@ func TestAddTransaction(t *testing.T) {
 	jsonBody, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest("POST", "/transactions", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
-	// Add mock authentication
-	req = MockAuthContext(req, "test-user-id")
+
+	// Use our helper to add authentication
+	req = SetupTestAuth(req)
+
 	w := httptest.NewRecorder()
 
 	// Execute
@@ -120,31 +114,26 @@ func TestAddTransaction(t *testing.T) {
 		t.Fatalf("Error checking transaction userId: %v", err)
 	}
 
-	if userID != "test-user-id" {
-		t.Errorf("Expected userId 'test-user-id', got '%s'", userID)
+	if userID != TestUserID {
+		t.Errorf("Expected userId '%s', got '%s'", TestUserID, userID)
 	}
 }
 
 func TestGetTransactions(t *testing.T) {
 	setupTransactionTestDB()
-	defer func() {
-		CleanupTestDB()
-		database.DB.Close()
-	}()
+	defer CleanupTestDB()
 
 	// First add a test transaction
 	_, err := database.DB.Exec(`
 		INSERT INTO transactions (id, amount, description, date, type, payTo, paid, paidDate, enteredBy, optional, userId)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, "test-id", 100.50, "Test Transaction", time.Now(), "Test", "Test Payee", true, time.Now().Format("2006-01-02"), "test-user", false, "test-user-id")
+	`, "test-id", 100.50, "Test Transaction", time.Now(), "Test", "Test Payee", true, time.Now().Format("2006-01-02"), "test-user", false, TestUserID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Setup
-	req := httptest.NewRequest("GET", "/transactions", nil)
-	// Add mock authentication
-	req = MockAuthContext(req, "test-user-id")
+	// Setup request with authentication
+	req := SetupTestAuth(httptest.NewRequest("GET", "/transactions", nil))
 	w := httptest.NewRecorder()
 
 	// Execute

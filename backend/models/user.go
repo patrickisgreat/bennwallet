@@ -29,16 +29,5 @@ type Permission struct {
 	ExpiresAt      time.Time `json:"expiresAt,omitempty"` // Optional expiration date
 }
 
-// PermissionType constants
-const (
-	PermissionRead  = "read"
-	PermissionWrite = "write"
-)
-
-// ResourceType constants
-const (
-	ResourceTransactions = "transactions"
-	ResourceCategories   = "categories"
-	ResourceReports      = "reports"
-	ResourceAll          = "all"
-)
+// ResourceCategories is a resource type not defined in constants.go
+const ResourceCategories = "categories"

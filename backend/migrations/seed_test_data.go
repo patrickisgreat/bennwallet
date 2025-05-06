@@ -211,6 +211,79 @@ func SeedTestData(db *sql.DB) error {
 		}
 	}
 
+	// Add permissions data for test users
+	log.Println("Adding test permissions data...")
+
+	// First, get all test users
+	userRows, err := db.Query("SELECT id, name FROM users")
+	if err != nil {
+		log.Println("Error fetching test users:", err)
+		// Continue with other seeding, don't fail completely
+	} else {
+		defer userRows.Close()
+
+		// Collect user IDs
+		var users []struct {
+			ID   string
+			Name string
+		}
+
+		for userRows.Next() {
+			var u struct {
+				ID   string
+				Name string
+			}
+			if err := userRows.Scan(&u.ID, &u.Name); err != nil {
+				log.Println("Error scanning user row:", err)
+				continue
+			}
+			users = append(users, u)
+		}
+
+		// Create permissions between users
+		stmt, err := db.Prepare(`
+			INSERT INTO permissions 
+			(granted_user_id, owner_user_id, resource_type, permission_type) 
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT (granted_user_id, owner_user_id, resource_type, permission_type) DO NOTHING
+		`)
+
+		if err != nil {
+			log.Println("Error preparing permissions insert statement:", err)
+		} else {
+			defer stmt.Close()
+
+			// For each user, grant access to some other users
+			for i, owner := range users {
+				// Grant permissions to some other users
+				for j, granted := range users {
+					if i != j { // Don't grant permissions to self
+						// Different permission types based on pattern
+						permType := "read"
+						if (i+j)%2 == 0 {
+							permType = "write"
+						}
+
+						_, err := stmt.Exec(granted.ID, owner.ID, "transactions", permType)
+						if err != nil {
+							log.Printf("Error inserting permission for %s -> %s: %v",
+								granted.ID, owner.ID, err)
+						}
+
+						// Add reports permission in some cases
+						if (i+j)%3 == 0 {
+							_, err := stmt.Exec(granted.ID, owner.ID, "reports", "read")
+							if err != nil {
+								log.Printf("Error inserting report permission for %s -> %s: %v",
+									granted.ID, owner.ID, err)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Commit the transaction
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
