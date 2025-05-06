@@ -78,13 +78,13 @@ func TestAuthMiddleware_DevMode(t *testing.T) {
 	// Create a test handler that will check the context
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get the user ID from context
-		userID := r.Context().Value("user_id")
+		userID := r.Context().Value(UserIDKey)
 		if userID == nil || userID.(string) != "admin-user-1" {
 			t.Errorf("Expected user_id 'admin-user-1', got %v", userID)
 		}
 
 		// Check role
-		role := r.Context().Value("user_role")
+		role := r.Context().Value(UserRoleKey)
 		if role == nil || role.(string) != "admin" {
 			t.Errorf("Expected user_role 'admin', got %v", role)
 		}
@@ -172,7 +172,7 @@ func TestAuthMiddleware_OptionsRequest(t *testing.T) {
 func TestGetUserIDFromContext(t *testing.T) {
 	// Create a request with a user ID in the context
 	req := httptest.NewRequest("GET", "/api/test", nil)
-	ctx := context.WithValue(req.Context(), "user_id", "test-user-123")
+	ctx := context.WithValue(req.Context(), UserIDKey, "test-user-123")
 	req = req.WithContext(ctx)
 
 	// Get the user ID from context

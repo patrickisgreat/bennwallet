@@ -150,6 +150,8 @@ jobs:
             PORT = "8080"
             NODE_ENV = "development"
             ENVIRONMENT = "development"
+            APP_ENV = "development"
+            RESET_DB = "true"
             YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
             YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
             YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
@@ -191,3 +193,5 @@ jobs:
         env:
           NODE_ENV: development
           ENVIRONMENT: development
+          APP_ENV: development
+          RESET_DB: 'true'
