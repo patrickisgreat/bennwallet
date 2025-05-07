@@ -28,11 +28,12 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Check if ynab_category_groups table exists
+	// Check if ynab_category_groups table exists using PostgreSQL information_schema
 	var tableCount int
 	err := database.DB.QueryRowContext(ctx, `
-		SELECT count(*) FROM sqlite_master 
-		WHERE type='table' AND name='ynab_category_groups'
+		SELECT COUNT(*) FROM information_schema.tables 
+		WHERE table_name = 'ynab_category_groups' 
+		AND table_schema = 'public'
 	`).Scan(&tableCount)
 
 	// If we hit a timeout or other error, just proceed anyway - worst case tables don't exist
@@ -49,7 +50,6 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 		log.Printf("YNAB tables missing, creating them now")
 
 		// Create YNAB category groups table with timeout context
-		// To this:
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -58,7 +58,7 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 				id TEXT NOT NULL,
 				name TEXT NOT NULL,
 				user_id TEXT NOT NULL,
-				last_updated DATETIME NOT NULL,
+				last_updated TIMESTAMP WITH TIME ZONE NOT NULL,
 				PRIMARY KEY (id, user_id)
 			)
 		`)
@@ -80,7 +80,7 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 				group_id TEXT NOT NULL,
 				name TEXT NOT NULL,
 				user_id TEXT NOT NULL,
-				last_updated DATETIME NOT NULL,
+				last_updated TIMESTAMP WITH TIME ZONE NOT NULL,
 				PRIMARY KEY (id, user_id),
 				FOREIGN KEY (group_id, user_id) REFERENCES ynab_category_groups(id, user_id)
 			)
@@ -103,8 +103,8 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 				token TEXT NOT NULL,
 				budget_id TEXT NOT NULL,
 				account_id TEXT NOT NULL,
-				sync_enabled BOOLEAN NOT NULL DEFAULT 0,
-				last_synced DATETIME
+				sync_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+				last_synced TIMESTAMP WITH TIME ZONE
 			)
 		`)
 		if err != nil {
@@ -124,7 +124,7 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 
 	var syncEnabled bool
 	err = database.DB.QueryRowContext(ctx, `
-		SELECT sync_enabled FROM user_ynab_settings WHERE user_id = ?
+		SELECT sync_enabled FROM user_ynab_settings WHERE user_id = $1
 	`, userId).Scan(&syncEnabled)
 
 	if err != nil || !syncEnabled {
@@ -142,7 +142,7 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 	groupRows, err := database.DB.QueryContext(ctx, `
 		SELECT id, name 
 		FROM ynab_category_groups 
-		WHERE user_id = ? 
+		WHERE user_id = $1 
 		ORDER BY name
 	`, userId)
 	if err != nil {
@@ -177,7 +177,7 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 		catRows, err := database.DB.QueryContext(ctx, `
 			SELECT id, name
 			FROM ynab_categories
-			WHERE user_id = ? AND group_id = ?
+			WHERE user_id = $1 AND group_id = $2
 			ORDER BY name
 		`, userId, group.ID)
 		if err != nil {

@@ -162,7 +162,7 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 
 	// Check if we already have a config for this user
 	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM ynab_config WHERE user_id = ?", userID).Scan(&count)
+	err := db.QueryRow("SELECT COUNT(*) FROM ynab_config WHERE user_id = $1", userID).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("error checking for existing YNAB config: %w", err)
 	}
@@ -195,12 +195,12 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 		// Update existing config
 		_, err = db.Exec(`
 			UPDATE ynab_config
-			SET encrypted_api_token = ?,
-				encrypted_budget_id = ?,
-				encrypted_account_id = ?,
-				sync_frequency = ?,
-				updated_at = ?
-			WHERE user_id = ?
+			SET encrypted_api_token = $1,
+				encrypted_budget_id = $2,
+				encrypted_account_id = $3,
+				sync_frequency = $4,
+				updated_at = $5
+			WHERE user_id = $6
 		`, encryptedToken, encryptedBudgetID, encryptedAccountID, syncFrequency, now, userID)
 
 		if err != nil {
@@ -212,7 +212,7 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 			INSERT INTO ynab_config
 			(user_id, encrypted_api_token, encrypted_budget_id, encrypted_account_id, 
 			 sync_frequency, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 		`, userID, encryptedToken, encryptedBudgetID, encryptedAccountID,
 			syncFrequency, now, now)
 
@@ -225,13 +225,13 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 	_, err = db.Exec(`
 		INSERT INTO user_ynab_settings
 		(user_id, token, budget_id, account_id, sync_enabled)
-		VALUES (?, ?, ?, ?, 1)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT(user_id) DO UPDATE
 		SET token = excluded.token,
 			budget_id = excluded.budget_id,
 			account_id = excluded.account_id,
-			sync_enabled = 1
-	`, userID, "enc:"+config.APIToken, config.BudgetID, config.AccountID)
+			sync_enabled = excluded.sync_enabled
+	`, userID, "enc:"+config.APIToken, config.BudgetID, config.AccountID, true)
 
 	if err != nil {
 		log.Printf("Error updating legacy YNAB settings: %v", err)
@@ -248,9 +248,9 @@ func UpdateLastSyncTime(db *sql.DB, userID string) error {
 	// Update in the new table
 	_, err := db.Exec(`
 		UPDATE ynab_config
-		SET last_sync_time = ?,
-			updated_at = ?
-		WHERE user_id = ?
+		SET last_sync_time = $1,
+			updated_at = $2
+		WHERE user_id = $3
 	`, now, now, userID)
 
 	if err != nil {
@@ -260,8 +260,8 @@ func UpdateLastSyncTime(db *sql.DB, userID string) error {
 	// Also update in the legacy table
 	_, err = db.Exec(`
 		UPDATE user_ynab_settings
-		SET last_synced = ?
-		WHERE user_id = ?
+		SET last_synced = $1
+		WHERE user_id = $2
 	`, now, userID)
 
 	if err != nil {

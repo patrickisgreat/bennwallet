@@ -5,13 +5,23 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/lib/pq"
 )
 
 func TestMain(m *testing.M) {
-	// Directly create an in-memory database for tests
+	// Create a test PostgreSQL database
 	var err error
-	DB, err = sql.Open("sqlite3", ":memory:")
+	testConfig := PostgresConfig{
+		Host:     getEnvOrDefault("TEST_DB_HOST", "localhost"),
+		Port:     getEnvOrDefault("TEST_DB_PORT", "5432"),
+		User:     getEnvOrDefault("TEST_DB_USER", "postgres"),
+		Password: getEnvOrDefault("TEST_DB_PASSWORD", "postgres"),
+		DBName:   getEnvOrDefault("TEST_DB_NAME", "bennwallet_test"),
+		SSLMode:  "disable",
+	}
+
+	connectionString := testConfig.ConnectionString()
+	DB, err = sql.Open("postgres", connectionString)
 	if err != nil {
 		panic(err)
 	}
@@ -48,14 +58,14 @@ func createTables() {
 	createTransactionsTable := `
 	CREATE TABLE IF NOT EXISTS transactions (
 		id TEXT PRIMARY KEY,
-		amount REAL NOT NULL,
+		amount NUMERIC(15,2) NOT NULL,
 		description TEXT NOT NULL,
-		date DATETIME NOT NULL,
+		date TIMESTAMP NOT NULL,
 		type TEXT NOT NULL,
-		payTo TEXT,
-		paid BOOLEAN NOT NULL DEFAULT 0,
-		paidDate TEXT,
-		enteredBy TEXT NOT NULL
+		pay_to TEXT,
+		paid BOOLEAN NOT NULL DEFAULT FALSE,
+		paid_date TEXT,
+		entered_by TEXT NOT NULL
 	);
 	`
 	_, err = DB.Exec(createTransactionsTable)
@@ -66,7 +76,7 @@ func createTables() {
 	// Create categories table
 	createCategoriesTable := `
 	CREATE TABLE IF NOT EXISTS categories (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id SERIAL PRIMARY KEY,
 		name TEXT NOT NULL,
 		description TEXT,
 		user_id TEXT NOT NULL,
@@ -84,7 +94,7 @@ func cleanupTestDB() {
 	tables := []string{"users", "transactions", "categories", "ynab_config", "user_ynab_settings", "ynab_category_groups", "ynab_categories"}
 
 	for _, table := range tables {
-		DB.Exec("DELETE FROM " + table)
+		DB.Exec("DROP TABLE IF EXISTS " + table + " CASCADE")
 	}
 }
 

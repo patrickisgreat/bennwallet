@@ -25,106 +25,72 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// First check if the optional column exists
-	var hasOptionalColumn bool
-	err := database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'optional'
-	`).Scan(&hasOptionalColumn)
-
-	if err != nil {
-		log.Printf("Error checking for optional column: %v", err)
-		hasOptionalColumn = false
-	}
-
-	// Check if the userId column exists
-	var hasUserIdColumn bool
-	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'userId'
-	`).Scan(&hasUserIdColumn)
-
-	if err != nil {
-		log.Printf("Error checking for userId column: %v", err)
-		hasUserIdColumn = false
-	}
-
-	// Base query with the appropriate columns
-	var query string
-	if hasOptionalColumn && hasUserIdColumn {
-		query = `
-			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy, optional, userId 
-			FROM transactions 
-			WHERE 1=1
-		`
-	} else if hasOptionalColumn {
-		query = `
-			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy, optional 
-			FROM transactions 
-			WHERE 1=1
-		`
-	} else {
-		query = `
-			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy 
-			FROM transactions 
-			WHERE 1=1
-		`
-	}
+	// Build a query specifically for PostgreSQL
+	query := `
+		SELECT id, amount, description, date, transaction_date, type, 
+		pay_to, paid, paid_date, entered_by, optional, user_id
+		FROM transactions 
+		WHERE 1=1
+	`
 
 	args := []interface{}{}
+	paramCounter := 1
 
-	// Add user ID filter if the column exists
-	if hasUserIdColumn {
-		// Get list of user IDs the current user can access using the permissions system
-		accessibleUsers, err := middleware.GetUserAccessibleResources(userID, models.ResourceTransactions, models.PermissionRead)
-		if err != nil {
-			log.Printf("Error getting accessible resources: %v", err)
-			// Fallback to showing only the user's own transactions
-			query += " AND (userId = ?)"
-			args = append(args, userID)
-			log.Printf("Fetching only personal transactions for user %s", userID)
-		} else if len(accessibleUsers) > 0 {
-			// Create placeholders for the SQL IN clause
-			placeholders := make([]string, len(accessibleUsers))
-			for i := range accessibleUsers {
-				placeholders[i] = "?"
-				args = append(args, accessibleUsers[i])
-			}
-
-			// Build query with IN clause and also include NULL userIds for backward compatibility
-			query += fmt.Sprintf(" AND (userId IN (%s) OR userId IS NULL)", strings.Join(placeholders, ","))
-			log.Printf("Fetching transactions for user %s and %d other accessible users", userID, len(accessibleUsers)-1)
-		} else {
-			// Fallback to showing only the user's own transactions
-			query += " AND (userId = ?)"
-			args = append(args, userID)
-			log.Printf("Fetching only personal transactions for user %s (no permissions found)", userID)
+	// Add user ID filter
+	// Get list of user IDs the current user can access using the permissions system
+	accessibleUsers, err := middleware.GetUserAccessibleResources(userID, models.ResourceTransactions, models.PermissionRead)
+	if err != nil {
+		log.Printf("Error getting accessible resources: %v", err)
+		// Fallback to showing only the user's own transactions
+		query += fmt.Sprintf(" AND user_id = $%d", paramCounter)
+		args = append(args, userID)
+		paramCounter++
+		log.Printf("Fetching only personal transactions for user %s", userID)
+	} else if len(accessibleUsers) > 0 {
+		// Create placeholders for the SQL IN clause
+		placeholders := make([]string, len(accessibleUsers))
+		for i := range accessibleUsers {
+			placeholders[i] = fmt.Sprintf("$%d", paramCounter)
+			args = append(args, accessibleUsers[i])
+			paramCounter++
 		}
+
+		// Build query with IN clause and also include NULL userIds for backward compatibility
+		query += fmt.Sprintf(" AND (user_id IN (%s) OR user_id IS NULL)",
+			strings.Join(placeholders, ","))
+		log.Printf("Fetching transactions for user %s and %d other accessible users", userID, len(accessibleUsers)-1)
+	} else {
+		// Fallback to showing only the user's own transactions
+		query += fmt.Sprintf(" AND user_id = $%d", paramCounter)
+		args = append(args, userID)
+		paramCounter++
+		log.Printf("Fetching only personal transactions for user %s (no permissions found)", userID)
 	}
 
 	// Parse query parameters
 	payTo := r.URL.Query().Get("payTo")
 	if payTo != "" {
-		query += " AND payTo LIKE ?"
+		query += fmt.Sprintf(" AND pay_to LIKE $%d", paramCounter)
 		search := "%" + payTo + "%"
 		args = append(args, search)
+		paramCounter++
 		log.Printf("Added PayTo LIKE filter: '%s' (as %s)", payTo, search)
 	}
 
 	enteredBy := r.URL.Query().Get("enteredBy")
 	if enteredBy != "" {
-		query += " AND enteredBy LIKE ?"
+		query += fmt.Sprintf(" AND entered_by LIKE $%d", paramCounter)
 		search := "%" + enteredBy + "%"
 		args = append(args, search)
+		paramCounter++
 		log.Printf("Added EnteredBy LIKE filter: '%s' (as %s)", enteredBy, search)
 	}
 
 	paid := r.URL.Query().Get("paid")
 	if paid != "" {
-		query += " AND paid = ?"
+		query += fmt.Sprintf(" AND paid = $%d", paramCounter)
 		args = append(args, paid == "true")
+		paramCounter++
 	}
 
 	query += " ORDER BY date DESC"
@@ -143,24 +109,12 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		var transactionDate sql.NullTime
 		var userId sql.NullString
 
-		var err error
-		if hasOptionalColumn && hasUserIdColumn {
-			err = rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
-			if userId.Valid {
-				t.UserID = userId.String
-			}
-		} else if hasOptionalColumn {
-			err = rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
-		} else {
-			err = rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
-			// Set default value for optional
-			t.Optional = false
-		}
-
+		err = rows.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		if paidDate.Valid {
 			t.PaidDate = paidDate.String
 		}
@@ -169,6 +123,10 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		} else {
 			t.TransactionDate = t.Date // Fall back to entered date if transaction date not available
 		}
+		if userId.Valid {
+			t.UserID = userId.String
+		}
+
 		transactions = append(transactions, t)
 	}
 
@@ -187,12 +145,13 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	// First check if the optional column exists
+	// First check if the optional column exists using PostgreSQL information_schema
 	var hasOptionalColumn bool
 	err := database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'optional'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'optional'
+		)
 	`).Scan(&hasOptionalColumn)
 
 	if err != nil {
@@ -200,16 +159,17 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 		hasOptionalColumn = false
 	}
 
-	// Check if the userId column exists
+	// Check if the user_id column exists
 	var hasUserIdColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'userId'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'user_id'
+		)
 	`).Scan(&hasUserIdColumn)
 
 	if err != nil {
-		log.Printf("Error checking for userId column: %v", err)
+		log.Printf("Error checking for user_id column: %v", err)
 		hasUserIdColumn = false
 	}
 
@@ -221,21 +181,21 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 	var query string
 	if hasOptionalColumn && hasUserIdColumn {
 		query = `
-			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy, optional, userId 
+			SELECT id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by, optional, user_id 
 			FROM transactions 
-			WHERE id = ?
+			WHERE id = $1
 		`
 	} else if hasOptionalColumn {
 		query = `
-			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy, optional 
+			SELECT id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by, optional 
 			FROM transactions 
-			WHERE id = ?
+			WHERE id = $1
 		`
 	} else {
 		query = `
-			SELECT id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy 
+			SELECT id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by 
 			FROM transactions 
-			WHERE id = ?
+			WHERE id = $1
 		`
 	}
 
@@ -244,7 +204,7 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 		// Check if the user has permission to view this transaction
 		// First, get the owner of the transaction
 		var transactionOwnerID sql.NullString
-		ownerErr := database.DB.QueryRow("SELECT userId FROM transactions WHERE id = ?", id).Scan(&transactionOwnerID)
+		ownerErr := database.DB.QueryRow("SELECT user_id FROM transactions WHERE id = $1", id).Scan(&transactionOwnerID)
 
 		if ownerErr != nil && ownerErr != sql.ErrNoRows {
 			log.Printf("Error getting transaction owner: %v", ownerErr)
@@ -272,7 +232,7 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Build the query with access control
-		query += " AND (userId = ? OR userId IS NULL)"
+		query += " AND (user_id = $2 OR user_id IS NULL)"
 		args := []interface{}{id, resourceOwnerID}
 
 		if hasOptionalColumn && hasUserIdColumn {
@@ -376,12 +336,13 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 		t.EnteredBy = userID
 	}
 
-	// Check if the optional column exists
+	// Check if the optional column exists using PostgreSQL info schema
 	var hasOptionalColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'optional'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'optional'
+		)
 	`).Scan(&hasOptionalColumn)
 
 	if err != nil {
@@ -389,25 +350,27 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 		hasOptionalColumn = false
 	}
 
-	// Check if the userId column exists
+	// Check if the user_id column exists
 	var hasUserIdColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'userId'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'user_id'
+		)
 	`).Scan(&hasUserIdColumn)
 
 	if err != nil {
-		log.Printf("Error checking for userId column: %v", err)
+		log.Printf("Error checking for user_id column: %v", err)
 		hasUserIdColumn = false
 	}
 
 	// Check if the transaction_date column exists
 	var hasTransactionDateColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'transaction_date'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'transaction_date'
+		)
 	`).Scan(&hasTransactionDateColumn)
 
 	if err != nil {
@@ -418,7 +381,7 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 	// If columns don't exist, add them
 	if !hasOptionalColumn {
 		log.Printf("Adding optional column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN optional BOOLEAN NOT NULL DEFAULT 0`)
+		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN optional BOOLEAN NOT NULL DEFAULT false`)
 		if err != nil {
 			log.Printf("Error adding optional column: %v", err)
 			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
@@ -428,10 +391,10 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !hasUserIdColumn {
-		log.Printf("Adding userId column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN userId TEXT`)
+		log.Printf("Adding user_id column to transactions table")
+		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN user_id TEXT`)
 		if err != nil {
-			log.Printf("Error adding userId column: %v", err)
+			log.Printf("Error adding user_id column: %v", err)
 			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -440,7 +403,7 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 
 	if !hasTransactionDateColumn {
 		log.Printf("Adding transaction_date column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN transaction_date DATETIME`)
+		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN transaction_date TIMESTAMP WITH TIME ZONE`)
 		if err != nil {
 			log.Printf("Error adding transaction_date column: %v", err)
 			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
@@ -451,20 +414,23 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 
 	// Build query based on available columns
 	insertQuery := `
-		INSERT INTO transactions (id, amount, description, date, transaction_date, type, payTo, paid, paidDate, enteredBy`
+		INSERT INTO transactions (id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by`
 
-	insertValues := `?, ?, ?, ?, ?, ?, ?, ?, ?, ?`
+	paramCount := 10
+	insertValues := fmt.Sprintf("$1, $2, $3, $4, $5, $6, $7, $8, $9, $10")
 	insertArgs := []interface{}{t.ID, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy}
 
 	if hasOptionalColumn {
 		insertQuery += `, optional`
-		insertValues += `, ?`
+		paramCount++
+		insertValues += fmt.Sprintf(", $%d", paramCount)
 		insertArgs = append(insertArgs, t.Optional)
 	}
 
 	if hasUserIdColumn {
-		insertQuery += `, userId`
-		insertValues += `, ?`
+		insertQuery += `, user_id`
+		paramCount++
+		insertValues += fmt.Sprintf(", $%d", paramCount)
 		insertArgs = append(insertArgs, t.UserID)
 	}
 
@@ -505,9 +471,10 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	// Check if the optional column exists
 	var hasOptionalColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'optional'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'optional'
+		)
 	`).Scan(&hasOptionalColumn)
 
 	if err != nil {
@@ -515,25 +482,27 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		hasOptionalColumn = false
 	}
 
-	// Check if the userId column exists
+	// Check if the user_id column exists
 	var hasUserIdColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'userId'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'user_id'
+		)
 	`).Scan(&hasUserIdColumn)
 
 	if err != nil {
-		log.Printf("Error checking for userId column: %v", err)
+		log.Printf("Error checking for user_id column: %v", err)
 		hasUserIdColumn = false
 	}
 
 	// Check if the transaction_date column exists
 	var hasTransactionDateColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'transaction_date'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'transaction_date'
+		)
 	`).Scan(&hasTransactionDateColumn)
 
 	if err != nil {
@@ -544,7 +513,7 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	// If columns don't exist, add them
 	if !hasOptionalColumn {
 		log.Printf("Adding optional column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN optional BOOLEAN NOT NULL DEFAULT 0`)
+		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN optional BOOLEAN NOT NULL DEFAULT false`)
 		if err != nil {
 			log.Printf("Error adding optional column: %v", err)
 			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
@@ -554,10 +523,10 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !hasUserIdColumn {
-		log.Printf("Adding userId column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN userId TEXT`)
+		log.Printf("Adding user_id column to transactions table")
+		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN user_id TEXT`)
 		if err != nil {
-			log.Printf("Error adding userId column: %v", err)
+			log.Printf("Error adding user_id column: %v", err)
 			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -566,7 +535,7 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 
 	if !hasTransactionDateColumn {
 		log.Printf("Adding transaction_date column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN transaction_date DATETIME`)
+		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN transaction_date TIMESTAMP WITH TIME ZONE`)
 		if err != nil {
 			log.Printf("Error adding transaction_date column: %v", err)
 			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
@@ -578,26 +547,26 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	// Build query based on available columns
 	updateQuery := `
 		UPDATE transactions 
-		SET amount = ?, description = ?, date = ?, transaction_date = ?, type = ?, payTo = ?, paid = ?, paidDate = ?, enteredBy = ?`
+		SET amount = $1, description = $2, date = $3, transaction_date = $4, type = $5, pay_to = $6, paid = $7, paid_date = $8, entered_by = $9`
 
 	updateArgs := []interface{}{t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy}
 
 	if hasOptionalColumn {
-		updateQuery += `, optional = ?`
+		updateQuery += fmt.Sprintf(`, optional = $%d`, len(updateArgs)+1)
 		updateArgs = append(updateArgs, t.Optional)
 	}
 
 	if hasUserIdColumn {
-		updateQuery += `, userId = ?`
+		updateQuery += fmt.Sprintf(`, user_id = $%d`, len(updateArgs)+1)
 		updateArgs = append(updateArgs, userID) // Use the authenticated user ID
 	}
 
-	updateQuery += ` WHERE id = ?`
+	updateQuery += fmt.Sprintf(` WHERE id = $%d`, len(updateArgs)+1)
 	updateArgs = append(updateArgs, id)
 
 	// If userId column exists, also check that user owns this transaction or has admin permission
 	if hasUserIdColumn {
-		updateQuery += ` AND (userId = ? OR userId IS NULL)`
+		updateQuery += fmt.Sprintf(` AND (user_id = $%d OR user_id IS NULL)`, len(updateArgs)+1)
 		updateArgs = append(updateArgs, userID)
 	}
 
@@ -638,26 +607,27 @@ func DeleteTransaction(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	// Check if the userId column exists
+	// Check if the user_id column exists
 	var hasUserIdColumn bool
 	err := database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'userId'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'user_id'
+		)
 	`).Scan(&hasUserIdColumn)
 
 	if err != nil {
-		log.Printf("Error checking for userId column: %v", err)
+		log.Printf("Error checking for user_id column: %v", err)
 		hasUserIdColumn = false
 	}
 
 	// Build delete query
-	deleteQuery := "DELETE FROM transactions WHERE id = ?"
+	deleteQuery := "DELETE FROM transactions WHERE id = $1"
 	deleteArgs := []interface{}{id}
 
 	// If userId column exists, also check that user owns this transaction
 	if hasUserIdColumn {
-		deleteQuery += " AND (userId = ? OR userId IS NULL)"
+		deleteQuery += " AND (user_id = $2 OR user_id IS NULL)"
 		deleteArgs = append(deleteArgs, userID)
 	}
 
@@ -716,32 +686,33 @@ func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Total transactions in database: %d", transactionCount)
 	}
 
-	// Check if the userId column exists
+	// Check if the user_id column exists using PostgreSQL information_schema
 	var hasUserIdColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'userId'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'user_id'
+		)
 	`).Scan(&hasUserIdColumn)
 
 	if err != nil {
-		log.Printf("Error checking for userId column: %v", err)
+		log.Printf("Error checking for user_id column: %v", err)
 		hasUserIdColumn = false
 	}
 
 	log.Printf("Has userId column: %v", hasUserIdColumn)
 
-	// Build separate queries for payTo and enteredBy
+	// Build separate queries for pay_to and entered_by (using snake_case for PostgreSQL)
 	payToQuery := `
-		SELECT DISTINCT payTo 
+		SELECT DISTINCT pay_to 
 		FROM transactions 
-		WHERE payTo IS NOT NULL
+		WHERE pay_to IS NOT NULL
 	`
 
 	enteredByQuery := `
-		SELECT DISTINCT enteredBy 
+		SELECT DISTINCT entered_by 
 		FROM transactions 
-		WHERE enteredBy IS NOT NULL
+		WHERE entered_by IS NOT NULL
 	`
 
 	args := []interface{}{}
@@ -753,47 +724,48 @@ func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("Error getting accessible resources: %v", err)
 			// Fallback to showing only the user's own transactions
-			payToQuery += " AND (userId = ?)"
-			enteredByQuery += " AND (userId = ?)"
-			args = append(args, userID, userID) // Add twice for both queries
+			payToQuery += " AND (user_id = $1)"
+			enteredByQuery += " AND (user_id = $1)"
+			args = append(args, userID) // Only add once for PostgreSQL
 			log.Printf("Fetching only personal unique fields for user %s", userID)
 		} else if len(accessibleUsers) > 0 {
 			// Create placeholders for the SQL IN clause
-			placeholders := make([]string, len(accessibleUsers))
-			for i := range accessibleUsers {
-				placeholders[i] = "?"
-			}
-
-			// Create args for both queries (need to duplicate)
+			payToPlaceholders := make([]string, len(accessibleUsers))
+			enteredByPlaceholders := make([]string, len(accessibleUsers))
 			payToArgs := make([]interface{}, len(accessibleUsers))
 			enteredByArgs := make([]interface{}, len(accessibleUsers))
+
 			for i, userId := range accessibleUsers {
+				payToPlaceholders[i] = fmt.Sprintf("$%d", i+1)
 				payToArgs[i] = userId
+				enteredByPlaceholders[i] = fmt.Sprintf("$%d", i+1)
 				enteredByArgs[i] = userId
 			}
 
 			// Build query with IN clause and also include NULL userIds for backward compatibility
-			inClause := fmt.Sprintf("(%s)", strings.Join(placeholders, ","))
-			payToQuery += fmt.Sprintf(" AND (userId IN %s OR userId IS NULL)", inClause)
-			enteredByQuery += fmt.Sprintf(" AND (userId IN %s OR userId IS NULL)", inClause)
+			payToInClause := fmt.Sprintf("(%s)", strings.Join(payToPlaceholders, ","))
+			enteredByInClause := fmt.Sprintf("(%s)", strings.Join(enteredByPlaceholders, ","))
 
-			// Combine args
-			args = append(args, payToArgs...)
-			args = append(args, enteredByArgs...)
+			payToQuery += fmt.Sprintf(" AND (user_id IN %s OR user_id IS NULL)", payToInClause)
+			enteredByQuery += fmt.Sprintf(" AND (user_id IN %s OR user_id IS NULL)", enteredByInClause)
+
+			// Add args separately for each query
+			payToArgs = append(payToArgs, payToArgs...)             // Duplicate for consistency with placeholders
+			enteredByArgs = append(enteredByArgs, enteredByArgs...) // Duplicate for consistency with placeholders
 
 			log.Printf("Fetching unique fields for user %s and %d other accessible users", userID, len(accessibleUsers)-1)
 		} else {
 			// Fallback to showing only the user's own transactions
-			payToQuery += " AND (userId = ?)"
-			enteredByQuery += " AND (userId = ?)"
-			args = append(args, userID, userID) // Add twice for both queries
+			payToQuery += " AND (user_id = $1)"
+			enteredByQuery += " AND (user_id = $1)"
+			args = append(args, userID) // Only add once for PostgreSQL
 			log.Printf("Fetching only personal unique fields for user %s (no permissions found)", userID)
 		}
 	}
 
 	// Add ORDER BY to make the results more predictable
-	payToQuery += " ORDER BY payTo"
-	enteredByQuery += " ORDER BY enteredBy"
+	payToQuery += " ORDER BY pay_to"
+	enteredByQuery += " ORDER BY entered_by"
 
 	log.Printf("PayTo query: %s", payToQuery)
 	log.Printf("EnteredBy query: %s", enteredByQuery)

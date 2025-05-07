@@ -126,8 +126,9 @@ func setupYNABFromEnvForUser(userID string) {
 
 	// Ensure user exists in users table
 	_, err = database.DB.Exec(`
-		INSERT OR IGNORE INTO users (id, username, name) 
-		VALUES (?, ?, ?)
+		INSERT INTO users (id, username, name) 
+		VALUES ($1, $2, $3)
+		ON CONFLICT (id) DO NOTHING
 	`, userID, fmt.Sprintf("user_%s", userID), fmt.Sprintf("User %s", userID))
 	if err != nil {
 		log.Printf("DEBUG: Error ensuring user exists: %v", err)
@@ -161,13 +162,13 @@ func setupYNABFromEnvForUser(userID string) {
 
 	result, err := database.DB.Exec(`
 		INSERT INTO user_ynab_settings (user_id, token, budget_id, account_id, sync_enabled)
-		VALUES (?, ?, ?, ?, 1)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT(user_id) DO UPDATE SET
 			token = excluded.token,
 			budget_id = excluded.budget_id,
 			account_id = excluded.account_id,
-			sync_enabled = 1
-	`, userID, hashedToken, budgetID, accountID)
+			sync_enabled = excluded.sync_enabled
+	`, userID, hashedToken, budgetID, accountID, true)
 
 	if err != nil {
 		log.Printf("DEBUG: Error updating legacy YNAB settings for user %s: %v", userID, err)
@@ -380,8 +381,9 @@ func SetupYNABForUser(userID string) {
 
 	// Ensure user exists
 	_, err = database.DB.Exec(`
-		INSERT OR IGNORE INTO users (id, username, name) 
-		VALUES (?, ?, ?)
+		INSERT INTO users (id, username, name) 
+		VALUES ($1, $2, $3)
+		ON CONFLICT (id) DO NOTHING
 	`, userID, fmt.Sprintf("user_%s", userID), fmt.Sprintf("User %s", userID))
 
 	if err != nil {
@@ -416,13 +418,13 @@ func SetupYNABForUser(userID string) {
 	// Update YNAB settings in legacy table
 	_, err = database.DB.Exec(`
 		INSERT INTO user_ynab_settings (user_id, token, budget_id, account_id, sync_enabled)
-		VALUES (?, ?, ?, ?, 1)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT(user_id) DO UPDATE SET
 			token = excluded.token,
 			budget_id = excluded.budget_id,
 			account_id = excluded.account_id,
-			sync_enabled = 1
-	`, userID, hashedToken, budgetID, accountID)
+			sync_enabled = excluded.sync_enabled
+	`, userID, hashedToken, budgetID, accountID, true)
 
 	if err != nil {
 		log.Printf("Error updating legacy YNAB settings: %v", err)

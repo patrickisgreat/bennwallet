@@ -15,6 +15,12 @@ primary_region = "sjc"                 # Silicon Valley
 # ─────────────────────────────────────────
 [env]
   PORT = "8080"                        # server listens on :8080
+  # PostgreSQL config (actual values set in Fly secrets)
+  DB_HOST = "bennwallet-db.internal"   # Fly.io PostgreSQL hostname
+  DB_PORT = "5432"                     # Standard PostgreSQL port
+  DB_USER = "postgres"                 # Default PostgreSQL user
+  DB_NAME = "bennwallet"               # Database name
+  DB_SSL_MODE = "disable"              # SSL mode for internal connections
 
 # ─────────────────────────────────────────
 # Main HTTP service
@@ -42,12 +48,7 @@ primary_region = "sjc"                 # Silicon Valley
   guest_path = "/app/dist"             # copied here in the final image stage
   url_prefix = "/"
 
-# ─────────────────────────────────────────
-# Persistent SQLite volume
-# ─────────────────────────────────────────
-[[mounts]]
-  source      = "bennwallet_data"      # volume name (create with `fly volumes create …`)
-  destination = "/data"                # path your code expects
-
-  [mounts.options]
-    size = "1"                         # GB
+# Note: We've removed the SQLite volume mount
+# PostgreSQL database is now managed as a separate Fly app
+# Create with: fly postgres create --name bennwallet-db
+# Connect with: fly postgres attach --app bennwallet bennwallet-db

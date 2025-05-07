@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/middleware"
+
+	_ "github.com/lib/pq"
 )
 
 // Define a constant for the test user ID that can be used across all tests
@@ -22,10 +25,31 @@ func SetupTestAuth(req *http.Request) *http.Request {
 	return req.WithContext(ctx)
 }
 
+// getTestDBConfig returns PostgreSQL test database configuration
+func getTestDBConfig() database.PostgresConfig {
+	return database.PostgresConfig{
+		Host:     getEnvOrDefault("TEST_DB_HOST", "localhost"),
+		Port:     getEnvOrDefault("TEST_DB_PORT", "5432"),
+		User:     getEnvOrDefault("TEST_DB_USER", "postgres"),
+		Password: getEnvOrDefault("TEST_DB_PASSWORD", "postgres"),
+		DBName:   getEnvOrDefault("TEST_DB_NAME", "bennwallet_test"),
+		SSLMode:  "disable",
+	}
+}
+
+// getEnvOrDefault gets environment variable or returns default
+func getEnvOrDefault(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
+}
+
 // SetupTestDB initializes a test database with common tables needed for tests
 func SetupTestDB() {
 	// Create a test database connection
-	db, err := sql.Open("sqlite3", ":memory:")
+	config := getTestDBConfig()
+	db, err := sql.Open("postgres", config.ConnectionString())
 	if err != nil {
 		panic(err)
 	}
@@ -38,7 +62,7 @@ func SetupTestDB() {
 			username TEXT,
 			name TEXT,
 			status TEXT,
-			isAdmin BOOLEAN DEFAULT 0,
+			is_admin BOOLEAN DEFAULT FALSE,
 			role TEXT DEFAULT 'user'
 		)
 	`)
@@ -48,8 +72,8 @@ func SetupTestDB() {
 
 	// Insert test user
 	_, err = db.Exec(`
-		INSERT INTO users (id, username, name, isAdmin, role)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO users (id, username, name, is_admin, role)
+		VALUES ($1, $2, $3, $4, $5)
 	`, TestUserID, "testuser", "Test User", true, "admin")
 	if err != nil {
 		panic(err)
@@ -58,13 +82,13 @@ func SetupTestDB() {
 	// Create permissions table
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS permissions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id SERIAL PRIMARY KEY,
 			granted_user_id TEXT NOT NULL,
 			owner_user_id TEXT NOT NULL,
 			resource_type TEXT NOT NULL,
 			permission_type TEXT NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			expires_at TIMESTAMP,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			expires_at TIMESTAMP WITH TIME ZONE,
 			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
 		)
 	`)
@@ -76,6 +100,12 @@ func SetupTestDB() {
 // CleanupTestDB closes the test database connection
 func CleanupTestDB() {
 	if database.DB != nil {
+		// Clean up tables
+		tables := []string{"users", "permissions"}
+		for _, table := range tables {
+			database.DB.Exec("DROP TABLE IF EXISTS " + table + " CASCADE")
+		}
+
 		database.DB.Close()
 	}
 }
@@ -126,10 +156,11 @@ func NewAuthenticatedRequest(method, url string, body interface{}) *http.Request
 	return MockAuthContext(req, "test-user-id")
 }
 
-// CreateTestDB creates a new in-memory database for testing
+// CreateTestDB creates a new PostgreSQL database for testing
 func CreateTestDB() *sql.DB {
 	// Create test database
-	db, err := sql.Open("sqlite3", ":memory:")
+	config := getTestDBConfig()
+	db, err := sql.Open("postgres", config.ConnectionString())
 	if err != nil {
 		panic(err)
 	}

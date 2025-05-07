@@ -69,6 +69,7 @@ jobs:
             PR_DEPLOYMENT = "true"
             RESET_DB = "true"
             PR_NUMBER = "${{ github.event.pull_request.number }}"
+            DATABASE_URL = "postgres://postgres:${{ secrets.DB_PASSWORD }}@${{ env.APP_NAME }}-db.internal:5432/bennwallet"
             YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
             YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
             YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
