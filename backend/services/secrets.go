@@ -26,38 +26,22 @@ type Secret struct {
 }
 
 // StoreSecret stores a secret in fly.io's secret store if available, otherwise in the database
-func StoreSecret(userID string, secretType SecretType, value string) error {
+func StoreSecret(userID string, secretType SecretType, secretValue string) error {
 	// Check if we're running on Fly.io
 	if os.Getenv("FLY_APP_NAME") != "" {
-		// For Fly.io, we use the FLY_API_TOKEN to manage secrets
-		// The secret name will be in the format: YNAB_TOKEN_USER_1
-		secretName := fmt.Sprintf("%s_USER_%s", strings.ToUpper(string(secretType)), userID)
-
-		// We're setting the secret through the Fly.io API
-		// In production, you'd need to authenticate with FLY_API_TOKEN
-		// For now, just log what would happen
-		log.Printf("Would store '%s' secret for user %s on Fly.io as '%s'", secretType, userID, secretName)
-
-		// When actually implementing with Fly.io, you would use their API:
-		// https://fly.io/docs/reference/secrets/#setting-secrets
+		// For Fly.io, we would need to call their API to store secrets
+		// This would be complex to do from the application, so we'll log instead
+		log.Printf("Running on Fly.io - secrets should be stored using 'fly secrets set' CLI")
+		log.Printf("To store this secret, run: fly secrets set %s_USER_%s=your_secret_value", strings.ToUpper(string(secretType)), userID)
+		return nil
 	}
 
-	// Regardless of Fly.io, we'll store a reference in the database
-	// For Fly.io, we only store a reference. For local, we store the actual encrypted value
-	hashedValue := value
-	if os.Getenv("FLY_APP_NAME") != "" {
-		// In prod, just store a placeholder since the real value is in Fly.io secrets
-		hashedValue = "[stored in fly.io secrets]"
-	} else {
-		// In local development, hash or encrypt the token here
-		// This is a simplified placeholder - use proper encryption in production
-		hashedValue = fmt.Sprintf("enc:%s", value)
-	}
+	// Not on Fly.io, store in database
+	hashedValue := fmt.Sprintf("enc:%s", secretValue)
 
-	// Store in database with last updated time
 	_, err := database.DB.Exec(`
 		INSERT INTO user_ynab_settings (user_id, token, budget_id, account_id, sync_enabled, last_synced)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT(user_id) DO UPDATE SET
 			token = excluded.token,
 			budget_id = excluded.budget_id,
@@ -90,7 +74,7 @@ func GetSecret(userID string, secretType SecretType) (string, error) {
 	// Not on Fly.io, retrieve from database
 	var tokenValue string
 	err := database.DB.QueryRow(`
-		SELECT token FROM user_ynab_settings WHERE user_id = ?
+		SELECT token FROM user_ynab_settings WHERE user_id = $1
 	`, userID).Scan(&tokenValue)
 
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strings"
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/middleware"
@@ -24,7 +23,7 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 
 	// Check if the user is an admin
 	var isAdmin bool
-	err := database.DB.QueryRow("SELECT isAdmin FROM users WHERE id = ?", userID).Scan(&isAdmin)
+	err := database.DB.QueryRow("SELECT is_admin FROM users WHERE id = $1", userID).Scan(&isAdmin)
 	if err != nil {
 		http.Error(w, "Failed to check user permissions: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -37,7 +36,7 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update query to include all fields
-	rows, err := database.DB.Query("SELECT id, username, name, status, isAdmin, role FROM users")
+	rows, err := database.DB.Query("SELECT id, username, name, status, is_admin, role FROM users")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -95,7 +94,7 @@ func GetUserByUsername(w http.ResponseWriter, r *http.Request) {
 	var status, role sql.NullString
 	var isAdmin sql.NullBool
 
-	err := database.DB.QueryRow("SELECT id, username, name, status, isAdmin, role FROM users WHERE username = ?", username).Scan(
+	err := database.DB.QueryRow("SELECT id, username, name, status, is_admin, role FROM users WHERE username = $1", username).Scan(
 		&user.ID, &user.Username, &user.Name, &status, &isAdmin, &role)
 
 	if err != nil {
@@ -129,7 +128,7 @@ func GetUserByUsername(w http.ResponseWriter, r *http.Request) {
 }
 
 // SyncFirebaseUser syncs a Firebase user with the backend database
-// This ensures that Firebase users exist in our users table
+// This ensures that Firebase users exist in our users table for permissions system
 func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		FirebaseID string `json:"firebaseId"`
@@ -149,82 +148,125 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Syncing Firebase user with ID: %s, Email: %s, Name: %s", request.FirebaseID, request.Email, request.Name)
 
-	// Check if this is a special case for Sarah's email
-	isSarahEmail := request.Email == "sarah.elizabeth.wallis@gmail.com"
-	// Check if this is Sarah's known Firebase UID
-	isSarahUID := request.FirebaseID == "4fWxBBh9NYhMlwop2SJGt1ZzzI22"
+	// Special case email and UID checks for privileged users
+	isSarah := request.Email == "sarah.elizabeth.wallis@gmail.com" ||
+		request.FirebaseID == "4fWxBBh9NYhMlwop2SJGt1ZzzI22"
+
+	isPatrick := request.Email == "patrickisgreat@gmail.com" ||
+		request.FirebaseID == "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"
 
 	// Check if user already exists by Firebase ID
 	var userID string
-	err := database.DB.QueryRow("SELECT id FROM users WHERE id = ?", request.FirebaseID).Scan(&userID)
+	err := database.DB.QueryRow("SELECT id FROM users WHERE id = $1", request.FirebaseID).Scan(&userID)
 
-	// If user doesn't exist by Firebase ID, but it's Sarah's email or UID, we need to handle migration
-	if err == sql.ErrNoRows && (isSarahEmail || isSarahUID) {
-		// Check if Sarah's legacy account exists (with ID=1)
-		var legacyExists bool
-		err = database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = '1' AND name = 'Sarah')").Scan(&legacyExists)
+	// If user doesn't exist by Firebase ID, but it's a special user, check for legacy account
+	if err == sql.ErrNoRows && (isSarah || isPatrick) {
+		// Check Sarah's legacy account
+		if isSarah {
+			var legacyExists bool
+			err = database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = '1' AND name = 'Sarah')").Scan(&legacyExists)
 
-		if err != nil {
-			log.Printf("Error checking for legacy Sarah account: %v", err)
-		} else if legacyExists {
-			log.Printf("Found legacy Sarah account, will update with Firebase ID")
+			if err == nil && legacyExists {
+				log.Printf("Found legacy Sarah account, updating with Firebase ID")
 
-			// Update the legacy account with the Firebase ID
-			_, err = database.DB.Exec(
-				"UPDATE users SET id = ?, username = ?, name = ? WHERE id = '1'",
-				request.FirebaseID, request.Email, request.Name)
+				// Update the legacy account with the Firebase ID
+				_, err = database.DB.Exec(
+					"UPDATE users SET id = $1, username = $2, name = $3, role = 'superadmin' WHERE id = '1'",
+					request.FirebaseID, request.Email, request.Name)
 
-			if err != nil {
-				log.Printf("Error updating legacy Sarah account: %v", err)
-				http.Error(w, "Failed to update user record: "+err.Error(), http.StatusInternalServerError)
-				return
+				if err != nil {
+					log.Printf("Error updating legacy Sarah account: %v", err)
+					http.Error(w, "Failed to update user record: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				// Update any transactions and categories linked to old ID
+				_, err = database.DB.Exec(
+					"UPDATE transactions SET user_id = $1 WHERE user_id = '1'",
+					request.FirebaseID)
+				if err != nil {
+					log.Printf("Error updating transactions for Sarah: %v", err)
+					// Continue anyway as this is not a critical error
+				}
+
+				_, err = database.DB.Exec(
+					"UPDATE categories SET user_id = $1 WHERE user_id = '1'",
+					request.FirebaseID)
+				if err != nil {
+					log.Printf("Error updating categories for Sarah: %v", err)
+					// Continue anyway as this is not a critical error
+				}
+
+				userID = request.FirebaseID
+				log.Printf("Successfully migrated Sarah's account to Firebase ID: %s", request.FirebaseID)
 			}
+		}
 
-			// Also update any transactions with userId = 1
-			_, err = database.DB.Exec(
-				"UPDATE transactions SET userId = ? WHERE userId = '1'",
-				request.FirebaseID)
+		// Check Patrick's legacy account
+		if isPatrick {
+			var legacyExists bool
+			err = database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = '2' AND name = 'Patrick')").Scan(&legacyExists)
 
-			if err != nil {
-				log.Printf("Error updating transactions for Sarah: %v", err)
-				// Continue anyway as this is not a critical error
+			if err == nil && legacyExists {
+				log.Printf("Found legacy Patrick account, updating with Firebase ID")
+
+				// Update the legacy account with the Firebase ID
+				_, err = database.DB.Exec(
+					"UPDATE users SET id = $1, username = $2, name = $3, role = 'superadmin' WHERE id = '2'",
+					request.FirebaseID, request.Email, request.Name)
+
+				if err != nil {
+					log.Printf("Error updating legacy Patrick account: %v", err)
+					http.Error(w, "Failed to update user record: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				// Update any transactions and categories linked to old ID
+				_, err = database.DB.Exec(
+					"UPDATE transactions SET user_id = $1 WHERE user_id = '2'",
+					request.FirebaseID)
+				if err != nil {
+					log.Printf("Error updating transactions for Patrick: %v", err)
+					// Continue anyway as this is not a critical error
+				}
+
+				_, err = database.DB.Exec(
+					"UPDATE categories SET user_id = $1 WHERE user_id = '2'",
+					request.FirebaseID)
+				if err != nil {
+					log.Printf("Error updating categories for Patrick: %v", err)
+					// Continue anyway as this is not a critical error
+				}
+
+				userID = request.FirebaseID
+				log.Printf("Successfully migrated Patrick's account to Firebase ID: %s", request.FirebaseID)
 			}
-
-			userID = request.FirebaseID
-			log.Printf("Successfully migrated Sarah's account to Firebase ID: %s", request.FirebaseID)
-
-			// Continue to return success below
 		}
 	}
 
-	// Check if this is one of our default admins
-	isDefaultAdmin := false
-	for _, name := range models.DefaultAdmins {
-		if request.Name == name ||
-			strings.Contains(request.Name, name) ||
-			isSarahEmail ||
-			isSarahUID ||
-			request.Email == "patrickisgreat@gmail.com" {
-			isDefaultAdmin = true
-			break
-		}
-	}
+	// Determine the appropriate role
+	var role string
+	var isAdmin bool
 
-	// Determine role based on default admin status
-	role := "user"
-	if isDefaultAdmin {
-		role = "admin"
+	if isSarah || isPatrick {
+		role = "superadmin"
+		isAdmin = true
+		log.Printf("Setting superadmin role for user %s", request.Email)
+	} else {
+		// Default regular user
+		role = "user"
+		isAdmin = false
 	}
 
 	if userID == "" {
-		// User doesn't exist, create a new one
+		// User doesn't exist, create a new one with appropriate permissions
 		_, err = database.DB.Exec(
-			"INSERT INTO users (id, username, name, status, isAdmin, role) VALUES (?, ?, ?, ?, ?, ?)",
+			"INSERT INTO users (id, username, name, status, is_admin, role) VALUES ($1, $2, $3, $4, $5, $6)",
 			request.FirebaseID,
 			request.Email,
 			request.Name,
 			"approved",
-			isDefaultAdmin,
+			isAdmin,
 			role,
 		)
 
@@ -234,13 +276,13 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 		}
 
 		userID = request.FirebaseID
-		log.Printf("Created new user with Firebase ID: %s", request.FirebaseID)
-	} else if isDefaultAdmin {
-		// User exists, but we need to ensure they're an admin if they're a default admin
+		log.Printf("Created new user with Firebase ID: %s, role: %s", request.FirebaseID, role)
+	} else if isSarah || isPatrick {
+		// User exists, but we need to ensure privileged users have proper role
 		_, err = database.DB.Exec(
-			"UPDATE users SET isAdmin = ?, role = ? WHERE id = ?",
+			"UPDATE users SET is_admin = $1, role = $2 WHERE id = $3",
 			true,
-			"admin",
+			role,
 			request.FirebaseID,
 		)
 
@@ -249,13 +291,14 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Updated privileges for existing user: %s", request.FirebaseID)
+		log.Printf("Updated privileges for existing user: %s to role: %s", request.FirebaseID, role)
 	}
 
 	// Return success with user ID
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"id": userID,
+		"id":   userID,
+		"role": role,
 	})
 }
 
@@ -304,11 +347,11 @@ func CreateOrUpdateFirebaseUser(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this user already exists
 	var existingID string
-	err = database.DB.QueryRow("SELECT id FROM users WHERE id = ?", firebaseUID).Scan(&existingID)
+	err = database.DB.QueryRow("SELECT id FROM users WHERE id = $1", firebaseUID).Scan(&existingID)
 	if err == nil {
 		// User exists, update the record
 		_, err = database.DB.Exec(
-			"UPDATE users SET name = ?, username = ?, isAdmin = ? WHERE id = ?",
+			"UPDATE users SET name = $1, username = $2, is_admin = $3 WHERE id = $4",
 			userRequest.Name, userRequest.Username, isAdmin, firebaseUID)
 
 		if err != nil {
@@ -320,7 +363,7 @@ func CreateOrUpdateFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Create a new user record with this Firebase UID
 		_, err = database.DB.Exec(
-			"INSERT INTO users (id, username, name, status, isAdmin) VALUES (?, ?, ?, ?, ?)",
+			"INSERT INTO users (id, username, name, status, is_admin) VALUES ($1, $2, $3, $4, $5)",
 			firebaseUID, userRequest.Username, userRequest.Name, status, isAdmin)
 
 		if err != nil {
@@ -328,7 +371,7 @@ func CreateOrUpdateFirebaseUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Created new user with Firebase UID %s, isAdmin: %v", firebaseUID, isAdmin)
+		log.Printf("Created new user with Firebase UID %s, is_admin: %v", firebaseUID, isAdmin)
 	}
 
 	// Return the user info

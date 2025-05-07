@@ -31,12 +31,14 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Received request: %+v", request)
 
+	// Check if columns exist using PostgreSQL information_schema
 	// Check if the optional column exists
 	var hasOptionalColumn bool
 	err := database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'optional'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'optional'
+		)
 	`).Scan(&hasOptionalColumn)
 
 	if err != nil {
@@ -47,9 +49,10 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 	// Check if the transaction_date column exists
 	var hasTransactionDateColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'transaction_date'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'transaction_date'
+		)
 	`).Scan(&hasTransactionDateColumn)
 
 	if err != nil {
@@ -57,16 +60,17 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		hasTransactionDateColumn = false
 	}
 
-	// Check if the userId column exists
+	// Check if the user_id column exists
 	var hasUserIdColumn bool
 	err = database.DB.QueryRow(`
-		SELECT COUNT(*) > 0 
-		FROM pragma_table_info('transactions') 
-		WHERE name = 'userId'
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'user_id'
+		)
 	`).Scan(&hasUserIdColumn)
 
 	if err != nil {
-		log.Printf("Error checking for userId column: %v", err)
+		log.Printf("Error checking for user_id column: %v", err)
 		hasUserIdColumn = false
 	}
 
@@ -86,20 +90,20 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("Error getting accessible resources: %v", err)
 			// Fallback to only showing the user's own transactions
-			query += " AND userId = ?"
+			query += " AND user_id = $1"
 			args = append(args, userID)
 		} else {
 			// Build a query to include all accessible user transactions
 			if len(accessibleUsers) > 0 {
 				placeholders := make([]string, len(accessibleUsers))
 				for i := range accessibleUsers {
-					placeholders[i] = "?"
+					placeholders[i] = fmt.Sprintf("$%d", len(args)+1)
 					args = append(args, accessibleUsers[i])
 				}
-				query += fmt.Sprintf(" AND (userId IN (%s) OR userId IS NULL)", strings.Join(placeholders, ","))
+				query += fmt.Sprintf(" AND (user_id IN (%s) OR user_id IS NULL)", strings.Join(placeholders, ","))
 			} else {
 				// Fallback to only showing the user's own transactions
-				query += " AND userId = ?"
+				query += " AND user_id = $1"
 				args = append(args, userID)
 			}
 		}
@@ -107,11 +111,11 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 
 	// Add date filters
 	if request.StartDate != "" {
-		query += " AND date >= ?"
+		query += fmt.Sprintf(" AND date >= $%d", len(args)+1)
 		args = append(args, request.StartDate)
 	}
 	if request.EndDate != "" {
-		query += " AND date <= ?"
+		query += fmt.Sprintf(" AND date <= $%d", len(args)+1)
 		args = append(args, request.EndDate)
 	}
 
@@ -121,40 +125,40 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		startDate := fmt.Sprintf("%d-%02d-01", *request.TransactionDateYear, *request.TransactionDateMonth)
 		endDate := fmt.Sprintf("%d-%02d-31", *request.TransactionDateYear, *request.TransactionDateMonth)
 
-		query += " AND transaction_date >= ? AND transaction_date <= ?"
+		query += fmt.Sprintf(" AND transaction_date >= $%d AND transaction_date <= $%d", len(args)+1, len(args)+2)
 		args = append(args, startDate, endDate)
 	}
 
 	// Add category filter
 	if request.Category != "" {
-		query += " AND type = ?"
+		query += fmt.Sprintf(" AND type = $%d", len(args)+1)
 		args = append(args, request.Category)
 	}
 
 	// Add PayTo filter with proper SQL query structuring
 	if request.PayTo != "" {
-		query += " AND payTo LIKE ?"
+		query += fmt.Sprintf(" AND pay_to LIKE $%d", len(args)+1)
 		args = append(args, "%"+request.PayTo+"%")
 	}
 
 	// Add EnteredBy filter with proper SQL query structuring
 	if request.EnteredBy != "" {
-		query += " AND enteredBy LIKE ?"
+		query += fmt.Sprintf(" AND entered_by LIKE $%d", len(args)+1)
 		args = append(args, "%"+request.EnteredBy+"%")
 	}
 
 	// Add paid filter
 	if request.Paid != nil {
-		query += " AND paid = ?"
+		query += fmt.Sprintf(" AND paid = $%d", len(args)+1)
 		args = append(args, *request.Paid)
 	} else {
-		// Default to true (only show paid transactions)
-		query += " AND paid = 1"
+		// Default to false (don't filter on paid status)
+		query += " AND paid = false"
 	}
 
 	// Add optional filter if the column exists
 	if hasOptionalColumn && (request.Optional == nil || *request.Optional == false) {
-		query += " AND (optional = 0 OR optional IS NULL)"
+		query += " AND (optional = false OR optional IS NULL)"
 	}
 
 	// Add grouping and ordering
