@@ -27,6 +27,10 @@ func main() {
 	// Check if we're running in database reset mode
 	isResetDB := os.Getenv("RESET_DB") == "true" || *resetDB
 
+	// Debug - print RESET_DB value
+	log.Printf("RESET_DB environment variable value: '%s'", os.Getenv("RESET_DB"))
+	log.Printf("Is reset DB flag: %v", isResetDB)
+
 	// Check if this is a PR deployment
 	isPRDeployment := os.Getenv("PR_DEPLOYMENT") == "true"
 
@@ -36,11 +40,9 @@ func main() {
 		os.Getenv("ENVIRONMENT") != "production" &&
 		os.Getenv("ENV") != "production"
 
-	// In development mode, always reset the database unless explicitly disabled
-	if isDevelopment && os.Getenv("NO_DB_RESET") != "true" {
-		log.Println("Running in development mode - automatically resetting database")
-		isResetDB = true
-	}
+	// In development mode, we don't automatically reset the database
+	// User must explicitly set RESET_DB=true or use the --reset-db flag
+	// This ensures we don't lose data every time the server starts
 
 	if isResetDB {
 		log.Println("Running in database reset mode")
@@ -70,7 +72,7 @@ func main() {
 
 	// Run migrations (including test data seeding if in dev/PR environment)
 	log.Println("Running migrations...")
-	err = migrations.RunMigrations(database.DB)
+	err = migrations.RunMigrations(database.DB, isResetDB)
 	if err != nil {
 		log.Printf("Warning: Failed to run migrations: %v", err)
 	}

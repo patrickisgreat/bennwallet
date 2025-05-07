@@ -8,12 +8,13 @@ import (
 )
 
 // RunMigrations executes all migrations in the correct order
-func RunMigrations(db *sql.DB) error {
+// isResetDB indicates if the database should be reset before running migrations
+func RunMigrations(db *sql.DB, isResetDB bool) error {
 	log.Println("Running migrations...")
 
-	// If RESET_DB is true, handle it first before any other operations
-	if os.Getenv("RESET_DB") == "true" {
-		log.Println("RESET_DB is true - resetting database before migrations...")
+	// If isResetDB is true, handle it first before any other operations
+	if isResetDB {
+		log.Println("Database reset requested - resetting database before migrations...")
 
 		// Drop all tables
 		if err := DropAllTables(db); err != nil {

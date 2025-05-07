@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 )
 
 // SeedTestData seeds test data for development and testing environments ONLY.
@@ -72,78 +71,7 @@ func SeedTestData(db *sql.DB) error {
 		}
 	}
 
-	// 2. Seed sample transaction data
-	sampleTransactions := []struct {
-		id          string
-		amount      float64
-		description string
-		date        string
-		txType      string
-		payTo       string
-		paid        bool
-		enteredBy   string
-		userId      string
-	}{
-		{
-			id:          "tx_1",
-			amount:      42.50,
-			description: "Groceries",
-			date:        "2023-08-15",
-			txType:      "expense",
-			payTo:       "Supermarket",
-			paid:        true,
-			enteredBy:   "1",
-			userId:      "1",
-		},
-		{
-			id:          "tx_2",
-			amount:      1200.00,
-			description: "Rent",
-			date:        "2023-08-01",
-			txType:      "expense",
-			payTo:       "Landlord",
-			paid:        true,
-			enteredBy:   "1",
-			userId:      "1",
-		},
-		{
-			id:          "tx_3",
-			amount:      85.99,
-			description: "Internet bill",
-			date:        "2023-08-10",
-			txType:      "expense",
-			payTo:       "ISP",
-			paid:        false,
-			enteredBy:   "2",
-			userId:      "2",
-		},
-		{
-			id:          "tx_4",
-			amount:      2500.00,
-			description: "Salary",
-			date:        "2023-08-25",
-			txType:      "income",
-			payTo:       "Employer",
-			paid:        true,
-			enteredBy:   "2",
-			userId:      "2",
-		},
-	}
-
-	for _, tx := range sampleTransactions {
-		_, err := db.Exec(`
-			INSERT INTO transactions 
-			(id, amount, description, date, type, pay_to, paid, entered_by, user_id) 
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			ON CONFLICT (id) DO NOTHING
-		`, tx.id, tx.amount, tx.description, tx.date, tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.userId)
-
-		if err != nil {
-			return fmt.Errorf("failed to insert transaction %s: %w", tx.id, err)
-		}
-	}
-
-	// 3. Add some sample categories
+	// 3. Add some sample categories first (moved up to create them before transactions)
 	sampleCategories := []struct {
 		name        string
 		description string
@@ -157,7 +85,10 @@ func SeedTestData(db *sql.DB) error {
 		{name: "Utilities", description: "Bills and services", user_id: "2", color: "#F44336"},
 	}
 
+	categoryIds := make(map[string]int) // Map to store category IDs by name and user
+
 	for _, cat := range sampleCategories {
+		// Insert category if it doesn't exist
 		_, err := db.Exec(`
 			INSERT INTO categories (name, description, user_id, color) 
 			VALUES ($1, $2, $3, $4)
@@ -167,67 +98,152 @@ func SeedTestData(db *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("failed to insert category %s: %w", cat.name, err)
 		}
-	}
 
-	// 4. Add transaction categories (connecting transactions to categories)
-	// First get category IDs
-	type categoryInfo struct {
-		id     int
-		name   string
-		userId string
-	}
-
-	var categories []categoryInfo
-	rows, err := db.Query("SELECT id, name, user_id FROM categories")
-	if err != nil {
-		return fmt.Errorf("failed to query categories: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cat categoryInfo
-		if err := rows.Scan(&cat.id, &cat.name, &cat.userId); err != nil {
-			return fmt.Errorf("failed to scan category: %w", err)
-		}
-		categories = append(categories, cat)
-	}
-
-	// Connect transactions to categories
-	transactionCategories := []struct {
-		transactionId string
-		categoryName  string
-		userId        string
-		amount        float64
-	}{
-		{transactionId: "tx_1", categoryName: "Food", userId: "1", amount: 42.50},
-		{transactionId: "tx_2", categoryName: "Housing", userId: "1", amount: 1200.00},
-		{transactionId: "tx_3", categoryName: "Utilities", userId: "2", amount: 85.99},
-	}
-
-	for _, tc := range transactionCategories {
-		// Find matching category
+		// Get the category ID for later use
 		var categoryId int
-		for _, cat := range categories {
-			if cat.name == tc.categoryName && cat.userId == tc.userId {
-				categoryId = cat.id
-				break
-			}
+		err = db.QueryRow(`
+			SELECT id FROM categories 
+			WHERE name = $1 AND user_id = $2
+		`, cat.name, cat.user_id).Scan(&categoryId)
+
+		if err != nil {
+			return fmt.Errorf("failed to get id for category %s: %w", cat.name, err)
 		}
 
-		if categoryId > 0 {
-			_, err := db.Exec(`
-				INSERT INTO transaction_categories (transaction_id, category_id, amount, created_at)
-				VALUES ($1, $2, $3, $4)
-				ON CONFLICT (transaction_id, category_id) DO NOTHING
-			`, tc.transactionId, categoryId, tc.amount, time.Now())
-
-			if err != nil {
-				return fmt.Errorf("failed to insert transaction category: %w", err)
-			}
-		}
+		// Store category ID in the map using composite key of name + user_id
+		categoryIds[cat.name+"-"+cat.user_id] = categoryId
 	}
 
-	// 5. Seed user permissions
+	// 2. Seed sample transaction data
+	sampleTransactions := []struct {
+		id           string
+		amount       float64
+		description  string
+		date         string
+		txType       string
+		payTo        string
+		paid         bool
+		enteredBy    string
+		userId       string
+		categoryName string // Added category name
+	}{
+		{
+			id:           "tx_1",
+			amount:       42.50,
+			description:  "Groceries",
+			date:         "2023-08-15",
+			txType:       "expense",
+			payTo:        "Supermarket",
+			paid:         true,
+			enteredBy:    "1",
+			userId:       "1",
+			categoryName: "Food",
+		},
+		{
+			id:           "tx_2",
+			amount:       1200.00,
+			description:  "Rent",
+			date:         "2023-08-01",
+			txType:       "expense",
+			payTo:        "Landlord",
+			paid:         true,
+			enteredBy:    "1",
+			userId:       "1",
+			categoryName: "Housing",
+		},
+		{
+			id:           "tx_3",
+			amount:       85.99,
+			description:  "Internet bill",
+			date:         "2023-08-10",
+			txType:       "expense",
+			payTo:        "ISP",
+			paid:         false,
+			enteredBy:    "2",
+			userId:       "2",
+			categoryName: "Utilities",
+		},
+		{
+			id:           "tx_4",
+			amount:       2500.00,
+			description:  "Salary",
+			date:         "2023-08-25",
+			txType:       "income",
+			payTo:        "Employer",
+			paid:         true,
+			enteredBy:    "2",
+			userId:       "2",
+			categoryName: "Entertainment", // Just for testing purposes
+		},
+	}
+
+	// Check if transaction_categories table exists
+	var hasTransactionCategoriesTable bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_name = 'transaction_categories'
+		)
+	`).Scan(&hasTransactionCategoriesTable)
+
+	if err != nil {
+		return fmt.Errorf("failed to check for transaction_categories table: %w", err)
+	}
+
+	// Create transaction_categories table if it doesn't exist
+	if !hasTransactionCategoriesTable {
+		_, err = db.Exec(`
+			CREATE TABLE IF NOT EXISTS transaction_categories (
+				id SERIAL PRIMARY KEY,
+				transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+				category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+				amount NUMERIC(15,2) NOT NULL,
+				created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE(transaction_id, category_id)
+			)
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to create transaction_categories table: %w", err)
+		}
+		log.Println("Created transaction_categories table")
+	}
+
+	for _, tx := range sampleTransactions {
+		// Insert transaction
+		_, err := db.Exec(`
+			INSERT INTO transactions 
+			(id, amount, description, date, type, pay_to, paid, entered_by, user_id) 
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (id) DO NOTHING
+		`, tx.id, tx.amount, tx.description, tx.date, tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.userId)
+
+		if err != nil {
+			return fmt.Errorf("failed to insert transaction %s: %w", tx.id, err)
+		}
+
+		// Get the category ID
+		categoryId, exists := categoryIds[tx.categoryName+"-"+tx.userId]
+		if !exists {
+			log.Printf("Warning: Category %s not found for user %s, skipping association", tx.categoryName, tx.userId)
+			continue
+		}
+
+		// Associate the transaction with the category
+		_, err = db.Exec(`
+			INSERT INTO transaction_categories 
+			(transaction_id, category_id, amount) 
+			VALUES ($1, $2, $3)
+			ON CONFLICT (transaction_id, category_id) DO NOTHING
+		`, tx.id, categoryId, tx.amount)
+
+		if err != nil {
+			return fmt.Errorf("failed to associate transaction %s with category %s: %w", tx.id, tx.categoryName, err)
+		}
+
+		log.Printf("Associated transaction %s with category %s (ID: %d)", tx.id, tx.categoryName, categoryId)
+	}
+
+	// 4. Seed user permissions
 	permissionsData := []struct {
 		grantedUserId  string
 		ownerUserId    string
