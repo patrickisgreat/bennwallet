@@ -127,6 +127,40 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 			t.UserID = userId.String
 		}
 
+		// Check if transaction_categories table exists
+		var hasTransactionCategoriesTable bool
+		err := database.DB.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.tables 
+				WHERE table_name = 'transaction_categories'
+			)
+		`).Scan(&hasTransactionCategoriesTable)
+
+		if err == nil && hasTransactionCategoriesTable {
+			// Fetch associated categories
+			catRows, err := database.DB.Query(`
+				SELECT c.id, c.name, c.description, c.color, c.user_id
+				FROM categories c
+				JOIN transaction_categories tc ON c.id = tc.category_id
+				WHERE tc.transaction_id = $1
+			`, t.ID)
+
+			if err == nil {
+				defer catRows.Close()
+				var categories []models.Category
+				for catRows.Next() {
+					var cat models.Category
+					if err := catRows.Scan(&cat.ID, &cat.Name, &cat.Description, &cat.Color, &cat.UserID); err == nil {
+						categories = append(categories, cat)
+					}
+				}
+				catRows.Close() // Close here to avoid resource leak
+				if len(categories) > 0 {
+					t.Categories = categories
+				}
+			}
+		}
+
 		transactions = append(transactions, t)
 	}
 
@@ -199,89 +233,24 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 		`
 	}
 
-	// Add user ID check if the column exists
-	if hasUserIdColumn {
-		// Check if the user has permission to view this transaction
-		// First, get the owner of the transaction
-		var transactionOwnerID sql.NullString
-		ownerErr := database.DB.QueryRow("SELECT user_id FROM transactions WHERE id = $1", id).Scan(&transactionOwnerID)
+	var row *sql.Row
+	row = database.DB.QueryRow(query, id)
 
-		if ownerErr != nil && ownerErr != sql.ErrNoRows {
-			log.Printf("Error getting transaction owner: %v", ownerErr)
-			http.Error(w, "Error checking transaction access", http.StatusInternalServerError)
-			return
-		}
-
-		var resourceOwnerID string
-		if ownerErr == sql.ErrNoRows || !transactionOwnerID.Valid {
-			// Transaction doesn't exist or has no owner - allow access to continue with normal query
-			// This will be filtered properly in the next step
-			resourceOwnerID = userID // Default to the current user
-		} else {
-			resourceOwnerID = transactionOwnerID.String
-		}
-
-		// Check if the user has permission to access this transaction
-		hasAccess := middleware.CheckUserPermission(userID, resourceOwnerID, models.ResourceTransactions, models.PermissionRead)
-
-		if !hasAccess && userID != resourceOwnerID {
-			log.Printf("User %s does not have permission to access transaction %s owned by %s",
-				userID, id, resourceOwnerID)
-			http.Error(w, "Transaction not found", http.StatusNotFound)
-			return
-		}
-
-		// Build the query with access control
-		query += " AND (user_id = $2 OR user_id IS NULL)"
-		args := []interface{}{id, resourceOwnerID}
-
-		if hasOptionalColumn && hasUserIdColumn {
-			err = database.DB.QueryRow(query, args...).Scan(
-				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
-		} else if hasOptionalColumn {
-			err = database.DB.QueryRow(query, args...).Scan(
-				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
-		} else {
-			err = database.DB.QueryRow(query, args...).Scan(
-				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
-		}
-
-		if err != nil {
-			if err == sql.ErrNoRows {
-				http.Error(w, "Transaction not found", http.StatusNotFound)
-			} else {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			}
-			return
-		}
-
-		if userId.Valid {
-			t.UserID = userId.String
-		}
+	if hasOptionalColumn && hasUserIdColumn {
+		err = row.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId)
+	} else if hasOptionalColumn {
+		err = row.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
 	} else {
-		// No userId column, just query by ID
-		args := []interface{}{id}
-		if hasOptionalColumn {
-			err = database.DB.QueryRow(query, args...).Scan(
-				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional)
-		} else {
-			err = database.DB.QueryRow(query, args...).Scan(
-				&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate,
-				&t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
-		}
+		err = row.Scan(&t.ID, &t.Amount, &t.Description, &t.Date, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy)
+	}
 
-		if err != nil {
-			if err == sql.ErrNoRows {
-				http.Error(w, "Transaction not found", http.StatusNotFound)
-			} else {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			}
-			return
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.NotFound(w, r)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
+		return
 	}
 
 	if paidDate.Valid {
@@ -290,7 +259,53 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 	if transactionDate.Valid {
 		t.TransactionDate = transactionDate.Time
 	} else {
-		t.TransactionDate = t.Date // Fall back to entered date if transaction date not available
+		t.TransactionDate = t.Date // Fall back to entered date
+	}
+	if hasUserIdColumn && userId.Valid {
+		t.UserID = userId.String
+	}
+
+	// Check if the current user has permission to access this transaction
+	if t.UserID != "" && t.UserID != userID {
+		// Check if the user has permission to view this transaction through the permissions system
+		hasPermission := middleware.CheckUserPermission(userID, t.UserID, models.ResourceTransactions, models.PermissionRead)
+		if !hasPermission {
+			http.Error(w, "You don't have permission to view this transaction", http.StatusForbidden)
+			return
+		}
+	}
+
+	// Check if transaction_categories table exists
+	var hasTransactionCategoriesTable bool
+	err = database.DB.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables 
+			WHERE table_name = 'transaction_categories'
+		)
+	`).Scan(&hasTransactionCategoriesTable)
+
+	if err == nil && hasTransactionCategoriesTable {
+		// Fetch associated categories
+		catRows, err := database.DB.Query(`
+			SELECT c.id, c.name, c.description, c.color, c.user_id
+			FROM categories c
+			JOIN transaction_categories tc ON c.id = tc.category_id
+			WHERE tc.transaction_id = $1
+		`, t.ID)
+
+		if err == nil {
+			defer catRows.Close()
+			var categories []models.Category
+			for catRows.Next() {
+				var cat models.Category
+				if err := catRows.Scan(&cat.ID, &cat.Name, &cat.Description, &cat.Color, &cat.UserID); err == nil {
+					categories = append(categories, cat)
+				}
+			}
+			if len(categories) > 0 {
+				t.Categories = categories
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -412,6 +427,55 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 		hasTransactionDateColumn = true
 	}
 
+	// Check if the transaction_categories table exists
+	var hasTransactionCategoriesTable bool
+	err = database.DB.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables 
+			WHERE table_name = 'transaction_categories'
+		)
+	`).Scan(&hasTransactionCategoriesTable)
+
+	if err != nil {
+		log.Printf("Error checking for transaction_categories table: %v", err)
+		hasTransactionCategoriesTable = false
+	}
+
+	// Create transaction_categories table if it doesn't exist
+	if !hasTransactionCategoriesTable {
+		log.Printf("Creating transaction_categories table")
+		_, err = database.DB.Exec(`
+			CREATE TABLE IF NOT EXISTS transaction_categories (
+				id SERIAL PRIMARY KEY,
+				transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+				category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+				amount NUMERIC(15,2) NOT NULL,
+				created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE(transaction_id, category_id)
+			)
+		`)
+		if err != nil {
+			log.Printf("Error creating transaction_categories table: %v", err)
+			http.Error(w, "Error creating transaction_categories table: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		hasTransactionCategoriesTable = true
+		log.Println("Created transaction_categories table")
+	}
+
+	// Start a database transaction to ensure both the transaction and its category associations are saved atomically
+	tx, err := database.DB.Begin()
+	if err != nil {
+		log.Printf("Error starting database transaction: %v", err)
+		http.Error(w, "Error starting database transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
 	// Build query based on available columns
 	insertQuery := `
 		INSERT INTO transactions (id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by`
@@ -438,11 +502,118 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Executing query: %s with %d args", insertQuery, len(insertArgs))
 
-	_, err = database.DB.Exec(insertQuery, insertArgs...)
+	_, err = tx.Exec(insertQuery, insertArgs...)
 	if err != nil {
 		log.Printf("Error inserting transaction: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Handle category associations if present
+	if len(t.Categories) > 0 {
+		for _, category := range t.Categories {
+			// Ensure the category exists and get its ID
+			var categoryID int
+			err = tx.QueryRow(`
+				SELECT id FROM categories 
+				WHERE name = $1 AND user_id = $2
+			`, category.Name, userID).Scan(&categoryID)
+
+			if err != nil {
+				if err == sql.ErrNoRows {
+					// Category doesn't exist, create it
+					log.Printf("Category %s not found, creating it", category.Name)
+					err = tx.QueryRow(`
+						INSERT INTO categories (name, description, user_id, color)
+						VALUES ($1, $2, $3, $4)
+						RETURNING id
+					`, category.Name, category.Description, userID, category.Color).Scan(&categoryID)
+
+					if err != nil {
+						log.Printf("Error creating category %s: %v", category.Name, err)
+						http.Error(w, "Error creating category: "+err.Error(), http.StatusInternalServerError)
+						return
+					}
+				} else {
+					log.Printf("Error finding category %s: %v", category.Name, err)
+					http.Error(w, "Error finding category: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+
+			// Associate the transaction with the category
+			_, err = tx.Exec(`
+				INSERT INTO transaction_categories (transaction_id, category_id, amount)
+				VALUES ($1, $2, $3)
+			`, t.ID, categoryID, t.Amount)
+
+			if err != nil {
+				log.Printf("Error associating transaction with category: %v", err)
+				http.Error(w, "Error associating transaction with category: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			log.Printf("Associated transaction %s with category %s (ID: %d)", t.ID, category.Name, categoryID)
+		}
+	} else if t.Type != "" {
+		// If we have a 'type' field but no explicit categories, try to use it as a category
+		// This is for backward compatibility with the previous approach
+		var categoryID int
+		err = tx.QueryRow(`
+			SELECT id FROM categories 
+			WHERE name = $1 AND user_id = $2
+		`, t.Type, userID).Scan(&categoryID)
+
+		if err == nil {
+			// We found a category matching the 'type' field
+			_, err = tx.Exec(`
+				INSERT INTO transaction_categories (transaction_id, category_id, amount)
+				VALUES ($1, $2, $3)
+			`, t.ID, categoryID, t.Amount)
+
+			if err != nil {
+				log.Printf("Error associating transaction with type-derived category: %v", err)
+				// This is not a critical error, so we'll just log it but continue
+			} else {
+				log.Printf("Associated transaction %s with category derived from type: %s (ID: %d)", t.ID, t.Type, categoryID)
+			}
+		} else if err != sql.ErrNoRows {
+			// If it's an error other than "not found", log it
+			log.Printf("Error checking for category based on type %s: %v", t.Type, err)
+		}
+	}
+
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		http.Error(w, "Error committing transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// If we were successful, try to load the categories for the response
+	if len(t.Categories) == 0 {
+		rows, err := database.DB.Query(`
+			SELECT c.id, c.name, c.description, c.color, c.user_id
+			FROM categories c
+			JOIN transaction_categories tc ON c.id = tc.category_id
+			WHERE tc.transaction_id = $1
+		`, t.ID)
+
+		if err == nil {
+			defer rows.Close()
+			var categories []models.Category
+			for rows.Next() {
+				var cat models.Category
+				err = rows.Scan(&cat.ID, &cat.Name, &cat.Description, &cat.Color, &cat.UserID)
+				if err == nil {
+					categories = append(categories, cat)
+				}
+			}
+			if len(categories) > 0 {
+				t.Categories = categories
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -510,90 +681,216 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		hasTransactionDateColumn = false
 	}
 
-	// If columns don't exist, add them
-	if !hasOptionalColumn {
-		log.Printf("Adding optional column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN optional BOOLEAN NOT NULL DEFAULT false`)
-		if err != nil {
-			log.Printf("Error adding optional column: %v", err)
-			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		hasOptionalColumn = true
+	// Check if the transaction_categories table exists
+	var hasTransactionCategoriesTable bool
+	err = database.DB.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables 
+			WHERE table_name = 'transaction_categories'
+		)
+	`).Scan(&hasTransactionCategoriesTable)
+
+	if err != nil {
+		log.Printf("Error checking for transaction_categories table: %v", err)
+		hasTransactionCategoriesTable = false
 	}
 
-	if !hasUserIdColumn {
-		log.Printf("Adding user_id column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN user_id TEXT`)
-		if err != nil {
-			log.Printf("Error adding user_id column: %v", err)
-			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
-			return
+	// Get the original transaction's owner to check permissions
+	var originalOwnerID sql.NullString
+	err = database.DB.QueryRow(
+		"SELECT user_id FROM transactions WHERE id = $1", id,
+	).Scan(&originalOwnerID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Transaction not found", http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-		hasUserIdColumn = true
+		return
 	}
 
-	if !hasTransactionDateColumn {
-		log.Printf("Adding transaction_date column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN transaction_date TIMESTAMP WITH TIME ZONE`)
-		if err != nil {
-			log.Printf("Error adding transaction_date column: %v", err)
-			http.Error(w, "Error updating database schema: "+err.Error(), http.StatusInternalServerError)
+	// Check if the user has permission to update this transaction
+	if originalOwnerID.Valid && originalOwnerID.String != userID {
+		hasPermission := middleware.CheckUserPermission(userID, originalOwnerID.String, models.ResourceTransactions, models.PermissionWrite)
+		if !hasPermission {
+			http.Error(w, "You don't have permission to update this transaction", http.StatusForbidden)
 			return
 		}
-		hasTransactionDateColumn = true
 	}
 
-	// Build query based on available columns
+	// Start a database transaction to ensure both the transaction update and category associations are saved atomically
+	tx, err := database.DB.Begin()
+	if err != nil {
+		log.Printf("Error starting database transaction: %v", err)
+		http.Error(w, "Error starting database transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Build the update query based on available columns
 	updateQuery := `
-		UPDATE transactions 
-		SET amount = $1, description = $2, date = $3, transaction_date = $4, type = $5, pay_to = $6, paid = $7, paid_date = $8, entered_by = $9`
+		UPDATE transactions SET 
+		amount = $1, 
+		description = $2, 
+		date = $3, 
+		type = $4, 
+		pay_to = $5, 
+		paid = $6, 
+		paid_date = $7, 
+		entered_by = $8
+	`
+	updateArgs := []interface{}{
+		t.Amount, t.Description, t.Date,
+		t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy,
+	}
+	paramCount := 8
 
-	updateArgs := []interface{}{t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy}
+	if hasTransactionDateColumn {
+		updateQuery += fmt.Sprintf(", transaction_date = $%d", paramCount+1)
+		updateArgs = append(updateArgs, t.TransactionDate)
+		paramCount++
+	}
 
 	if hasOptionalColumn {
-		updateQuery += fmt.Sprintf(`, optional = $%d`, len(updateArgs)+1)
+		updateQuery += fmt.Sprintf(", optional = $%d", paramCount+1)
 		updateArgs = append(updateArgs, t.Optional)
+		paramCount++
 	}
 
-	if hasUserIdColumn {
-		updateQuery += fmt.Sprintf(`, user_id = $%d`, len(updateArgs)+1)
-		updateArgs = append(updateArgs, userID) // Use the authenticated user ID
-	}
-
-	updateQuery += fmt.Sprintf(` WHERE id = $%d`, len(updateArgs)+1)
+	updateQuery += fmt.Sprintf(" WHERE id = $%d", paramCount+1)
 	updateArgs = append(updateArgs, id)
 
-	// If userId column exists, also check that user owns this transaction or has admin permission
-	if hasUserIdColumn {
-		updateQuery += fmt.Sprintf(` AND (user_id = $%d OR user_id IS NULL)`, len(updateArgs)+1)
-		updateArgs = append(updateArgs, userID)
-	}
-
-	log.Printf("Executing update query: %s with %d args", updateQuery, len(updateArgs))
-
-	result, err := database.DB.Exec(updateQuery, updateArgs...)
+	_, err = tx.Exec(updateQuery, updateArgs...)
 	if err != nil {
 		log.Printf("Error updating transaction: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error updating transaction: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Check if any rows were affected
-	rowsAffected, err := result.RowsAffected()
+	// Update category associations if the transaction_categories table exists
+	if hasTransactionCategoriesTable {
+		// Remove existing category associations
+		_, err = tx.Exec(`DELETE FROM transaction_categories WHERE transaction_id = $1`, id)
+		if err != nil {
+			log.Printf("Error removing existing category associations: %v", err)
+			http.Error(w, "Error updating category associations: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Add new category associations if present
+		if len(t.Categories) > 0 {
+			for _, category := range t.Categories {
+				// Ensure the category exists and get its ID
+				var categoryID int
+				err = tx.QueryRow(`
+					SELECT id FROM categories 
+					WHERE name = $1 AND user_id = $2
+				`, category.Name, userID).Scan(&categoryID)
+
+				if err != nil {
+					if err == sql.ErrNoRows {
+						// Category doesn't exist, create it
+						log.Printf("Category %s not found, creating it", category.Name)
+						err = tx.QueryRow(`
+							INSERT INTO categories (name, description, user_id, color)
+							VALUES ($1, $2, $3, $4)
+							RETURNING id
+						`, category.Name, category.Description, userID, category.Color).Scan(&categoryID)
+
+						if err != nil {
+							log.Printf("Error creating category %s: %v", category.Name, err)
+							http.Error(w, "Error creating category: "+err.Error(), http.StatusInternalServerError)
+							return
+						}
+					} else {
+						log.Printf("Error finding category %s: %v", category.Name, err)
+						http.Error(w, "Error finding category: "+err.Error(), http.StatusInternalServerError)
+						return
+					}
+				}
+
+				// Associate the transaction with the category
+				_, err = tx.Exec(`
+					INSERT INTO transaction_categories (transaction_id, category_id, amount)
+					VALUES ($1, $2, $3)
+				`, id, categoryID, t.Amount)
+
+				if err != nil {
+					log.Printf("Error associating transaction with category: %v", err)
+					http.Error(w, "Error associating transaction with category: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				log.Printf("Associated transaction %s with category %s (ID: %d)", id, category.Name, categoryID)
+			}
+		} else if t.Type != "" {
+			// Backward compatibility: if no explicit categories but Type field is set, use it as a category
+			var categoryID int
+			err = tx.QueryRow(`
+				SELECT id FROM categories 
+				WHERE name = $1 AND user_id = $2
+			`, t.Type, userID).Scan(&categoryID)
+
+			if err == nil {
+				// We found a category matching the 'type' field
+				_, err = tx.Exec(`
+					INSERT INTO transaction_categories (transaction_id, category_id, amount)
+					VALUES ($1, $2, $3)
+				`, id, categoryID, t.Amount)
+
+				if err != nil {
+					log.Printf("Error associating transaction with type-derived category: %v", err)
+					// Not a critical error, just log it
+				} else {
+					log.Printf("Associated transaction %s with category derived from type: %s (ID: %d)", id, t.Type, categoryID)
+				}
+			}
+		}
+	}
+
+	// Commit the transaction
+	err = tx.Commit()
 	if err != nil {
-		log.Printf("Error getting rows affected: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("Error committing transaction update: %v", err)
+		http.Error(w, "Error committing transaction update: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if rowsAffected == 0 {
-		log.Printf("No transaction found with id %s for user %s", id, userID)
-		http.Error(w, "Transaction not found or you don't have permission to modify it", http.StatusNotFound)
-		return
+	// Fetch the updated transaction with its categories for the response
+	t.ID = id // Ensure the ID is set
+
+	// Load updated categories
+	if hasTransactionCategoriesTable {
+		rows, err := database.DB.Query(`
+			SELECT c.id, c.name, c.description, c.color, c.user_id
+			FROM categories c
+			JOIN transaction_categories tc ON c.id = tc.category_id
+			WHERE tc.transaction_id = $1
+		`, id)
+
+		if err == nil {
+			defer rows.Close()
+			var categories []models.Category
+			for rows.Next() {
+				var cat models.Category
+				err = rows.Scan(&cat.ID, &cat.Name, &cat.Description, &cat.Color, &cat.UserID)
+				if err == nil {
+					categories = append(categories, cat)
+				}
+			}
+			if len(categories) > 0 {
+				t.Categories = categories
+			}
+		}
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(t)
 }
 
 func DeleteTransaction(w http.ResponseWriter, r *http.Request) {
