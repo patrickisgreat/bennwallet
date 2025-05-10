@@ -1,3 +1,14 @@
+## [1.3.2](https://github.com/patrickisgreat/bennwallet/compare/v1.3.1...v1.3.2) (2025-05-10)
+
+### Bug Fixes
+
+* boop ([bc23657](https://github.com/patrickisgreat/bennwallet/commit/bc236576f4141f2b0c2465b6d192fbb71e2faa15))
+* db seeding works now ([1971a2b](https://github.com/patrickisgreat/bennwallet/commit/1971a2bfa97b1ae42116a24e6eb442aa5f58395b))
+* gha again ([71fb085](https://github.com/patrickisgreat/bennwallet/commit/71fb08534646015aaf72263a490e61d52223e23b))
+* more progress on postgres rewrite ([d94a6f3](https://github.com/patrickisgreat/bennwallet/commit/d94a6f32e4d7d73809832ea946a53f21e150f642))
+* scaffold permissions rebuild ([63edfc2](https://github.com/patrickisgreat/bennwallet/commit/63edfc242bc152f3dfce881a9008c7d17ffb1c65))
+* woah ([a0be6f3](https://github.com/patrickisgreat/bennwallet/commit/a0be6f3ae235610de78d997a2deb6ec766c5f47e))
+
 ## [1.3.1](https://github.com/patrickisgreat/bennwallet/compare/v1.3.0...v1.3.1) (2025-05-06)
 
 ### Bug Fixes
