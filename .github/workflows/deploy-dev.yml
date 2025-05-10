@@ -191,10 +191,10 @@ jobs:
             ENVIRONMENT = "development"
             APP_ENV = "development"
             RESET_DB = "true"
-            DATABASE_URL = "postgres://postgres:${{ secrets.DB_PASSWORD }}@${{ env.FLY_DEV_APP_NAME }}-db.internal:5432/bennwallet"
             YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
             YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
             YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
+            DATABASE_URL = "postgres://postgres:postgres@localhost:5432/bennwallet?sslmode=disable"
 
           [http_service]
             internal_port = 8080
@@ -208,6 +208,21 @@ jobs:
             cpu_kind = "shared"
             cpus = 1
             memory_mb = 1024
+            
+          [[mounts]]
+            source = "${{ env.VOLUME_NAME }}"
+            destination = "/data"
+            
+            [mounts.options]
+              size = "1"
+
+          # Add Postgres as a service
+          [[services]]
+            internal_port = 5432
+            protocol = "tcp"
+            
+            [[services.ports]]
+              port = "5432"
           EOF
 
       - name: Check if volume exists and create if needed
@@ -218,6 +233,15 @@ jobs:
           else
             echo "Volume ${{ env.VOLUME_NAME }} already exists"
           fi
+
+      - name: Configure database connection for the app
+        run: |
+          echo "Configuring database connection for the app..."
+          
+          # Set PostgreSQL connection string as a secret
+          flyctl secrets set DATABASE_URL="postgres://postgres:postgres@localhost:5432/bennwallet?sslmode=disable" --app "${{ env.FLY_DEV_APP_NAME }}"
+          
+          echo "Database connection configured"
 
       - name: Deploy to Fly.io Development
         run: |

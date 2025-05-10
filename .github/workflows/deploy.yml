@@ -222,6 +222,22 @@ jobs:
           echo "Current volumes:"
           flyctl volumes list --app ${{ env.FLY_PROD_APP_NAME }}
 
+      - name: Check and setup PostgreSQL
+        run: |
+          echo "Checking for PostgreSQL database..."
+          
+          # Check if bennwallet-prod-db exists
+          if ! flyctl postgres list | grep -q "bennwallet-prod-db"; then
+            echo "Creating PostgreSQL database cluster..."
+            flyctl postgres create --name bennwallet-prod-db --org personal --region sjc --vm-size shared-cpu-1x --volume-size 1
+          else
+            echo "PostgreSQL database cluster already exists."
+          fi
+          
+          # Attach the database to the app (will do nothing if already attached)
+          echo "Attaching PostgreSQL to the app..."
+          flyctl postgres attach bennwallet-prod-db --app ${{ env.FLY_PROD_APP_NAME }} || true
+
       - name: Create production fly.toml
         run: |
           cat > fly.toml << EOF
@@ -240,7 +256,6 @@ jobs:
             PORT = "8080"
             NODE_ENV = "production"
             ENVIRONMENT = "production"
-            DATABASE_URL = "postgres://postgres:${{ secrets.DB_PASSWORD }}@${{ env.FLY_PROD_APP_NAME }}-db.internal:5432/bennwallet"
             YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
             YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
             YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
