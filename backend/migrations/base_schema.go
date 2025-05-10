@@ -22,11 +22,15 @@ func CreateBaseSchema(db *sql.DB) error {
 			amount NUMERIC(15,2) NOT NULL,
 			description TEXT NOT NULL,
 			date TEXT NOT NULL,
+			transaction_date TEXT,
 			type TEXT NOT NULL,
 			pay_to TEXT,
 			paid BOOLEAN NOT NULL DEFAULT FALSE,
+			paid_date TEXT,
+			optional BOOLEAN NOT NULL DEFAULT FALSE,
 			entered_by TEXT NOT NULL,
-			user_id TEXT NOT NULL REFERENCES users(id)
+			user_id TEXT NOT NULL REFERENCES users(id),
+			note TEXT
 		);
 
 		CREATE TABLE IF NOT EXISTS categories (

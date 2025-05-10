@@ -46,11 +46,23 @@ func InitDB() error {
 	return nil
 }
 
-// SeedDefaultUsers seeds default users (proxy for backward compatibility)
+// SeedDefaultUsers seeds default users for testing
 func SeedDefaultUsers() error {
-	// This function is kept for backward compatibility
-	// Default users are now seeded as part of SeedDefaultData
-	return nil
+	// Insert default users for testing purposes
+	_, err := DB.Exec(`
+		INSERT INTO users (id, username, name, status, is_admin, role)
+		VALUES 
+		('1', 'sarah', 'Sarah', 'approved', true, 'admin'),
+		('2', 'patrick', 'Patrick', 'approved', true, 'admin')
+		ON CONFLICT (id) DO UPDATE SET
+		   username = EXCLUDED.username,
+		   name = EXCLUDED.name,
+		   status = EXCLUDED.status,
+		   is_admin = EXCLUDED.is_admin,
+		   role = EXCLUDED.role
+	`)
+
+	return err
 }
 
 // SetupTestDB creates a new test database for PostgreSQL testing

@@ -15,6 +15,7 @@ type Transaction struct {
 	EnteredBy       string     `json:"enteredBy"`
 	Optional        bool       `json:"optional"`
 	UserID          string     `json:"userId,omitempty"`
+	Note            string     `json:"note,omitempty"`
 	Categories      []Category `json:"categories,omitempty"`
 }
 

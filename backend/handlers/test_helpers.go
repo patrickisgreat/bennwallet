@@ -167,3 +167,50 @@ func CreateTestDB() *sql.DB {
 	database.DB = db
 	return db
 }
+
+// SetupPostgresTestDB creates a PostgreSQL database connection for testing and returns it
+func SetupPostgresTestDB() (*sql.DB, error) {
+	// Create a test database connection
+	config := getTestDBConfig()
+	db, err := sql.Open("postgres", config.ConnectionString())
+	if err != nil {
+		return nil, err
+	}
+
+	// Clear existing tables for a clean test
+	_, err = db.Exec(`
+		DROP TABLE IF EXISTS transactions CASCADE;
+		DROP TABLE IF EXISTS permissions CASCADE;
+		DROP TABLE IF EXISTS users CASCADE;
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create users table first for foreign key support
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			username TEXT,
+			name TEXT,
+			status TEXT,
+			is_admin BOOLEAN DEFAULT FALSE,
+			role TEXT DEFAULT 'user'
+		)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	// Insert test user
+	_, err = db.Exec(`
+		INSERT INTO users (id, username, name, is_admin, role)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO NOTHING
+	`, TestUserID, "testuser", "Test User", true, "admin")
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}

@@ -109,7 +109,7 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 		// Insert category group
 		_, err = tx.Exec(
 			`INSERT OR REPLACE INTO ynab_category_groups (id, name, user_id, last_updated)
-			VALUES (?, ?, ?, ?)`,
+			VALUES ($1, $2, $3, $4)`,
 			group.ID, group.Name, userID, now,
 		)
 		if err != nil {
@@ -125,7 +125,7 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 
 			_, err = tx.Exec(
 				`INSERT OR REPLACE INTO ynab_categories (id, group_id, name, user_id, last_updated)
-				VALUES (?, ?, ?, ?, ?)`,
+				VALUES ($1, $2, $3, $4, $5)`,
 				category.ID, group.ID, category.Name, userID, now,
 			)
 			if err != nil {

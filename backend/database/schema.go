@@ -23,6 +23,35 @@ func CreateSchema(db *sql.DB) error {
 	return nil
 }
 
+// AddTransactionNotesColumn adds the note column to the transactions table if it doesn't exist
+func AddTransactionNotesColumn(db *sql.DB) error {
+	log.Printf("Adding note column to transactions table if it doesn't exist")
+
+	// Check if the column already exists
+	exists, err := CheckColumnExists(db, "transactions", "note")
+	if err != nil {
+		return fmt.Errorf("failed to check if note column exists: %w", err)
+	}
+
+	if !exists {
+		// Add the note column
+		_, err = db.Exec(`ALTER TABLE transactions ADD COLUMN note TEXT`)
+		if err != nil {
+			return fmt.Errorf("failed to add note column to transactions table: %w", err)
+		}
+		log.Printf("Added note column to transactions table")
+
+		// Record the migration
+		if err := recordMigration(db, "add_transaction_notes_column", "postgres"); err != nil {
+			return fmt.Errorf("failed to record migration: %w", err)
+		}
+	} else {
+		log.Printf("Note column already exists in transactions table")
+	}
+
+	return nil
+}
+
 // createPostgresSchema creates all the tables needed for PostgreSQL
 func createPostgresSchema(db *sql.DB) error {
 	// This is now available in postgres_schema.go

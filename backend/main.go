@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
@@ -18,10 +19,16 @@ import (
 	"github.com/gorilla/mux"
 )
 
+var (
+	port       = flag.String("port", ":8080", "Port to listen on")
+	resetDB    = flag.Bool("reset-db", false, "Reset database")
+	devMode    = flag.Bool("dev", true, "Run in development mode with test auth")
+	testUserID = flag.String("test-user", "admin-user-1", "Test user ID for dev mode")
+	noExit     = flag.Bool("no-exit", false, "Don't exit after migrations")
+)
+
 func main() {
 	// Parse command line flags
-	noExit := flag.Bool("no-exit", false, "Don't exit after database reset")
-	resetDB := flag.Bool("reset-db", false, "Force reset the database")
 	flag.Parse()
 
 	// Check if we're running in database reset mode
@@ -103,6 +110,33 @@ func main() {
 	// Apply global middleware
 	r.Use(middleware.EnableCORS)
 
+	// Dev-only middleware that sets a test user ID for authentication
+	testAuthMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Only apply in dev mode
+			if *devMode {
+				log.Printf("Dev mode: setting test user ID: %s", *testUserID)
+				ctx := context.WithValue(r.Context(), middleware.UserIDKey, *testUserID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+			} else {
+				next.ServeHTTP(w, r)
+			}
+		})
+	}
+
+	// Apply our middleware chain
+	// CORS first, then auth
+	r.Use(middleware.EnableCORS)
+
+	if *devMode {
+		// In dev mode, use test auth middleware
+		r.Use(testAuthMiddleware)
+		log.Println("Running in dev mode with test authentication")
+	} else {
+		// In production, use real auth middleware
+		r.Use(middleware.AuthMiddleware)
+	}
+
 	// Register routes with both direct paths and /api prefix to maintain compatibility
 	registerRoutes(r)
 	apiRouter := r.PathPrefix("/api").Subrouter()
@@ -120,20 +154,15 @@ func main() {
 	}).Methods("GET")
 
 	// Configure the server
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
 	srv := &http.Server{
 		Handler:      r,
-		Addr:         ":" + port,
+		Addr:         *port,
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
 
 	// Start the server
-	log.Printf("Starting server on port %s...", port)
+	log.Printf("Starting server on port %s...", *port)
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -164,6 +193,7 @@ func registerRoutes(r *mux.Router) {
 	protectedRouter.HandleFunc("/users", handlers.GetUsers).Methods("GET")
 	protectedRouter.HandleFunc("/users/sync", handlers.SyncFirebaseUser).Methods("POST")
 	protectedRouter.HandleFunc("/users/{username}", handlers.GetUserByUsername).Methods("GET")
+	protectedRouter.HandleFunc("/user/me", handlers.GetCurrentUser).Methods("GET")
 
 	// Protected YNAB routes
 	protectedRouter.HandleFunc("/ynab/categories", handlers.GetYNABCategories).Methods("GET")
@@ -175,10 +205,14 @@ func registerRoutes(r *mux.Router) {
 	protectedRouter.HandleFunc("/ynab/config", handlers.UpdateYNABConfig).Methods("PUT")
 	protectedRouter.HandleFunc("/ynab/sync/categories", handlers.SyncYNABCategories).Methods("POST")
 
+	// Diagnostic routes
+	protectedRouter.HandleFunc("/diagnostic/db-check", handlers.CheckDatabaseHandler).Methods("GET")
+
 	// Permission management routes
 	protectedRouter.HandleFunc("/permissions", handlers.GetUserPermissions).Methods("GET")
 	protectedRouter.HandleFunc("/permissions", handlers.GrantPermission).Methods("POST")
 	protectedRouter.HandleFunc("/permissions", handlers.RevokePermission).Methods("DELETE")
+	protectedRouter.HandleFunc("/permissions/all", handlers.GetAllPermissions).Methods("GET")
 	protectedRouter.HandleFunc("/roles", handlers.SetUserRole).Methods("POST")
 	protectedRouter.HandleFunc("/roles/{userId}", handlers.GetUserRole).Methods("GET")
 

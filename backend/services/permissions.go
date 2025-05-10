@@ -33,17 +33,20 @@ func IsRoleAtLeast(userRole, requiredRole string) bool {
 
 // GetUserRole gets the role of a user
 func GetUserRole(userID string) (string, error) {
-	var role sql.NullString
-	err := database.DB.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&role)
+	var role string
+	err := database.DB.QueryRow("SELECT role FROM users WHERE id = $1", userID).Scan(&role)
 	if err != nil {
-		return "", err
+		if err == sql.ErrNoRows {
+			return "user", nil // Default role if user not found
+		}
+		return "", fmt.Errorf("failed to get user role: %w", err)
 	}
 
-	if !role.Valid || role.String == "" {
-		return "user", nil // Default role
+	if role == "" {
+		return "user", nil // Default role if role is empty
 	}
 
-	return role.String, nil
+	return role, nil
 }
 
 // IsSuperAdmin checks if a user is a super admin
@@ -58,12 +61,21 @@ func IsSuperAdmin(userID string) (bool, error) {
 
 // IsAdmin checks if a user is an admin or super admin
 func IsAdmin(userID string) (bool, error) {
-	role, err := GetUserRole(userID)
+	var role string
+	err := database.DB.QueryRow(
+		"SELECT role FROM users WHERE id = $1",
+		userID,
+	).Scan(&role)
+
 	if err != nil {
-		return false, err
+		if err == sql.ErrNoRows {
+			return false, nil // Not an admin if user not found
+		}
+		return false, fmt.Errorf("failed to check if user is admin: %w", err)
 	}
 
-	return IsRoleAtLeast(role, "admin"), nil
+	// Check if role is admin or superadmin
+	return role == "admin" || role == "superadmin", nil
 }
 
 // SetUserRole sets the role of a user
@@ -110,14 +122,14 @@ func SetUserRole(actorID, targetUserID, newRole string) error {
 	}
 
 	// All checks passed, update the role
-	_, err = database.DB.Exec("UPDATE users SET role = ? WHERE id = ?", newRole, targetUserID)
+	_, err = database.DB.Exec("UPDATE users SET role = $1 WHERE id = $2", newRole, targetUserID)
 	if err != nil {
 		return fmt.Errorf("failed to update user role: %w", err)
 	}
 
 	// Update isAdmin for backward compatibility
 	isAdmin := newRole == "admin" || newRole == "superadmin"
-	_, err = database.DB.Exec("UPDATE users SET isAdmin = ? WHERE id = ?", isAdmin, targetUserID)
+	_, err = database.DB.Exec("UPDATE users SET isAdmin = $1 WHERE id = $2", isAdmin, targetUserID)
 	if err != nil {
 		return fmt.Errorf("failed to update isAdmin flag: %w", err)
 	}
@@ -147,7 +159,7 @@ func GrantPermission(granterID, granteeID, resourceType, permissionType string, 
 	query := `
 		INSERT INTO permissions 
 		(granted_user_id, owner_user_id, resource_type, permission_type, created_at, expires_at) 
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT(granted_user_id, owner_user_id, resource_type, permission_type) 
 		DO UPDATE SET expires_at = excluded.expires_at
 	`
@@ -184,7 +196,7 @@ func RevokePermission(revokerID, granteeID, ownerID, resourceType, permissionTyp
 
 	// Delete the permission
 	_, err = database.DB.Exec(
-		"DELETE FROM permissions WHERE granted_user_id = ? AND owner_user_id = ? AND resource_type = ? AND permission_type = ?",
+		"DELETE FROM permissions WHERE granted_user_id = $1 AND owner_user_id = $2 AND resource_type = $3 AND permission_type = $4",
 		granteeID,
 		ownerID,
 		resourceType,
@@ -203,7 +215,7 @@ func GetUserPermissions(userID string) ([]models.Permission, error) {
 	rows, err := database.DB.Query(`
 		SELECT id, granted_user_id, owner_user_id, resource_type, permission_type, created_at, expires_at 
 		FROM permissions 
-		WHERE granted_user_id = ?
+		WHERE granted_user_id = $1
 	`, userID)
 
 	if err != nil {
@@ -255,11 +267,11 @@ func CheckPermission(userID, resourceOwnerID, resourceType, permissionType strin
 	err = database.DB.QueryRow(`
 		SELECT EXISTS (
 			SELECT 1 FROM permissions 
-			WHERE granted_user_id = ? 
-			AND owner_user_id = ? 
-			AND resource_type IN (?, 'all')
-			AND permission_type IN (?, 'write', 'all')
-			AND (expires_at IS NULL OR expires_at > ?)
+			WHERE granted_user_id = $1 
+			AND owner_user_id = $2 
+			AND resource_type IN ($3, 'all')
+			AND permission_type IN ($4, 'write', 'all')
+			AND (expires_at IS NULL OR expires_at > $5)
 		)
 	`, userID, resourceOwnerID, resourceType, permissionType, now).Scan(&exists)
 
@@ -292,12 +304,12 @@ func GetAccessibleResources(userID, resourceType, permissionType string) ([]stri
 		rows, err = database.DB.Query(`
 			SELECT DISTINCT owner_user_id 
 			FROM permissions 
-			WHERE granted_user_id = ? 
-			AND resource_type IN (?, 'all')
-			AND permission_type IN (?, 'write', 'all')
-			AND (expires_at IS NULL OR expires_at > ?)
+			WHERE granted_user_id = $1 
+			AND resource_type IN ($2, 'all')
+			AND permission_type IN ($3, 'write', 'all')
+			AND (expires_at IS NULL OR expires_at > $4)
 			UNION
-			SELECT ? as owner_user_id
+			SELECT $5 as owner_user_id
 		`, userID, resourceType, permissionType, now, userID)
 	}
 
@@ -316,4 +328,41 @@ func GetAccessibleResources(userID, resourceType, permissionType string) ([]stri
 	}
 
 	return ownerIDs, nil
+}
+
+// GetAllPermissions gets all permissions in the system
+func GetAllPermissions() ([]models.Permission, error) {
+	rows, err := database.DB.Query(`
+		SELECT id, granted_user_id, owner_user_id, resource_type, permission_type, created_at, expires_at 
+		FROM permissions
+		ORDER BY owner_user_id, granted_user_id
+	`)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all permissions: %w", err)
+	}
+	defer rows.Close()
+
+	var permissions []models.Permission
+	for rows.Next() {
+		var p models.Permission
+		var expiresAt sql.NullTime
+
+		err := rows.Scan(&p.ID, &p.GrantedUserID, &p.OwnerUserID, &p.ResourceType, &p.PermissionType, &p.CreatedAt, &expiresAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan permission: %w", err)
+		}
+
+		if expiresAt.Valid {
+			p.ExpiresAt = expiresAt.Time
+		}
+
+		permissions = append(permissions, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating permissions rows: %w", err)
+	}
+
+	return permissions, nil
 }

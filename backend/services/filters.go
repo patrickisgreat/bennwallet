@@ -34,7 +34,7 @@ func CreateSavedFilter(userID, name, resourceType, filterConfig string, isDefaul
 		_, err = database.DB.Exec(`
 			UPDATE saved_filters 
 			SET is_default = 0 
-			WHERE user_id = ? AND resource_type = ?
+			WHERE user_id = $1 AND resource_type = $2
 		`, userID, resourceType)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update existing default filters: %w", err)
@@ -44,7 +44,7 @@ func CreateSavedFilter(userID, name, resourceType, filterConfig string, isDefaul
 	// Insert the new filter
 	_, err = database.DB.Exec(`
 		INSERT INTO saved_filters (id, name, user_id, resource_type, filter_config, is_default, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, id, name, userID, resourceType, filterConfig, isDefault, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert saved filter: %w", err)
@@ -71,7 +71,7 @@ func GetSavedFilters(userID, resourceType string) ([]models.SavedFilter, error) 
 	rows, err := database.DB.Query(`
 		SELECT id, name, user_id, resource_type, filter_config, is_default, created_at, updated_at
 		FROM saved_filters
-		WHERE user_id = ? AND resource_type = ?
+		WHERE user_id = $1 AND resource_type = $2
 	`, userID, resourceType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query saved filters: %w", err)
@@ -107,7 +107,7 @@ func GetSavedFilterByID(id string) (*models.SavedFilter, error) {
 	err := database.DB.QueryRow(`
 		SELECT id, name, user_id, resource_type, filter_config, is_default, created_at, updated_at
 		FROM saved_filters
-		WHERE id = ?
+		WHERE id = $1
 	`, id).Scan(
 		&filter.ID,
 		&filter.Name,
@@ -134,7 +134,7 @@ func GetDefaultFilter(userID, resourceType string) (*models.SavedFilter, error) 
 	err := database.DB.QueryRow(`
 		SELECT id, name, user_id, resource_type, filter_config, is_default, created_at, updated_at
 		FROM saved_filters
-		WHERE user_id = ? AND resource_type = ? AND is_default = 1
+		WHERE user_id = $1 AND resource_type = $2 AND is_default = 1
 	`, userID, resourceType).Scan(
 		&filter.ID,
 		&filter.Name,
@@ -177,7 +177,7 @@ func UpdateSavedFilter(id, name, filterConfig string, isDefault bool) (*models.S
 		_, err = database.DB.Exec(`
 			UPDATE saved_filters 
 			SET is_default = 0 
-			WHERE user_id = ? AND resource_type = ? AND id != ?
+			WHERE user_id = $1 AND resource_type = $2 AND id != $3
 		`, filter.UserID, filter.ResourceType, id)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update existing default filters: %w", err)
@@ -187,8 +187,8 @@ func UpdateSavedFilter(id, name, filterConfig string, isDefault bool) (*models.S
 	// Update the filter
 	_, err = database.DB.Exec(`
 		UPDATE saved_filters 
-		SET name = ?, filter_config = ?, is_default = ?, updated_at = ?
-		WHERE id = ?
+		SET name = $1, filter_config = $2, is_default = $3, updated_at = $4
+		WHERE id = $5
 	`, name, filterConfig, isDefault, now, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update saved filter: %w", err)
@@ -208,7 +208,7 @@ func DeleteSavedFilter(id string) error {
 	// Delete the filter
 	result, err := database.DB.Exec(`
 		DELETE FROM saved_filters 
-		WHERE id = ?
+		WHERE id = $1
 	`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete saved filter: %w", err)

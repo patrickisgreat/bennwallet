@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"bennwallet/backend/database"
 	"database/sql"
 	"fmt"
 	"log"
@@ -45,6 +46,10 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		name string
 		fn   func(*sql.DB) error
 	}{
+		// Add note column to transactions table
+		{"add_transaction_notes_column", func(db *sql.DB) error {
+			return database.AddTransactionNotesColumn(db)
+		}},
 		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
 	}

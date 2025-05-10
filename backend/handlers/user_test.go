@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,47 +10,74 @@ import (
 	"bennwallet/backend/models"
 
 	"github.com/gorilla/mux"
+	_ "github.com/lib/pq"
 )
 
-func setupTestDB() {
-	// Create a test database connection
-	db, err := sql.Open("sqlite3", ":memory:")
+func setupUserTestDB() {
+	// Use our shared PostgreSQL test DB setup helper
+	db, err := SetupPostgresTestDB()
 	if err != nil {
 		panic(err)
 	}
 	database.DB = db
 
-	// Create users table with all fields
-	_, err = db.Exec(`
-		CREATE TABLE users (
-			id TEXT PRIMARY KEY,
-			username TEXT UNIQUE NOT NULL,
-			name TEXT,
-			status TEXT DEFAULT 'approved',
-			isAdmin BOOLEAN DEFAULT 0,
-			role TEXT DEFAULT 'user'
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
-
 	// Insert test data including admin user
-	_, err = db.Exec("INSERT INTO users (id, username, name, status, isAdmin, role) VALUES (?, ?, ?, ?, ?, ?)",
-		"test1", "testuser", "Test User", "approved", 0, "user")
+	_, err = db.Exec(`INSERT INTO users (id, username, name, status, is_admin, role) 
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET 
+		  username = EXCLUDED.username,
+		  name = EXCLUDED.name,
+		  status = EXCLUDED.status,
+		  is_admin = EXCLUDED.is_admin,
+		  role = EXCLUDED.role`,
+		"test1", "testuser", "Test User", "approved", false, "user")
 	if err != nil {
 		panic(err)
 	}
 
-	_, err = db.Exec("INSERT INTO users (id, username, name, status, isAdmin, role) VALUES (?, ?, ?, ?, ?, ?)",
-		"admin1", "Sarah", "Sarah Admin", "approved", 1, "admin")
+	_, err = db.Exec(`INSERT INTO users (id, username, name, status, is_admin, role) 
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET 
+		  username = EXCLUDED.username,
+		  name = EXCLUDED.name,
+		  status = EXCLUDED.status,
+		  is_admin = EXCLUDED.is_admin,
+		  role = EXCLUDED.role`,
+		"admin1", "Sarah", "Sarah Admin", "approved", true, "admin")
 	if err != nil {
 		panic(err)
 	}
 }
 
 func TestGetUsers(t *testing.T) {
-	setupTestDB()
+	// Ensure the database is clean before running test
+	db, err := SetupPostgresTestDB()
+	if err != nil {
+		t.Fatalf("Failed to set up test database: %v", err)
+	}
+
+	// Delete all users first to ensure a clean state
+	_, err = db.Exec("DELETE FROM users")
+	if err != nil {
+		t.Fatalf("Failed to clear users table: %v", err)
+	}
+
+	// Create our own test users
+	_, err = db.Exec(`INSERT INTO users (id, username, name, status, is_admin, role) 
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		"test1", "testuser", "Test User", "approved", false, "user")
+	if err != nil {
+		t.Fatalf("Failed to insert test user: %v", err)
+	}
+
+	_, err = db.Exec(`INSERT INTO users (id, username, name, status, is_admin, role) 
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		"admin1", "Sarah", "Sarah Admin", "approved", true, "admin")
+	if err != nil {
+		t.Fatalf("Failed to insert admin user: %v", err)
+	}
+
+	database.DB = db
 	defer database.DB.Close()
 
 	req, err := http.NewRequest("GET", "/users", nil)
@@ -119,7 +145,27 @@ func TestGetUsers(t *testing.T) {
 }
 
 func TestGetUserByUsername(t *testing.T) {
-	setupTestDB()
+	// Ensure the database is clean before running test
+	db, err := SetupPostgresTestDB()
+	if err != nil {
+		t.Fatalf("Failed to set up test database: %v", err)
+	}
+
+	// Delete all users first to ensure a clean state
+	_, err = db.Exec("DELETE FROM users")
+	if err != nil {
+		t.Fatalf("Failed to clear users table: %v", err)
+	}
+
+	// Create our test user
+	_, err = db.Exec(`INSERT INTO users (id, username, name, status, is_admin, role) 
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		"test1", "testuser", "Test User", "approved", false, "user")
+	if err != nil {
+		t.Fatalf("Failed to insert test user: %v", err)
+	}
+
+	database.DB = db
 	defer database.DB.Close()
 
 	req, err := http.NewRequest("GET", "/users/testuser", nil)
@@ -163,7 +209,19 @@ func TestGetUserByUsername(t *testing.T) {
 }
 
 func TestGetUserByUsername_NotFound(t *testing.T) {
-	setupTestDB()
+	// Ensure the database is clean before running test
+	db, err := SetupPostgresTestDB()
+	if err != nil {
+		t.Fatalf("Failed to set up test database: %v", err)
+	}
+
+	// Delete all users first to ensure a clean state
+	_, err = db.Exec("DELETE FROM users")
+	if err != nil {
+		t.Fatalf("Failed to clear users table: %v", err)
+	}
+
+	database.DB = db
 	defer database.DB.Close()
 
 	req, err := http.NewRequest("GET", "/users/nonexistent", nil)

@@ -243,3 +243,36 @@ func GetUserRole(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+// GetAllPermissions returns all permissions in the system
+// Only accessible to superadmins
+func GetAllPermissions(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from context
+	userID := middleware.GetUserIDFromContext(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
+	// Check if the requesting user is a superadmin
+	isSuperAdmin, err := services.IsSuperAdmin(userID)
+	if err != nil {
+		http.Error(w, "Failed to check admin status: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if !isSuperAdmin {
+		http.Error(w, "Forbidden: Only superadmins can view all permissions", http.StatusForbidden)
+		return
+	}
+
+	// Get all permissions
+	permissions, err := services.GetAllPermissions()
+	if err != nil {
+		http.Error(w, "Failed to get permissions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(permissions)
+}
