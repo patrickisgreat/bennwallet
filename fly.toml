@@ -1,24 +1,31 @@
-# fly.toml app configuration file generated for bennwallet-prod on 2025-05-10T16:55:58-04:00
+# fly.toml app configuration file generated for bennwallet on 2025-05-10T17:18:25-04:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'bennwallet-prod'
+app = 'bennwallet'
 primary_region = 'sjc'
 
 [build]
   dockerfile = 'Dockerfile'
 
+  [build.args]
+    YNAB_ACCOUNT_ID = ''
+    YNAB_API_TOKEN = 'xIgepVnHjCxstZ30bAsr21TF40xORiT74fSD0GDWe9Y'
+    YNAB_BUDGET_ID = '662ab203-7b47-45e1-8245-ce86ea9b848e'
+
 [env]
-  ENVIRONMENT = 'production'
-  NODE_ENV = 'production'
+  APP_ENV = 'development'
+  ENVIRONMENT = 'development'
+  NODE_ENV = 'development'
   PORT = '8080'
+  RESET_DB = 'true'
   YNAB_ACCOUNT_ID = ''
   YNAB_API_TOKEN = 'xIgepVnHjCxstZ30bAsr21TF40xORiT74fSD0GDWe9Y'
   YNAB_BUDGET_ID = '662ab203-7b47-45e1-8245-ce86ea9b848e'
 
 [[mounts]]
-  source = 'bennwallet_prod_data'
+  source = 'bennwallet_data'
   destination = '/data'
 
 [http_service]
@@ -26,7 +33,7 @@ primary_region = 'sjc'
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   processes = ['app']
 
 [[vm]]
