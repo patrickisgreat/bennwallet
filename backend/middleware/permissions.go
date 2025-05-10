@@ -1,150 +1,216 @@
 package middleware
 
 import (
-	"database/sql"
+	"fmt"
 	"log"
-	"time"
+	"net/http"
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/models"
+	"bennwallet/backend/services"
 )
 
-// CheckUserPermission checks if a user has permission to access a resource
-// Returns true if:
-// 1. The user is the owner of the resource
-// 2. The user is an admin
-// 3. The user has been granted explicit permission to access the resource
-func CheckUserPermission(userID, resourceOwnerID, resourceType, permissionType string) bool {
-	// Always allow users to access their own resources
-	if userID == resourceOwnerID {
+// CheckUserPermission checks if a user has a specific permission for a resource owned by another user
+func CheckUserPermission(grantedUserID, ownerUserID, resourceType, permissionType string) bool {
+	// Log the permission check
+	log.Printf("Checking permission for user %s to access resource %s owned by %s (permission: %s)",
+		grantedUserID, resourceType, ownerUserID, permissionType)
+
+	// Self-check: Users always have permission to access their own resources
+	if grantedUserID == ownerUserID {
+		log.Printf("Permission granted - self check: user %s == owner %s", grantedUserID, ownerUserID)
 		return true
 	}
 
-	// Check if user is an admin
-	var isAdmin bool
-	err := database.DB.QueryRow("SELECT isAdmin FROM users WHERE id = ?", userID).Scan(&isAdmin)
-	if err != nil {
-		log.Printf("Error checking if user %s is admin: %v", userID, err)
-	} else if isAdmin {
-		// Admins have access to everything
+	// Special case: Patrick Bennett's Firebase ID - grant all permissions
+	if grantedUserID == "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2" {
+		log.Printf("Permission granted - special admin access for Patrick Bennett (user: %s)", grantedUserID)
 		return true
 	}
 
-	// Check if user has been granted explicit permission
-	var permissionExists bool
-	now := time.Now()
+	// Check if the user is a superadmin
+	var role string
+	err := database.DB.QueryRow("SELECT role FROM users WHERE id = $1", grantedUserID).Scan(&role)
+	if err == nil && (role == "superadmin" || role == "admin") {
+		log.Printf("Permission granted - user %s has role %s", grantedUserID, role)
+		return true
+	}
 
-	err = database.DB.QueryRow(`
+	// Query the database to check if the permission exists
+	var exists bool
+	query := `
 		SELECT EXISTS (
-			SELECT 1 FROM permissions 
-			WHERE granted_user_id = ? 
-			AND owner_user_id = ? 
-			AND resource_type IN (?, 'all')
-			AND permission_type = ?
-			AND (expires_at IS NULL OR expires_at > ?)
+			SELECT 1 FROM permissions
+			WHERE granted_user_id = $1
+			AND owner_user_id = $2
+			AND resource_type = $3
+			AND permission_type = $4
 		)
-	`, userID, resourceOwnerID, resourceType, permissionType, now).Scan(&permissionExists)
-
+	`
+	err = database.DB.QueryRow(query, grantedUserID, ownerUserID, resourceType, permissionType).Scan(&exists)
 	if err != nil {
-		log.Printf("Error checking permission for user %s on resource %s: %v", userID, resourceType, err)
+		log.Printf("Error checking permissions: %v", err)
 		return false
 	}
 
-	// Check for write permission if read permission was requested
-	// (write permission implies read permission)
-	if !permissionExists && permissionType == models.PermissionRead {
-		err = database.DB.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 FROM permissions 
-				WHERE granted_user_id = ? 
-				AND owner_user_id = ? 
-				AND resource_type IN (?, 'all')
-				AND permission_type = 'write'
-				AND (expires_at IS NULL OR expires_at > ?)
-			)
-		`, userID, resourceOwnerID, resourceType, now).Scan(&permissionExists)
-
-		if err != nil {
-			log.Printf("Error checking write permission for user %s on resource %s: %v", userID, resourceType, err)
-			return false
-		}
-	}
-
-	return permissionExists
+	log.Printf("Permission %s for resource %s: %v", permissionType, resourceType, exists)
+	return exists
 }
 
 // GetUsersWithAccessToResource gets all users who have access to a resource
 func GetUsersWithAccessToResource(resourceOwnerID, resourceType string) ([]string, error) {
-	rows, err := database.DB.Query(`
-		SELECT DISTINCT granted_user_id FROM permissions 
-		WHERE owner_user_id = ? 
-		AND resource_type IN (?, 'all')
-		AND (expires_at IS NULL OR expires_at > ?)
-	`, resourceOwnerID, resourceType, time.Now())
-
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var userIDs []string
-	for rows.Next() {
-		var userID string
-		if err := rows.Scan(&userID); err != nil {
-			return nil, err
-		}
-		userIDs = append(userIDs, userID)
-	}
-
-	return userIDs, nil
+	// This is now a wrapper around the service function
+	return services.GetAccessibleResources(resourceOwnerID, resourceType, models.PermissionRead)
 }
 
-// GetUserAccessibleResources gets all resources that a user has access to
+// GetUserAccessibleResources returns a list of user IDs for which the current user has access to their resources
 func GetUserAccessibleResources(userID, resourceType, permissionType string) ([]string, error) {
-	// Get user's admin status
-	var isAdmin bool
-	err := database.DB.QueryRow("SELECT isAdmin FROM users WHERE id = ?", userID).Scan(&isAdmin)
-	if err != nil {
-		log.Printf("Error checking if user %s is admin: %v", userID, err)
+	log.Printf("Getting accessible resources for user %s (resource: %s, permission: %s)",
+		userID, resourceType, permissionType)
+
+	// Special case: Patrick Bennett's Firebase ID - grant access to all users
+	if userID == "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2" {
+		log.Printf("Special case for Patrick Bennett - getting all users")
+		var allUserIDs []string
+		rows, err := database.DB.Query("SELECT id FROM users")
+		if err != nil {
+			return nil, fmt.Errorf("error querying users for admin: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, fmt.Errorf("error scanning user ID: %w", err)
+			}
+			allUserIDs = append(allUserIDs, id)
+		}
+
+		// Always add the user's own ID
+		allUserIDs = append(allUserIDs, userID)
+		log.Printf("Returning all user IDs for Patrick Bennett: %v", allUserIDs)
+		return allUserIDs, nil
 	}
 
-	var rows *sql.Rows
-	if isAdmin {
-		// Admins can access all resources
-		rows, err = database.DB.Query(`
-			SELECT DISTINCT owner_user_id 
-			FROM permissions 
-			WHERE resource_type = ?
-			UNION
-			SELECT id FROM users
-		`, resourceType)
-	} else {
-		// Regular users can only access resources they own or have been granted access to
-		rows, err = database.DB.Query(`
-			SELECT DISTINCT owner_user_id 
-			FROM permissions 
-			WHERE granted_user_id = ? 
-			AND resource_type IN (?, 'all')
-			AND permission_type IN (?, 'write')
-			AND (expires_at IS NULL OR expires_at > ?)
-			UNION
-			SELECT ? as owner_user_id
-		`, userID, resourceType, permissionType, time.Now(), userID)
+	// Check for superadmin role
+	var role string
+	err := database.DB.QueryRow("SELECT role FROM users WHERE id = $1", userID).Scan(&role)
+	if err == nil && (role == "superadmin" || role == "admin") {
+		log.Printf("User %s has role %s - getting all users", userID, role)
+		var allUserIDs []string
+		rows, err := database.DB.Query("SELECT id FROM users")
+		if err != nil {
+			return nil, fmt.Errorf("error querying users for admin: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, fmt.Errorf("error scanning user ID: %w", err)
+			}
+			allUserIDs = append(allUserIDs, id)
+		}
+
+		log.Printf("Returning all user IDs for admin user: %v", allUserIDs)
+		return allUserIDs, nil
 	}
 
+	// Regular permission check
+	query := `
+		SELECT owner_user_id FROM permissions
+		WHERE granted_user_id = $1
+		AND resource_type = $2
+		AND permission_type = $3
+	`
+	rows, err := database.DB.Query(query, userID, resourceType, permissionType)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error querying permissions: %w", err)
 	}
 	defer rows.Close()
 
-	var ownerIDs []string
+	var ownerUserIDs []string
 	for rows.Next() {
-		var ownerID string
-		if err := rows.Scan(&ownerID); err != nil {
-			return nil, err
+		var ownerUserID string
+		if err := rows.Scan(&ownerUserID); err != nil {
+			return nil, fmt.Errorf("error scanning owner user ID: %w", err)
 		}
-		ownerIDs = append(ownerIDs, ownerID)
+		ownerUserIDs = append(ownerUserIDs, ownerUserID)
 	}
 
-	return ownerIDs, nil
+	// Always add the user's own ID
+	ownerUserIDs = append(ownerUserIDs, userID)
+
+	log.Printf("Found accessible resources for user %s: %v", userID, ownerUserIDs)
+	return ownerUserIDs, nil
+}
+
+// RequirePermission is a middleware that ensures the user has permission to access a resource
+func RequirePermission(resourceType, permissionType string, getResourceOwnerID func(r *http.Request) (string, error)) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Get user ID from context
+			userID := GetUserIDFromContext(r)
+			if userID == "" {
+				http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+				return
+			}
+
+			// Get resource owner ID
+			resourceOwnerID, err := getResourceOwnerID(r)
+			if err != nil {
+				http.Error(w, "Failed to determine resource owner: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// Check permission
+			if !CheckUserPermission(userID, resourceOwnerID, resourceType, permissionType) {
+				http.Error(w, "Forbidden: Insufficient permissions", http.StatusForbidden)
+				return
+			}
+
+			// Permission check passed, continue
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireRole is a middleware that ensures the user has at least the specified role
+func RequireRole(requiredRole string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Get user ID from context
+			userID := GetUserIDFromContext(r)
+			if userID == "" {
+				http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+				return
+			}
+
+			// Get user's role
+			userRole, err := services.GetUserRole(userID)
+			if err != nil {
+				http.Error(w, "Failed to get user role: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// Check if user's role is sufficient
+			if !services.IsRoleAtLeast(userRole, requiredRole) {
+				http.Error(w, "Forbidden: Insufficient role privileges", http.StatusForbidden)
+				return
+			}
+
+			// Role check passed, continue
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireAdmin is a middleware that ensures the user is an admin
+func RequireAdmin() func(http.Handler) http.Handler {
+	return RequireRole(models.RoleAdmin)
+}
+
+// RequireSuperAdmin is a middleware that ensures the user is a super admin
+func RequireSuperAdmin() func(http.Handler) http.Handler {
+	return RequireRole(models.RoleSuperAdmin)
 }

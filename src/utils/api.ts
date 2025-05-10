@@ -47,14 +47,25 @@ interface BackendTransaction {
   paidDate?: string;
   enteredBy: string;
   optional?: boolean;
+  note?: string;
+  categories?: Array<{
+    id: number;
+    name: string;
+    description: string;
+    color?: string;
+    userId: string;
+  }>;
 }
 
 // Convert the frontend Transaction type to the backend format
 function toBackendTransaction(tx: Transaction): BackendTransaction {
-  return {
+  console.log('Debug - Converting frontend tx to backend:', JSON.stringify(tx, null, 2));
+  console.log('Debug - Frontend note before conversion:', tx.note);
+  
+  const backendTx: BackendTransaction = {
     id: tx.id,
     amount: tx.amount,
-    description: tx.note,
+    description: tx.note || '',  // Use the note field for the backend description field
     date: tx.entered,
     transactionDate: tx.transactionDate,
     type: tx.category,
@@ -63,24 +74,60 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
     paidDate: tx.paidDate,
     enteredBy: tx.enteredBy,
     optional: tx.optional,
+    note: tx.note || '',  // Also send the note field directly
   };
+
+  console.log('Debug - Backend note after conversion:', backendTx.note);
+  console.log('Debug - Backend description after conversion:', backendTx.description);
+
+  // Add categories if available
+  if (tx.categories && tx.categories.length > 0) {
+    backendTx.categories = tx.categories.map(cat => ({
+      id: cat.id,
+      name: cat.name,
+      description: cat.description || '',
+      color: cat.color,
+      userId: String(cat.userId), // Ensure userId is string as backend expects
+    }));
+  }
+
+  return backendTx;
 }
 
 // Convert the backend transaction format to the frontend format
 function toFrontendTransaction(tx: BackendTransaction): Transaction {
-  return {
+  console.log('Debug - Converting backend tx to frontend:', JSON.stringify(tx, null, 2));
+  console.log('Debug - Backend note before conversion:', tx.note);
+  console.log('Debug - Backend description before conversion:', tx.description);
+
+  const frontendTx: Transaction = {
     id: tx.id,
     entered: tx.date,
     transactionDate: tx.transactionDate || tx.date, // Fall back to entered date if transaction date not available
-    payTo: (tx.payTo as 'Sarah' | 'Patrick') || 'Sarah',
+    payTo: tx.payTo || '', // Use empty string if payTo is missing
     amount: tx.amount,
-    note: tx.description,
+    note: tx.note || tx.description || '', // Use note field if available, otherwise fall back to description
     category: tx.type,
     paid: tx.paid || false,
     paidDate: tx.paidDate,
-    enteredBy: tx.enteredBy as 'Sarah' | 'Patrick',
+    enteredBy: tx.enteredBy || '', // Use empty string if enteredBy is missing
     optional: tx.optional || false,
   };
+
+  console.log('Debug - Frontend note after conversion:', frontendTx.note);
+
+  // Add categories if available from backend
+  if (tx.categories && tx.categories.length > 0) {
+    frontendTx.categories = tx.categories.map(cat => ({
+      id: cat.id,
+      name: cat.name,
+      description: cat.description,
+      color: cat.color || '',
+      userId: typeof cat.userId === 'string' ? parseInt(cat.userId, 10) : cat.userId,
+    }));
+  }
+
+  return frontendTx;
 }
 
 // Define explicit types for transaction filters
@@ -94,35 +141,51 @@ export interface TransactionFilterParams {
   paid?: boolean;
 }
 
-export async function fetchTransactions(params?: TransactionFilterParams): Promise<Transaction[]> {
+export const fetchTransactions = async (params: Record<string, string | boolean | undefined> = {}): Promise<Transaction[]> => {
   try {
     console.log('Fetching transactions with params:', params);
-
-    // Create a new object for query parameters that can have string values
-    const queryParams: Record<string, string | undefined> = {};
-
-    // Copy all params to the new object, converting as needed
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          if (typeof value === 'boolean') {
-            queryParams[key] = value ? 'true' : 'false';
-          } else {
-            queryParams[key] = value;
-          }
-        }
-      });
-    }
-
-    console.log('Sending query params:', queryParams);
-    const response = await api.get('/transactions', { params: queryParams });
+    
+    // Build query string
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) {
+        queryParams.set(key, String(value));
+      }
+    });
+    
+    const query = queryParams.toString();
+    const queryString = query ? `?${query}` : '';
+    
+    console.log('Sending query params:', params);
+    const response = await api.get<Transaction[] | null>(`/transactions${queryString}`);
+    
     console.log('Transactions response:', response.data);
-    return Array.isArray(response.data) ? response.data.map(toFrontendTransaction) : [];
+    
+    // Check if response is null or not an array, return empty array
+    if (!response.data || !Array.isArray(response.data)) {
+      console.log('API did not return an array:', response.data);
+      return []; // Return empty array instead of throwing
+    }
+    
+    // Debug note data in received transactions
+    if (response.data && response.data.length > 0) {
+      const sampleTx = response.data[0];
+      console.log('Debug - Sample transaction data:', JSON.stringify(sampleTx, null, 2));
+      console.log('Debug - Note field in first transaction:', sampleTx.note);
+      // Log all raw properties to see what's available
+      console.log('Debug - All properties in first transaction:', Object.keys(sampleTx));
+    }
+    
+    return response.data;
   } catch (error) {
-    console.error('Error fetching transactions:', error);
-    return [];
+    if (axios.isAxiosError(error) && error.response) {
+      console.log('API error response:', error.response);
+    } else {
+      console.log('Error fetching transactions:', error);
+    }
+    throw error;
   }
-}
+};
 
 export async function createTransaction(transaction: Transaction): Promise<boolean> {
   try {
@@ -139,20 +202,30 @@ export async function updateTransaction(
   updates: Partial<Transaction>
 ): Promise<boolean> {
   try {
+    console.log('Debug - Updating transaction:', id);
+    console.log('Debug - Update payload:', JSON.stringify(updates, null, 2));
+    
     // First fetch the existing transaction to get all fields
     const response = await api.get(`/transactions/${id}`);
     if (!response.data) {
       throw new Error('Transaction not found');
     }
 
+    console.log('Debug - Existing transaction from API:', JSON.stringify(response.data, null, 2));
+
     // Convert backend to frontend format
     const existingTx = toFrontendTransaction(response.data);
+    console.log('Debug - Existing transaction after conversion:', JSON.stringify(existingTx, null, 2));
 
     // Merge the updates with the existing transaction
     const mergedTx = { ...existingTx, ...updates };
+    console.log('Debug - Merged transaction:', JSON.stringify(mergedTx, null, 2));
 
     // Update with the merged data
-    await api.put(`/transactions/${id}`, toBackendTransaction(mergedTx));
+    const backendTx = toBackendTransaction(mergedTx);
+    console.log('Debug - Transaction converted back to backend format:', JSON.stringify(backendTx, null, 2));
+    
+    await api.put(`/transactions/${id}`, backendTx);
     return true;
   } catch (error) {
     console.error('Error updating transaction:', error);
@@ -359,24 +432,32 @@ export interface UniqueTransactionFields {
   enteredBy: string[];
 }
 
-export async function fetchUniqueTransactionFields(): Promise<UniqueTransactionFields> {
+export const fetchUniqueTransactionFields = async (): Promise<{
+  payTo: string[];
+  enteredBy: string[];
+  category: string[];
+}> => {
   try {
-    console.log('API base URL:', api.defaults.baseURL);
-    const url = '/transactions/unique-fields';
-    console.log('Fetching unique fields from:', url);
-    const response = await api.get(url);
-    console.log('Unique fields response:', response.data);
-    return response.data;
+    console.log('Fetching unique transaction fields');
+    const response = await api.get('/transactions/unique-fields');
+    
+    console.log('Raw unique fields response:', response.data);
+    console.log('Entered By values received:', response.data.enteredBy);
+    
+    return {
+      payTo: response.data.payTo || [],
+      enteredBy: response.data.enteredBy || [],
+      category: response.data.category || [],
+    };
   } catch (error) {
-    const axiosError = error as AxiosError;
-    console.error('Error fetching unique transaction fields:', axiosError);
-    if (axiosError.response) {
-      console.error('Response status:', axiosError.response.status);
-      console.error('Response data:', axiosError.response.data);
-    }
-    return { payTo: [], enteredBy: [] };
+    console.error('Error fetching unique transaction fields:', error);
+    return {
+      payTo: [],
+      enteredBy: [],
+      category: [],
+    };
   }
-}
+};
 
 export interface YNABCategory {
   id: string;
@@ -449,5 +530,190 @@ export async function fetchYNABCategories(): Promise<CategoryGroup[]> {
     console.error('📋 Error fetching YNAB categories:', error);
     console.error('📋 END fetchYNABCategories - Failed');
     return [];
+  }
+}
+
+// Add the User interface and fetchUsers function near the top of the file, after other interfaces are defined
+export interface User {
+  id: string;
+  name: string;
+  username: string;
+  email: string;
+  role?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Add the fetchUsers function near the other API functions
+export async function fetchUsers(): Promise<User[]> {
+  try {
+    console.log('Fetching users');
+    const response = await api.get('/users');
+    console.log('Users response:', response.data);
+    
+    if (Array.isArray(response.data)) {
+      return response.data;
+    } else {
+      console.warn('Invalid response format from users API:', response.data);
+      return []; // Return empty array instead of fallbacks
+    }
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    console.error('Error fetching users:', axiosError);
+    if (axiosError.response) {
+      console.error('Response status:', axiosError.response.status);
+      console.error('Response data:', axiosError.response.data);
+    }
+    return []; // Return empty array instead of fallbacks
+  }
+}
+
+// Add a diagnostic function to check database health
+export async function checkDatabaseHealth(): Promise<{
+  status: string;
+  tables: { [key: string]: number };
+  errors?: string[];
+}> {
+  try {
+    console.log('Checking database health...');
+    const response = await api.get('/diagnostic/db-check');
+    console.log('Database health response:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error checking database health:', error);
+    return {
+      status: 'error',
+      tables: {},
+      errors: ['Failed to check database health']
+    };
+  }
+}
+
+// Add the Category interface and fetchCategories function
+export interface Category {
+  id: number;
+  name: string;
+  description: string;
+  color?: string;
+  userId: number | string;
+}
+
+export async function fetchCategories(): Promise<Category[]> {
+  try {
+    console.log('Fetching categories from database');
+    const response = await api.get('/categories');
+    console.log('Categories response:', response.data);
+    
+    if (Array.isArray(response.data)) {
+      return response.data;
+    } else {
+      console.warn('Invalid response format from categories API:', response.data);
+      return []; // Return empty array instead of fallbacks
+    }
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    console.error('Error fetching categories:', axiosError);
+    if (axiosError.response) {
+      console.error('Response status:', axiosError.response.status);
+      console.error('Response data:', axiosError.response.data);
+    }
+    return []; // Return empty array instead of fallbacks
+  }
+}
+
+export async function fetchCurrentUser(): Promise<{
+  id: string;
+  username: string;
+  name: string;
+  role: string;
+  status?: string;
+  isAdmin?: boolean;
+} | null> {
+  try {
+    console.log('Fetching current user information from API');
+    const response = await api.get('/user/me');
+    console.log('Current user response:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching current user:', error);
+    return null;
+  }
+}
+
+// Permission API types and functions
+export interface Permission {
+  id: string;
+  ownerUserId: string;
+  grantedUserId: string;
+  permissionType: string; // "read" or "write"
+  resourceType: string; // "transactions", "categories", "ynab_config"
+  createdAt: string;
+  expiresAt?: string;
+}
+
+// Get permissions for a specific user
+export async function fetchUserPermissions(userId?: string): Promise<Permission[]> {
+  try {
+    const queryParams = userId ? `?userId=${userId}` : '';
+    const response = await api.get<Permission[]>(`/permissions${queryParams}`);
+    return response.data || [];
+  } catch (error) {
+    console.error('Error fetching user permissions:', error);
+    return [];
+  }
+}
+
+// Get all permissions in the system (admin only)
+export async function fetchAllPermissions(): Promise<Permission[]> {
+  try {
+    const response = await api.get<Permission[]>('/permissions/all');
+    return response.data || [];
+  } catch (error) {
+    console.error('Error fetching all permissions:', error);
+    return [];
+  }
+}
+
+// Grant a permission to a user
+export async function grantPermission(
+  granteeId: string, 
+  resourceType: string, 
+  permissionType: string,
+  expiresAt?: Date
+): Promise<boolean> {
+  try {
+    await api.post('/permissions', {
+      granteeId,
+      resourceType,
+      permissionType,
+      expiresAt: expiresAt ? expiresAt.toISOString() : undefined
+    });
+    return true;
+  } catch (error) {
+    console.error('Error granting permission:', error);
+    return false;
+  }
+}
+
+// Revoke a permission
+export async function revokePermission(
+  granteeId: string,
+  ownerId: string,
+  resourceType: string,
+  permissionType: string
+): Promise<boolean> {
+  try {
+    await api.delete('/permissions', {
+      data: {
+        granteeId,
+        ownerId,
+        resourceType,
+        permissionType
+      }
+    });
+    return true;
+  } catch (error) {
+    console.error('Error revoking permission:', error);
+    return false;
   }
 }

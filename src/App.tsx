@@ -12,6 +12,7 @@ import Dashboard from './pages/Dashboard';
 import ProfilePage from './pages/ProfilePage';
 import TransactionsPage from './pages/TransactionsPage';
 import ReportsPage from './pages/ReportsPage';
+import AdminPage from './pages/AdminPage';
 import './App.css';
 
 // Error boundary component
@@ -69,6 +70,7 @@ function App() {
                     <Route path="/profile" element={<ProfilePage />} />
                     <Route path="/transactions" element={<TransactionsPage />} />
                     <Route path="/reports" element={<ReportsPage />} />
+                    <Route path="/admin" element={<AdminPage />} />
                   </Route>
                 </Route>
               </Route>

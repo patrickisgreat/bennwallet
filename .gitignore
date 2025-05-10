@@ -60,3 +60,5 @@ Thumbs.db
 *.out
 /vendor/
 /Godeps/
+
+.cursorrules

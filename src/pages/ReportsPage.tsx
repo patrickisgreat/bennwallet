@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchYNABSplits, syncToYNAB, ReportFilter, CategoryTotal } from '../utils/api';
+import { fetchYNABSplits, syncToYNAB, ReportFilter, CategoryTotal, fetchUniqueTransactionFields } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 function ReportsPage() {
@@ -20,6 +20,10 @@ function ReportsPage() {
     optional: true, // Change to true - don't exclude optional by default
   });
   const [total, setTotal] = useState(0);
+  const [uniqueFields, setUniqueFields] = useState<{ payTo: string[]; enteredBy: string[] }>({
+    payTo: [],
+    enteredBy: [],
+  });
 
   // First check if user is authenticated
   useEffect(() => {
@@ -34,6 +38,23 @@ function ReportsPage() {
       }
     }
   }, [currentUser]);
+
+  // Load unique fields for dropdowns
+  const loadUniqueFields = useCallback(async () => {
+    try {
+      const fields = await fetchUniqueTransactionFields();
+      console.log('Loaded unique fields for reports:', fields);
+      // Add detailed logging for payTo values
+      if (fields && fields.payTo && fields.payTo.length > 0) {
+        console.log('Available PayTo values for filtering:', JSON.stringify(fields.payTo));
+      } else {
+        console.warn('No PayTo values available for filtering');
+      }
+      setUniqueFields(fields);
+    } catch (err) {
+      console.error('Error loading unique transaction fields:', err);
+    }
+  }, []);
 
   const loadReportData = useCallback(async () => {
     if (!currentUser) {
@@ -77,6 +98,15 @@ function ReportsPage() {
         optional: filter.optional,
       };
 
+      // Add more detailed logging for debugging
+      console.log('Filter values being sent:');
+      console.log('- startDate:', filterToSend.startDate);
+      console.log('- endDate:', filterToSend.endDate);
+      console.log('- payTo:', filterToSend.payTo, typeof filterToSend.payTo);
+      console.log('- enteredBy:', filterToSend.enteredBy, typeof filterToSend.enteredBy);
+      console.log('- paid:', filterToSend.paid, typeof filterToSend.paid);
+      console.log('- optional:', filterToSend.optional, typeof filterToSend.optional);
+
       const data = await fetchYNABSplits(filterToSend);
       console.log('Received YNAB splits data:', data);
 
@@ -105,11 +135,19 @@ function ReportsPage() {
   useEffect(() => {
     if (currentUser && authChecked) {
       loadReportData();
+      loadUniqueFields();
     }
-  }, [currentUser, authChecked, loadReportData]);
+  }, [currentUser, authChecked, loadReportData, loadUniqueFields]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    
+    // Add detailed logging for EnteredBy changes
+    if (name === 'enteredBy') {
+      console.log('EnteredBy changed to:', value);
+      console.log('EnteredBy value type:', typeof value);
+    }
+    
     setFilter(prev => ({ ...prev, [name]: value }));
   };
 
@@ -242,8 +280,11 @@ function ReportsPage() {
               className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
             >
               <option value="">All</option>
-              <option value="Sarah">Sarah</option>
-              <option value="Patrick">Patrick</option>
+              {uniqueFields.payTo.map(name => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -256,8 +297,14 @@ function ReportsPage() {
               className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
             >
               <option value="">All</option>
-              <option value="Sarah">Sarah</option>
-              <option value="Patrick">Patrick</option>
+              {uniqueFields.enteredBy.map(name => {
+                console.log('EnteredBy option:', name);
+                return (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                );
+              })}
             </select>
           </div>
 

@@ -10,27 +10,34 @@ import (
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/models"
+
+	_ "github.com/lib/pq"
 )
 
 func setupTransactionTestDB() {
-	// Use our common test database setup
-	SetupTestDB()
+	// Create a test database connection
+	db, err := SetupPostgresTestDB()
+	if err != nil {
+		panic(err)
+	}
+	database.DB = db
 
 	// Create transactions table
-	_, err := database.DB.Exec(`
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS transactions (
 			id TEXT PRIMARY KEY,
-			amount REAL NOT NULL,
+			amount NUMERIC(15,2) NOT NULL,
 			description TEXT NOT NULL,
-			date DATETIME NOT NULL,
-			transaction_date DATETIME,
+			date TIMESTAMP NOT NULL,
+			transaction_date TIMESTAMP,
 			type TEXT NOT NULL,
-			payTo TEXT,
-			paid BOOLEAN NOT NULL DEFAULT 0,
-			paidDate TEXT,
-			enteredBy TEXT NOT NULL,
-			optional BOOLEAN NOT NULL DEFAULT 0,
-			userId TEXT
+			pay_to TEXT,
+			paid BOOLEAN NOT NULL DEFAULT false,
+			paid_date TEXT,
+			entered_by TEXT NOT NULL,
+			optional BOOLEAN NOT NULL DEFAULT false,
+			user_id TEXT,
+			note TEXT
 		)
 	`)
 	if err != nil {
@@ -40,7 +47,7 @@ func setupTransactionTestDB() {
 
 func TestAddTransaction(t *testing.T) {
 	setupTransactionTestDB()
-	defer CleanupTestDB()
+	defer database.DB.Close()
 
 	// Setup
 	now := time.Now()
@@ -64,8 +71,7 @@ func TestAddTransaction(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	// Use our helper to add authentication
-	req = SetupTestAuth(req)
-
+	req = MockAuthContext(req, TestUserID)
 	w := httptest.NewRecorder()
 
 	// Execute
@@ -84,7 +90,7 @@ func TestAddTransaction(t *testing.T) {
 
 	// Verify transaction was created in database
 	var count int
-	err = database.DB.QueryRow("SELECT COUNT(*) FROM transactions WHERE description = ?", reqBody.Description).Scan(&count)
+	err = database.DB.QueryRow("SELECT COUNT(*) FROM transactions WHERE description = $1", reqBody.Description).Scan(&count)
 	if err != nil {
 		t.Fatalf("Error checking transaction: %v", err)
 	}
@@ -95,7 +101,7 @@ func TestAddTransaction(t *testing.T) {
 
 	// Verify transaction date was stored correctly
 	var storedTxDate time.Time
-	err = database.DB.QueryRow("SELECT transaction_date FROM transactions WHERE description = ?", reqBody.Description).Scan(&storedTxDate)
+	err = database.DB.QueryRow("SELECT transaction_date FROM transactions WHERE description = $1", reqBody.Description).Scan(&storedTxDate)
 	if err != nil {
 		t.Fatalf("Error checking transaction date: %v", err)
 	}
@@ -109,7 +115,7 @@ func TestAddTransaction(t *testing.T) {
 
 	// Verify user ID was set from auth context
 	var userID string
-	err = database.DB.QueryRow("SELECT userId FROM transactions WHERE description = ?", reqBody.Description).Scan(&userID)
+	err = database.DB.QueryRow("SELECT user_id FROM transactions WHERE description = $1", reqBody.Description).Scan(&userID)
 	if err != nil {
 		t.Fatalf("Error checking transaction userId: %v", err)
 	}
@@ -121,19 +127,19 @@ func TestAddTransaction(t *testing.T) {
 
 func TestGetTransactions(t *testing.T) {
 	setupTransactionTestDB()
-	defer CleanupTestDB()
+	defer database.DB.Close()
 
 	// First add a test transaction
 	_, err := database.DB.Exec(`
-		INSERT INTO transactions (id, amount, description, date, type, payTo, paid, paidDate, enteredBy, optional, userId)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO transactions (id, amount, description, date, type, pay_to, paid, paid_date, entered_by, optional, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`, "test-id", 100.50, "Test Transaction", time.Now(), "Test", "Test Payee", true, time.Now().Format("2006-01-02"), "test-user", false, TestUserID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Setup request with authentication
-	req := SetupTestAuth(httptest.NewRequest("GET", "/transactions", nil))
+	req := MockAuthContext(httptest.NewRequest("GET", "/transactions", nil), TestUserID)
 	w := httptest.NewRecorder()
 
 	// Execute
