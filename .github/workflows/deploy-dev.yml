@@ -191,7 +191,6 @@ jobs:
             ENVIRONMENT = "development"
             APP_ENV = "development"
             RESET_DB = "true"
-            DATABASE_URL = "postgres://postgres:${{ secrets.DB_PASSWORD }}@${{ env.FLY_DEV_APP_NAME }}-db.internal:5432/bennwallet"
             YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
             YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
             YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
@@ -208,6 +207,13 @@ jobs:
             cpu_kind = "shared"
             cpus = 1
             memory_mb = 1024
+            
+          [[mounts]]
+            source = "${{ env.VOLUME_NAME }}"
+            destination = "/data"
+            
+            [mounts.options]
+              size = "1"
           EOF
 
       - name: Check if volume exists and create if needed
@@ -218,6 +224,22 @@ jobs:
           else
             echo "Volume ${{ env.VOLUME_NAME }} already exists"
           fi
+
+      - name: Check and setup PostgreSQL
+        run: |
+          echo "Checking for PostgreSQL database..."
+          
+          # Check if dev PostgreSQL database exists
+          if ! flyctl postgres list | grep -q "${FLY_DEV_APP_NAME}-db"; then
+            echo "Creating PostgreSQL database cluster..."
+            flyctl postgres create --name ${FLY_DEV_APP_NAME}-db --org personal --region sjc --vm-size shared-cpu-1x --volume-size 1
+          else
+            echo "PostgreSQL database cluster already exists."
+          fi
+          
+          # Attach the database to the app (will do nothing if already attached)
+          echo "Attaching PostgreSQL to the app..."
+          flyctl postgres attach ${FLY_DEV_APP_NAME}-db --app ${{ env.FLY_DEV_APP_NAME }} || true
 
       - name: Deploy to Fly.io Development
         run: |
