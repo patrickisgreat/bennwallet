@@ -229,19 +229,22 @@ jobs:
         run: |
           echo "Checking for PostgreSQL database..."
           
+          # Set FLYCTL_NONINTERACTIVE=1 to ensure commands run non-interactively
+          export FLYCTL_NONINTERACTIVE=1
+          
           # Check if Managed PostgreSQL database exists
           if ! flyctl managed-postgres list | grep -q "${FLY_DEV_APP_NAME}-db"; then
             echo "Creating PostgreSQL database with Managed Postgres..."
             # Create a managed postgres database with correct flags and region
             # Using lax (Los Angeles) as it's one of the available regions for Managed Postgres
-            flyctl managed-postgres create --name ${FLY_DEV_APP_NAME}-db --org personal --region lax --plan hobby-v --yes
+            flyctl managed-postgres create --name ${FLY_DEV_APP_NAME}-db --org personal --region lax --plan hobby-v
           else
             echo "PostgreSQL database already exists."
           fi
           
           # Attach the database to the app (will do nothing if already attached)
           echo "Attaching PostgreSQL to the app..."
-          flyctl managed-postgres attach ${FLY_DEV_APP_NAME}-db --app ${{ env.FLY_DEV_APP_NAME }} --yes || true
+          flyctl managed-postgres attach ${FLY_DEV_APP_NAME}-db --app ${{ env.FLY_DEV_APP_NAME }} || true
 
       - name: Deploy to Fly.io Development
         run: |
