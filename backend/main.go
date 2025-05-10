@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -10,49 +12,54 @@ import (
 	"bennwallet/backend/database"
 	"bennwallet/backend/handlers"
 	"bennwallet/backend/middleware"
+	"bennwallet/backend/migrations"
 	"bennwallet/backend/security"
 	"bennwallet/backend/services"
 
 	"github.com/gorilla/mux"
 )
 
+var (
+	port       = flag.String("port", ":8080", "Port to listen on")
+	resetDB    = flag.Bool("reset-db", false, "Reset database")
+	devMode    = flag.Bool("dev", true, "Run in development mode with test auth")
+	testUserID = flag.String("test-user", "admin-user-1", "Test user ID for dev mode")
+	noExit     = flag.Bool("no-exit", false, "Don't exit after migrations")
+)
+
 func main() {
+	// Parse command line flags
+	flag.Parse()
+
 	// Check if we're running in database reset mode
-	if os.Getenv("RESET_DB") == "true" {
-		log.Println("Running in database reset mode")
+	isResetDB := os.Getenv("RESET_DB") == "true" || *resetDB
 
-		// In PR deployments with RESET_DB=true, completely reset the database
-		if os.Getenv("PR_DEPLOYMENT") == "true" {
-			log.Println("PR deployment with RESET_DB=true - completely recreating database")
-			dbPath := os.Getenv("DB_PATH")
-			if dbPath == "" {
-				dbPath = "/data/bennwallet.db"
-			}
-
-			// Check if file exists
-			_, err := os.Stat(dbPath)
-			if err == nil {
-				// Delete the database file
-				log.Printf("Deleting existing database file at %s", dbPath)
-				err = os.Remove(dbPath)
-				if err != nil {
-					log.Printf("Warning: Failed to delete database file: %v", err)
-				} else {
-					log.Println("Database file deleted successfully")
-				}
-			} else if !os.IsNotExist(err) {
-				log.Printf("Error checking database file: %v", err)
-			}
-		}
-	}
+	// Debug - print RESET_DB value
+	log.Printf("RESET_DB environment variable value: '%s'", os.Getenv("RESET_DB"))
+	log.Printf("Is reset DB flag: %v", isResetDB)
 
 	// Check if this is a PR deployment
-	if os.Getenv("PR_DEPLOYMENT") == "true" {
+	isPRDeployment := os.Getenv("PR_DEPLOYMENT") == "true"
+
+	// Check environment
+	isDevelopment := os.Getenv("APP_ENV") != "production" &&
+		os.Getenv("NODE_ENV") != "production" &&
+		os.Getenv("ENVIRONMENT") != "production" &&
+		os.Getenv("ENV") != "production"
+
+	// In development mode, we don't automatically reset the database
+	// User must explicitly set RESET_DB=true or use the --reset-db flag
+	// This ensures we don't lose data every time the server starts
+
+	if isResetDB {
+		log.Println("Running in database reset mode")
+	}
+
+	if isPRDeployment {
 		log.Println("Running in PR deployment mode")
 	}
 
-	// Check environment
-	if os.Getenv("APP_ENV") != "production" && os.Getenv("NODE_ENV") != "production" {
+	if isDevelopment {
 		log.Println("Running in development environment")
 	}
 
@@ -70,27 +77,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Seed default users but don't start syncing yet
-	err = database.SeedDefaultUsers()
+	// Run migrations (including test data seeding if in dev/PR environment)
+	log.Println("Running migrations...")
+	err = migrations.RunMigrations(database.DB, isResetDB)
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Run migrations with error handling for RESET_DB mode
-	if err := database.RunMigrations(); err != nil {
-		// For RESET_DB mode, don't exit with an error if migrations fail
-		// This allows the PR deploys to recover from database locks
-		if os.Getenv("RESET_DB") == "true" {
-			log.Printf("Warning: Migrations failed in RESET_DB mode: %v", err)
-			log.Println("Continuing with deployment despite migration errors")
-		} else {
-			log.Fatal(err)
-		}
+		log.Printf("Warning: Failed to run migrations: %v", err)
 	}
 
 	// If running in reset mode, exit after database setup is complete
-	if os.Getenv("RESET_DB") == "true" {
-		log.Println("Database reset attempted. Exiting.")
+	// unless --no-exit flag is provided
+	if isResetDB && !*noExit {
+		log.Println("Database reset completed successfully. Exiting.")
 		return
 	}
 
@@ -113,6 +110,33 @@ func main() {
 	// Apply global middleware
 	r.Use(middleware.EnableCORS)
 
+	// Dev-only middleware that sets a test user ID for authentication
+	testAuthMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Only apply in dev mode
+			if *devMode {
+				log.Printf("Dev mode: setting test user ID: %s", *testUserID)
+				ctx := context.WithValue(r.Context(), middleware.UserIDKey, *testUserID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+			} else {
+				next.ServeHTTP(w, r)
+			}
+		})
+	}
+
+	// Apply our middleware chain
+	// CORS first, then auth
+	r.Use(middleware.EnableCORS)
+
+	if *devMode {
+		// In dev mode, use test auth middleware
+		r.Use(testAuthMiddleware)
+		log.Println("Running in dev mode with test authentication")
+	} else {
+		// In production, use real auth middleware
+		r.Use(middleware.AuthMiddleware)
+	}
+
 	// Register routes with both direct paths and /api prefix to maintain compatibility
 	registerRoutes(r)
 	apiRouter := r.PathPrefix("/api").Subrouter()
@@ -130,20 +154,15 @@ func main() {
 	}).Methods("GET")
 
 	// Configure the server
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
 	srv := &http.Server{
 		Handler:      r,
-		Addr:         ":" + port,
+		Addr:         *port,
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
 
 	// Start the server
-	log.Printf("Starting server on port %s...", port)
+	log.Printf("Starting server on port %s...", *port)
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -174,6 +193,7 @@ func registerRoutes(r *mux.Router) {
 	protectedRouter.HandleFunc("/users", handlers.GetUsers).Methods("GET")
 	protectedRouter.HandleFunc("/users/sync", handlers.SyncFirebaseUser).Methods("POST")
 	protectedRouter.HandleFunc("/users/{username}", handlers.GetUserByUsername).Methods("GET")
+	protectedRouter.HandleFunc("/user/me", handlers.GetCurrentUser).Methods("GET")
 
 	// Protected YNAB routes
 	protectedRouter.HandleFunc("/ynab/categories", handlers.GetYNABCategories).Methods("GET")
@@ -184,4 +204,30 @@ func registerRoutes(r *mux.Router) {
 	protectedRouter.HandleFunc("/ynab/config", handlers.GetYNABConfig).Methods("GET")
 	protectedRouter.HandleFunc("/ynab/config", handlers.UpdateYNABConfig).Methods("PUT")
 	protectedRouter.HandleFunc("/ynab/sync/categories", handlers.SyncYNABCategories).Methods("POST")
+
+	// Diagnostic routes
+	protectedRouter.HandleFunc("/diagnostic/db-check", handlers.CheckDatabaseHandler).Methods("GET")
+
+	// Permission management routes
+	protectedRouter.HandleFunc("/permissions", handlers.GetUserPermissions).Methods("GET")
+	protectedRouter.HandleFunc("/permissions", handlers.GrantPermission).Methods("POST")
+	protectedRouter.HandleFunc("/permissions", handlers.RevokePermission).Methods("DELETE")
+	protectedRouter.HandleFunc("/permissions/all", handlers.GetAllPermissions).Methods("GET")
+	protectedRouter.HandleFunc("/roles", handlers.SetUserRole).Methods("POST")
+	protectedRouter.HandleFunc("/roles/{userId}", handlers.GetUserRole).Methods("GET")
+
+	// Saved filters routes
+	protectedRouter.HandleFunc("/filters", handlers.GetSavedFilters).Methods("GET")
+	protectedRouter.HandleFunc("/filters", handlers.CreateSavedFilter).Methods("POST")
+	protectedRouter.HandleFunc("/filters/{id}", handlers.GetSavedFilter).Methods("GET")
+	protectedRouter.HandleFunc("/filters/{id}", handlers.UpdateSavedFilter).Methods("PUT")
+	protectedRouter.HandleFunc("/filters/{id}", handlers.DeleteSavedFilter).Methods("DELETE")
+
+	// Custom reports routes
+	protectedRouter.HandleFunc("/reports/custom", handlers.GetCustomReports).Methods("GET")
+	protectedRouter.HandleFunc("/reports/custom", handlers.CreateCustomReport).Methods("POST")
+	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.GetCustomReport).Methods("GET")
+	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.UpdateCustomReport).Methods("PUT")
+	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.DeleteCustomReport).Methods("DELETE")
+	protectedRouter.HandleFunc("/reports/custom/{id}/run", handlers.RunCustomReport).Methods("POST")
 }

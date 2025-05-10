@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
+
+	_ "github.com/lib/pq"
 )
 
 // Define a constant for the test user ID
@@ -20,20 +23,39 @@ const testUserID = "test-user-id"
 
 func setupReportTestDB() {
 	// Create a test database connection
-	db, err := sql.Open("sqlite3", ":memory:")
+	config := database.PostgresConfig{
+		Host:     getEnvWithDefault("TEST_DB_HOST", "localhost"),
+		Port:     getEnvWithDefault("TEST_DB_PORT", "5432"),
+		User:     getEnvWithDefault("TEST_DB_USER", "postgres"),
+		Password: getEnvWithDefault("TEST_DB_PASSWORD", "postgres"),
+		DBName:   getEnvWithDefault("TEST_DB_NAME", "bennwallet_test"),
+		SSLMode:  "disable",
+	}
+
+	db, err := sql.Open("postgres", config.ConnectionString())
 	if err != nil {
 		panic(err)
 	}
 	database.DB = db
 
+	// Clear existing tables for this test
+	_, err = db.Exec(`
+		DROP TABLE IF EXISTS transactions CASCADE;
+		DROP TABLE IF EXISTS permissions CASCADE;
+		DROP TABLE IF EXISTS users CASCADE;
+	`)
+	if err != nil {
+		panic(err)
+	}
+
 	// Create users table first for foreign key support
 	_, err = db.Exec(`
-		CREATE TABLE users (
+		CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			username TEXT,
 			name TEXT,
 			status TEXT,
-			isAdmin BOOLEAN DEFAULT 0,
+			is_admin BOOLEAN DEFAULT false,
 			role TEXT DEFAULT 'user'
 		)
 	`)
@@ -43,8 +65,13 @@ func setupReportTestDB() {
 
 	// Insert test user
 	_, err = db.Exec(`
-		INSERT INTO users (id, username, name, isAdmin, role)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO users (id, username, name, is_admin, role)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO UPDATE SET 
+		  username = EXCLUDED.username,
+		  name = EXCLUDED.name,
+		  is_admin = EXCLUDED.is_admin,
+		  role = EXCLUDED.role
 	`, testUserID, "testuser", "Test User", true, "admin")
 	if err != nil {
 		panic(err)
@@ -52,8 +79,8 @@ func setupReportTestDB() {
 
 	// Create permissions table
 	_, err = db.Exec(`
-		CREATE TABLE permissions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+		CREATE TABLE IF NOT EXISTS permissions (
+			id SERIAL PRIMARY KEY,
 			granted_user_id TEXT NOT NULL,
 			owner_user_id TEXT NOT NULL,
 			resource_type TEXT NOT NULL,
@@ -69,19 +96,34 @@ func setupReportTestDB() {
 
 	// Create transactions table
 	_, err = db.Exec(`
-		CREATE TABLE transactions (
+		CREATE TABLE IF NOT EXISTS transactions (
 			id TEXT PRIMARY KEY,
-			amount REAL NOT NULL,
+			amount NUMERIC(15,2) NOT NULL,
 			description TEXT NOT NULL,
-			date DATETIME NOT NULL,
-			transaction_date DATETIME,
+			date TIMESTAMP NOT NULL,
+			transaction_date TIMESTAMP,
 			type TEXT NOT NULL,
-			payTo TEXT,
-			paid BOOLEAN NOT NULL DEFAULT 0,
-			paidDate TEXT,
-			enteredBy TEXT NOT NULL,
-			optional BOOLEAN NOT NULL DEFAULT 0,
-			userId TEXT
+			pay_to TEXT,
+			paid BOOLEAN NOT NULL DEFAULT false,
+			paid_date TEXT,
+			entered_by TEXT NOT NULL,
+			optional BOOLEAN NOT NULL DEFAULT false,
+			user_id TEXT,
+			note TEXT
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+
+	// Create transaction_categories join table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS transaction_categories (
+			id SERIAL PRIMARY KEY,
+			transaction_id TEXT NOT NULL,
+			category_id INTEGER NOT NULL,
+			amount NUMERIC(15,2) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
 	if err != nil {
@@ -90,6 +132,14 @@ func setupReportTestDB() {
 
 	// Insert sample data for testing
 	insertTestTransactions()
+}
+
+// Helper function to get environment variable with default
+func getEnvWithDefault(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
 }
 
 func insertTestTransactions() {
@@ -127,8 +177,8 @@ func insertTestTransactions() {
 	for _, tx := range testTransactions {
 		_, err := database.DB.Exec(`
 			INSERT INTO transactions 
-			(id, amount, description, date, type, payTo, paid, enteredBy, optional, userId)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(id, amount, description, date, type, pay_to, paid, entered_by, optional, user_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		`, tx.id, tx.amount, tx.description, tx.date, tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.optional, tx.userId)
 
 		if err != nil {

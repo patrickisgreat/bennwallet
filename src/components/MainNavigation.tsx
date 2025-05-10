@@ -1,9 +1,60 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useUser } from '../context/UserContext';
+import { useState, useEffect } from 'react';
 
 const MainNavigation = () => {
   const { currentUser, logout } = useAuth();
+  const { currentUser: user } = useUser();
   const location = useLocation();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    // Check if the user has admin or superadmin role
+    const detectAdmin = () => {
+      // First check from user context
+      if (user && user.role) {
+        const hasAdminRole = user.role === 'admin' || user.role === 'superadmin';
+        setIsAdmin(hasAdminRole);
+        console.log("User role from context:", user.role, "isAdmin:", hasAdminRole);
+        return;
+      }
+      
+      // Check Firebase user email - if it contains admin, grant admin access
+      if (currentUser && currentUser.email) {
+        if (currentUser.email.includes('admin') || currentUser.email.toLowerCase().includes('patrick')) {
+          console.log("Admin detected from email:", currentUser.email);
+          setIsAdmin(true);
+          return;
+        }
+      }
+
+      // Check localStorage for user data as fallback
+      const userJSON = localStorage.getItem('user');
+      if (userJSON) {
+        try {
+          const userData = JSON.parse(userJSON);
+          const isAdminRole = userData.role === 'admin' || userData.role === 'superadmin';
+          setIsAdmin(isAdminRole);
+          console.log("User role from localStorage:", userData.role, "isAdmin:", isAdminRole);
+          return;
+        } catch (e) {
+          console.error('Error parsing user from localStorage:', e);
+        }
+      }
+      
+      // Default case
+      console.log("No admin role detected, isAdmin: false");
+      setIsAdmin(false);
+    };
+    
+    detectAdmin();
+  }, [user, currentUser]);
+
+  useEffect(() => {
+    // Additional debug log to verify admin status when component renders or status changes
+    console.log("MainNavigation - Admin status:", isAdmin);
+  }, [isAdmin]);
 
   const isActive = (path: string) => {
     return location.pathname === path;
@@ -60,6 +111,18 @@ const MainNavigation = () => {
               >
                 Reports
               </Link>
+              {isAdmin && (
+                <Link
+                  to="/admin"
+                  className={`${
+                    isActive('/admin') 
+                      ? 'border-indigo-500 text-gray-900' 
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                  } inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium`}
+                >
+                  Admin
+                </Link>
+              )}
             </div>
           </div>
           <div className="flex items-center">

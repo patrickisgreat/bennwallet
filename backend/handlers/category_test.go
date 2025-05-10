@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,34 +9,48 @@ import (
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/models"
+
+	_ "github.com/lib/pq"
 )
 
-func setupCategoryTestDB() {
-	// Create a test database connection
-	db, err := sql.Open("sqlite3", ":memory:")
+func TestAddCategory(t *testing.T) {
+	// Create a test database connection using our common setup helper
+	db, err := SetupPostgresTestDB()
 	if err != nil {
-		panic(err)
+		t.Fatalf("Failed to set up test database: %v", err)
 	}
 	database.DB = db
-
-	// Create categories table
-	_, err = db.Exec(`
-		CREATE TABLE categories (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			description TEXT,
-			user_id TEXT NOT NULL,
-			color TEXT
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
-}
-
-func TestAddCategory(t *testing.T) {
-	setupCategoryTestDB()
 	defer database.DB.Close()
+
+	// Check if categories table exists
+	var exists bool
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'categories')").Scan(&exists)
+	if err != nil {
+		t.Fatalf("Error checking if categories table exists: %v", err)
+	}
+
+	// Only create the table if it doesn't exist
+	if !exists {
+		// Create categories table with PostgreSQL syntax
+		_, err = db.Exec(`
+			CREATE TABLE categories (
+				id SERIAL PRIMARY KEY,
+				name TEXT NOT NULL,
+				description TEXT,
+				user_id TEXT NOT NULL,
+				color TEXT
+			)
+		`)
+		if err != nil {
+			t.Fatalf("Error creating categories table: %v", err)
+		}
+	} else {
+		// Clear existing categories for a clean test
+		_, err = db.Exec("DELETE FROM categories")
+		if err != nil {
+			t.Fatalf("Error clearing categories table: %v", err)
+		}
+	}
 
 	// Setup
 	reqBody := models.Category{
@@ -62,14 +75,14 @@ func TestAddCategory(t *testing.T) {
 	}
 
 	var response models.Category
-	err := json.NewDecoder(w.Body).Decode(&response)
+	err = json.NewDecoder(w.Body).Decode(&response)
 	if err != nil {
 		t.Fatalf("Error decoding response: %v", err)
 	}
 
 	// Verify category was created in database
 	var count int
-	err = database.DB.QueryRow("SELECT COUNT(*) FROM categories WHERE name = ?", reqBody.Name).Scan(&count)
+	err = database.DB.QueryRow("SELECT COUNT(*) FROM categories WHERE name = $1", reqBody.Name).Scan(&count)
 	if err != nil {
 		t.Fatalf("Error checking category: %v", err)
 	}
@@ -80,13 +93,48 @@ func TestAddCategory(t *testing.T) {
 }
 
 func TestGetCategories(t *testing.T) {
-	setupCategoryTestDB()
+	// Create a test database connection using our common setup helper
+	db, err := SetupPostgresTestDB()
+	if err != nil {
+		t.Fatalf("Failed to set up test database: %v", err)
+	}
+	database.DB = db
 	defer database.DB.Close()
 
+	// Check if categories table exists
+	var exists bool
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'categories')").Scan(&exists)
+	if err != nil {
+		t.Fatalf("Error checking if categories table exists: %v", err)
+	}
+
+	// Only create the table if it doesn't exist
+	if !exists {
+		// Create categories table with PostgreSQL syntax
+		_, err = db.Exec(`
+			CREATE TABLE categories (
+				id SERIAL PRIMARY KEY,
+				name TEXT NOT NULL,
+				description TEXT,
+				user_id TEXT NOT NULL,
+				color TEXT
+			)
+		`)
+		if err != nil {
+			t.Fatalf("Error creating categories table: %v", err)
+		}
+	} else {
+		// Clear existing categories for a clean test
+		_, err = db.Exec("DELETE FROM categories")
+		if err != nil {
+			t.Fatalf("Error clearing categories table: %v", err)
+		}
+	}
+
 	// First add a test category
-	_, err := database.DB.Exec(`
+	_, err = db.Exec(`
 		INSERT INTO categories (name, description, user_id, color)
-		VALUES (?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4)
 	`, "Test Category", "Test Description", "test-user-id", "#FF0000")
 	if err != nil {
 		t.Fatal(err)

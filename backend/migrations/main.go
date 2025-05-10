@@ -1,21 +1,40 @@
 package migrations
 
 import (
+	"bennwallet/backend/database"
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 )
 
 // RunMigrations executes all migrations in the correct order
-func RunMigrations(db *sql.DB) error {
+// isResetDB indicates if the database should be reset before running migrations
+func RunMigrations(db *sql.DB, isResetDB bool) error {
 	log.Println("Running migrations...")
+
+	// If isResetDB is true, handle it first before any other operations
+	if isResetDB {
+		log.Println("Database reset requested - resetting database before migrations...")
+
+		// Drop all tables
+		if err := DropAllTables(db); err != nil {
+			return fmt.Errorf("failed to drop tables: %w", err)
+		}
+
+		// Create base tables
+		log.Println("Creating base tables...")
+		if err := CreateBaseSchema(db); err != nil {
+			return fmt.Errorf("failed to create base schema: %w", err)
+		}
+	}
 
 	// Create migrations table if it doesn't exist
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS migrations (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
 	if err != nil {
@@ -27,22 +46,36 @@ func RunMigrations(db *sql.DB) error {
 		name string
 		fn   func(*sql.DB) error
 	}{
-		// Add all migrations here in order
-		{"add_transaction_date", AddTransactionDateColumn},
-		{"add_ynab_tables", AddYNABTables},
-		{"string_user_ids", StringUserIDs},
-		{"add_categories_unique_constraint", AddCategoriesUniqueConstraint},
-		{"add_optional_field", AddOptionalField},
-		{"add_permissions_table", AddPermissionsTable},
-		{"update_users_for_permissions", UpdateUsersForPermissions},
-		// For development and PR environments, also seed test data
+		// Add note column to transactions table
+		{"add_transaction_notes_column", func(db *sql.DB) error {
+			return database.AddTransactionNotesColumn(db)
+		}},
+		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
+	}
+
+	// Check if we're in production
+	inProduction := os.Getenv("APP_ENV") == "production" ||
+		os.Getenv("NODE_ENV") == "production" ||
+		os.Getenv("ENVIRONMENT") == "production" ||
+		os.Getenv("ENV") == "production"
+
+	if inProduction {
+		log.Println("Running in PRODUCTION mode - test data seeding will be skipped")
+	} else {
+		log.Println("Running in DEVELOPMENT/TEST mode - test data may be seeded if needed")
 	}
 
 	// Run each migration if it hasn't been applied yet
 	for _, migration := range migrations {
+		// Skip test data seeding in production
+		if inProduction && migration.name == "seed_test_data" {
+			log.Printf("Skipping test data seeding in production environment")
+			continue
+		}
+
 		var count int
-		err := db.QueryRow("SELECT COUNT(*) FROM migrations WHERE name = ?", migration.name).Scan(&count)
+		err := db.QueryRow("SELECT COUNT(*) FROM migrations WHERE name = $1", migration.name).Scan(&count)
 		if err != nil {
 			return fmt.Errorf("failed to check migration status: %w", err)
 		}
@@ -54,7 +87,7 @@ func RunMigrations(db *sql.DB) error {
 				return fmt.Errorf("failed to apply migration %s: %w", migration.name, err)
 			}
 
-			_, err = db.Exec("INSERT INTO migrations (name) VALUES (?)", migration.name)
+			_, err = db.Exec("INSERT INTO migrations (name) VALUES ($1)", migration.name)
 			if err != nil {
 				return fmt.Errorf("failed to record migration: %w", err)
 			}

@@ -200,7 +200,7 @@ func startBackgroundSync(db *sql.DB) {
 
 					// Get the budget ID
 					var budgetID string
-					err := db.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = ?", userID).Scan(&budgetID)
+					err := db.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = $1", userID).Scan(&budgetID)
 					if err != nil {
 						log.Printf("Error getting budget ID for user %s: %v", userID, err)
 						return
@@ -244,7 +244,7 @@ func (c *YNABClient) SyncCategories(ctx context.Context, userID string) error {
 	} else {
 		// Try legacy format
 		var token string
-		err := c.db.QueryRow("SELECT token, budget_id FROM user_ynab_settings WHERE user_id = ?", userID).Scan(&token, &budgetID)
+		err := c.db.QueryRow("SELECT token, budget_id FROM user_ynab_settings WHERE user_id = $1", userID).Scan(&token, &budgetID)
 		if err != nil {
 			return fmt.Errorf("failed to get YNAB settings from legacy table: %w", err)
 		}
@@ -320,7 +320,7 @@ func (c *YNABClient) SyncTransactions(ctx context.Context, userID string) error 
 	} else {
 		// Try legacy format
 		var token string
-		err := c.db.QueryRow("SELECT token, budget_id, account_id FROM user_ynab_settings WHERE user_id = ?", userID).Scan(&token, &budgetID, &accountID)
+		err := c.db.QueryRow("SELECT token, budget_id, account_id FROM user_ynab_settings WHERE user_id = $1", userID).Scan(&token, &budgetID, &accountID)
 		if err != nil {
 			return fmt.Errorf("failed to get YNAB settings from legacy table: %w", err)
 		}

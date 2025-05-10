@@ -1,0 +1,49 @@
+############################################
+# Fly.io configuration for "bennwallet-db"
+############################################
+app            = "bennwallet-db"
+primary_region = "sjc"                 # Silicon Valley
+
+# ─────────────────────────────────────────
+# How we build the image
+# ─────────────────────────────────────────
+[build]
+  dockerfile = "Dockerfile.postgres"   # uses the PostgreSQL-specific Dockerfile
+
+# ─────────────────────────────────────────
+# Environment variables visible at runtime
+# ─────────────────────────────────────────
+[env]
+  POSTGRES_USER = "postgres"
+  POSTGRES_DB = "bennwallet"
+
+# ─────────────────────────────────────────
+# PostgreSQL service configuration
+# ─────────────────────────────────────────
+[http_service]
+  internal_port        = 5432          # PostgreSQL's default port
+  force_https          = false         # PostgreSQL doesn't use HTTPS
+  auto_stop_machines   = true          # Stop when idle to save resources
+  auto_start_machines  = true          # Start on demand
+  min_machines_running = 1             # Keep at least one instance running
+
+  [[http_service.checks]]
+    interval            = "10s"
+    timeout             = "5s"
+    grace_period        = "30s"
+    method              = "tcp"
+    port                = 5432
+
+[[vm]]
+  size = "shared-cpu-1x"               # Choose appropriate VM size
+  memory = "1gb"                       # Minimum memory for PostgreSQL
+
+# ─────────────────────────────────────────
+# Persistent storage for PostgreSQL
+# ─────────────────────────────────────────
+[[mounts]]
+  source = "postgres_data"             # Volume name for PostgreSQL data
+  destination = "/var/lib/postgresql/data"
+  
+  [mounts.options]
+    size = "1"                         # GB 

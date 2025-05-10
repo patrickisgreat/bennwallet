@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { api } from '../utils/api';
+import { api, fetchCategories } from '../utils/api';
 import { useUser } from '../context/UserContext';
 
 interface YNABCategory {
@@ -49,7 +49,7 @@ export default function HierarchicalCategorySelector({
     return value; // Fallback to just showing the value
   };
 
-  // Load YNAB categories from the server
+  // Load categories from the server
   useEffect(() => {
     if (currentUser) {
       loadCategories();
@@ -77,24 +77,90 @@ export default function HierarchicalCategorySelector({
     setError(null);
     
     try {
-      // Fetch YNAB category groups and categories
-      const response = await api.get('/ynab/categories', {
-        params: { userId: currentUser.id }
-      });
+      // Try to fetch direct database categories first
+      const databaseCategories = await fetchCategories();
       
-      if (response.data && Array.isArray(response.data)) {
-        setCategoryGroups(response.data);
-      } else {
-        console.warn('YNAB categories API did not return expected data:', response.data);
-        setCategoryGroups([]);
+      // Transform database categories into category groups
+      if (databaseCategories && databaseCategories.length > 0) {
+        // Group categories by color for visual organization
+        const colorGroups: { [key: string]: YNABCategory[] } = {};
+        
+        databaseCategories.forEach(cat => {
+          // Use the color as a group key, or "Other" if no color
+          const colorKey = cat.color || "#CCCCCC";
+          const colorName = getColorName(colorKey);
+          
+          if (!colorGroups[colorKey]) {
+            colorGroups[colorKey] = [];
+          }
+          
+          colorGroups[colorKey].push({
+            id: String(cat.id),
+            name: cat.name,
+            category_group_id: colorKey,
+            category_group_name: colorName
+          });
+        });
+        
+        // Convert the color groups to category groups
+        const groups: CategoryGroup[] = Object.entries(colorGroups).map(([colorKey, categories]) => ({
+          id: colorKey,
+          name: getColorName(colorKey),
+          categories
+        }));
+        
+        setCategoryGroups(groups);
+        setLoading(false);
+        return;
+      }
+      
+      // Fallback: Try to fetch YNAB categories
+      try {
+        const response = await api.get('/ynab/categories', {
+          params: { userId: currentUser.id }
+        });
+        
+        if (response.data && Array.isArray(response.data)) {
+          setCategoryGroups(response.data);
+        } else {
+          console.warn('YNAB categories API did not return expected data:', response.data);
+          setCategoryGroups([]);
+        }
+      } catch (ynabError) {
+        console.error('Error loading YNAB categories:', ynabError);
+        // If we already got database categories, don't show an error
+        if (databaseCategories.length === 0) {
+          setError('No categories found. Please add categories in settings.');
+        }
       }
     } catch (error) {
-      console.error('Error loading YNAB categories:', error);
+      console.error('Error loading categories:', error);
       setError('Failed to load categories');
       setCategoryGroups([]);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper to convert color codes to readable names
+  const getColorName = (colorCode: string): string => {
+    const colorMap: {[key: string]: string} = {
+      "#4CAF50": "Green",
+      "#2196F3": "Blue",
+      "#FFC107": "Yellow",
+      "#9C27B0": "Purple",
+      "#F44336": "Red",
+      "#3F51B5": "Indigo",
+      "#009688": "Teal",
+      "#FF5722": "Orange",
+      "#795548": "Brown",
+      "#E91E63": "Pink",
+      "#607D8B": "Gray",
+      "#8BC34A": "Light Green",
+      "#CCCCCC": "Other"
+    };
+    
+    return colorMap[colorCode] || "Categories";
   };
 
   // Filter categories based on search term

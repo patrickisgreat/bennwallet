@@ -15,7 +15,7 @@ import React from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
 // Define the filter interface
-interface TransactionFilter {
+export interface TransactionFilter {
   // Entry date filters
   startDate: string;
   endDate: string;
@@ -25,6 +25,7 @@ interface TransactionFilter {
   payTo: string;
   enteredBy: string;
   paid?: boolean;
+  paidStatus: string; // 'all', 'paid', 'unpaid'
 }
 
 function TransactionsPage() {
@@ -37,48 +38,97 @@ function TransactionsPage() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [uniqueFields, setUniqueFields] = useState<{ payTo: string[]; enteredBy: string[] }>({
-    payTo: [],
-    enteredBy: [],
-  });
+  const [payToOptions, setPayToOptions] = useState<string[]>([]);
+  const [enteredByOptions, setEnteredByOptions] = useState<string[]>([]);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // Initialize filter with appropriate defaults based on user
-  const [filter, setFilter] = useState<TransactionFilter>(() => {
-    // Get saved filter from localStorage if available
-    const savedFilter = localStorage.getItem('transactionFilter');
-    if (savedFilter) {
-      return JSON.parse(savedFilter);
-    }
-
-    // First day of current month
-    const startDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-      .toISOString()
-      .split('T')[0];
-    // Today
-    const endDate = new Date().toISOString().split('T')[0];
-
-    // Set default filter based on the user's role
-    // If Patrick is logged in, show transactions entered by Sarah for Patrick to pay
-    // If Sarah is logged in, show transactions entered by Patrick for Sarah to pay
-    const userName = user?.name || '';
-    const isPatrick = userName.toLowerCase().includes('patrick');
-
-    return {
-      startDate,
-      endDate,
-      txStartDate: '',
-      txEndDate: '',
-      payTo: isPatrick ? 'Patrick' : 'Sarah',
-      enteredBy: isPatrick ? 'Sarah' : 'Patrick',
-      paid: false,
-    };
+  const [filter, setFilter] = useState<TransactionFilter>({
+    startDate: '',
+    endDate: '',
+    txStartDate: '',
+    txEndDate: '',
+    payTo: '',
+    enteredBy: '',
+    paid: undefined,
+    paidStatus: 'all',
   });
+
+  // Sorting state
+  const [sortColumn, setSortColumn] = useState<keyof Transaction>('transactionDate');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  // Function to sort transactions
+  const sortTransactions = (
+    data: Transaction[], 
+    column: keyof Transaction, 
+    direction: 'asc' | 'desc'
+  ): Transaction[] => {
+    return [...data].sort((a, b) => {
+      const aValue = a[column];
+      const bValue = b[column];
+      
+      // Special handling for dates
+      if (column === 'transactionDate' || column === 'entered' || column === 'paidDate') {
+        // Safely convert to Date objects or timestamps
+        const aDate = aValue ? new Date(aValue as string).getTime() : 0;
+        const bDate = bValue ? new Date(bValue as string).getTime() : 0;
+        
+        return direction === 'asc' ? aDate - bDate : bDate - aDate;
+      }
+      
+      if (aValue === bValue) return 0;
+      if (aValue === null || aValue === undefined) return 1;
+      if (bValue === null || bValue === undefined) return -1;
+      
+      if (direction === 'asc') {
+        return aValue < bValue ? -1 : 1;
+      } else {
+        return aValue > bValue ? -1 : 1;
+      }
+    });
+  };
 
   useEffect(() => {
     loadTransactions();
     loadUniqueFields();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Load unique fields for dropdowns and update default filter if needed
+  const loadUniqueFields = async () => {
+    try {
+      setApiError(null);
+      const fields = await fetchUniqueTransactionFields();
+      console.log('Loaded unique transaction fields:', fields);
+      setPayToOptions(fields.payTo);
+      setEnteredByOptions(fields.enteredBy);
+
+      // If we have the user's name and filter fields are empty, set default filters
+      if (user?.name && (!filter.payTo || !filter.enteredBy)) {
+        // Update filter with user-specific defaults if we have user info
+        // If the current user's name is in the list, use it
+        const userName = user.name;
+        let otherUsers: string[] = [];
+
+        if (fields.payTo.includes(userName)) {
+          // Find other users - prefer to show transactions from others
+          otherUsers = fields.payTo.filter(name => name !== userName);
+        }
+
+        // Set default filters based on user context
+        setFilter(prev => ({
+          ...prev,
+          payTo: prev.payTo || userName, // Default to current user if not set
+          // Default enteredBy to another user if available, otherwise empty
+          enteredBy: prev.enteredBy || (otherUsers.length > 0 ? otherUsers[0] : ''),
+        }));
+      }
+    } catch (err) {
+      console.error('Error loading unique transaction fields:', err);
+      setApiError('Failed to load user options. Please try refreshing the page.');
+    }
+  };
 
   useEffect(() => {
     // Save filter to localStorage whenever it changes
@@ -94,8 +144,10 @@ function TransactionsPage() {
     if (!currentUser) return;
 
     setLoading(true);
+    setApiError(null);
+    
     try {
-      // Create API filter parameters from the current filter
+      // Create API filter parameters
       const filterParams = {
         startDate: filter.startDate || undefined,
         endDate: filter.endDate || undefined,
@@ -103,10 +155,11 @@ function TransactionsPage() {
         txEndDate: filter.txEndDate || undefined,
         payTo: filter.payTo || undefined,
         enteredBy: filter.enteredBy || undefined,
-        paid: filter.paid,
+        paid: filter.paidStatus === 'paid' ? true : 
+              filter.paidStatus === 'unpaid' ? false : undefined,
       };
 
-      // Only include parameters that have values - EXCLUDE empty strings
+      // Only include parameters with values
       const apiParams: Record<string, string | boolean | undefined> = {};
       Object.entries(filterParams).forEach(([key, value]) => {
         if (value !== undefined && value !== '') {
@@ -116,130 +169,38 @@ function TransactionsPage() {
 
       console.log('Fetching transactions with API params:', apiParams);
       const data = await fetchTransactions(apiParams);
+      
+      // Log categories for debugging
+      if (data && data.length > 0) {
+        console.log(`Received ${data.length} transactions from API`);
+        data.forEach(tx => {
+          if (tx.categories && tx.categories.length > 0) {
+            console.log(`Transaction ${tx.id} has ${tx.categories.length} categories:`, 
+                        tx.categories.map(cat => cat.name).join(', '));
+          } else if (tx.category) {
+            console.log(`Transaction ${tx.id} has legacy category: ${tx.category}`);
+          } else {
+            console.log(`Transaction ${tx.id} has no categories`);
+          }
+        });
+      }
+      
+      // Update state with the fetched data
       setTransactions(data);
-      applyFilters();
+      
+      // Apply sorting
+      const sorted = sortTransactions(data, sortColumn, sortDirection);
+      setFilteredTransactions(sorted);
+      
       setError(null);
     } catch (err) {
       console.error('Error loading transactions:', err);
-      setError('Failed to load transactions. Please try again.');
+      setApiError('Failed to load transactions. The server returned an error (500). Please contact your administrator.');
+      setTransactions([]);
+      setFilteredTransactions([]);
     } finally {
       setLoading(false);
     }
-  };
-
-  const loadUniqueFields = async () => {
-    try {
-      const fields = await fetchUniqueTransactionFields();
-      console.log('Loaded unique fields:', fields);
-      setUniqueFields(fields);
-    } catch (err) {
-      console.error('Error loading unique transaction fields:', err);
-    }
-  };
-
-  const applyFilters = () => {
-    console.log('Raw transactions before filtering:', transactions);
-    let filtered = [...transactions];
-
-    // Filter by entered date range
-    if (filter.startDate) {
-      console.log(`Filtering by entered start date: ${filter.startDate}`);
-      // For start date, set time to beginning of day
-      const startDate = new Date(filter.startDate + 'T00:00:00');
-
-      filtered = filtered.filter(tx => {
-        const txDate = new Date(tx.entered);
-        console.log(`Comparing entered date ${tx.entered} (${txDate}) >= ${startDate}`);
-        return txDate >= startDate;
-      });
-    }
-
-    if (filter.endDate) {
-      console.log(`Filtering by entered end date: ${filter.endDate}`);
-      // For end date, set time to end of day
-      const endDate = new Date(filter.endDate + 'T23:59:59');
-
-      filtered = filtered.filter(tx => {
-        const txDate = new Date(tx.entered);
-        console.log(`Comparing entered date ${tx.entered} (${txDate}) <= ${endDate}`);
-        return txDate <= endDate;
-      });
-    }
-
-    // Filter by transaction date range
-    if (filter.txStartDate) {
-      console.log(`Filtering by transaction start date: ${filter.txStartDate}`);
-      const txStartDate = new Date(filter.txStartDate + 'T00:00:00');
-
-      filtered = filtered.filter(tx => {
-        const txDate = new Date(tx.transactionDate);
-        return txDate >= txStartDate;
-      });
-    }
-
-    if (filter.txEndDate) {
-      console.log(`Filtering by transaction end date: ${filter.txEndDate}`);
-      const txEndDate = new Date(filter.txEndDate + 'T23:59:59');
-
-      filtered = filtered.filter(tx => {
-        const txDate = new Date(tx.transactionDate);
-        return txDate <= txEndDate;
-      });
-    }
-
-    // Helper function to match names with flexibility
-    const matchesName = (value: string, searchTerm: string) => {
-      if (!searchTerm) return true; // If no search term, match all
-      if (!value) return false; // If no value but a search term, no match
-
-      const valueLower = value.toLowerCase();
-      const searchLower = searchTerm.toLowerCase();
-
-      // Direct match
-      if (valueLower === searchLower) return true;
-
-      // Contains match
-      if (valueLower.includes(searchLower)) return true;
-
-      // Special case for "Sarah" and "Sarah Elizabeth Wallis"
-      if (
-        searchLower === 'sarah' &&
-        (valueLower.includes('sarah') || valueLower === 'sarah elizabeth wallis')
-      )
-        return true;
-
-      // Special case for "Patrick" and "Patrick Bennett"
-      if (
-        searchLower === 'patrick' &&
-        (valueLower.includes('patrick') || valueLower === 'patrick bennett')
-      )
-        return true;
-
-      return false;
-    };
-
-    // Filter by payTo
-    if (filter.payTo) {
-      filtered = filtered.filter(tx => matchesName(tx.payTo, filter.payTo));
-    }
-
-    // Filter by enteredBy
-    if (filter.enteredBy) {
-      filtered = filtered.filter(tx => matchesName(tx.enteredBy, filter.enteredBy));
-    }
-
-    // Filter by paid status
-    if (filter.paid !== undefined) {
-      filtered = filtered.filter(tx => tx.paid === filter.paid);
-    }
-
-    console.log('Filtering transactions:', {
-      total: transactions.length,
-      filtered: filtered.length,
-      filters: filter,
-    });
-
-    setFilteredTransactions(filtered);
   };
 
   const handleAddTransaction = async (transaction: Transaction) => {
@@ -251,7 +212,16 @@ function TransactionsPage() {
     try {
       const success = await updateTransaction(id, updates);
       if (success) {
-        setTransactions(prev => prev.map(tx => (tx.id === id ? { ...tx, ...updates } : tx)));
+        const updatedTransactions = transactions.map(tx => 
+          tx.id === id ? { ...tx, ...updates } : tx
+        );
+        setTransactions(updatedTransactions);
+        
+        // Also update the filtered transactions to ensure the UI reflects the change
+        setFilteredTransactions(sortTransactions(updatedTransactions, sortColumn, sortDirection));
+        
+        // Remove forced refresh to prevent notes from reverting
+        // Local state updates above should be sufficient
       } else {
         setError('Failed to update transaction');
       }
@@ -270,6 +240,7 @@ function TransactionsPage() {
       const success = await deleteTransaction(id);
       if (success) {
         setTransactions(prev => prev.filter(tx => tx.id !== id));
+        setFilteredTransactions(prev => prev.filter(tx => tx.id !== id));
       } else {
         setError('Failed to delete transaction');
       }
@@ -287,8 +258,29 @@ function TransactionsPage() {
   };
 
   const handleEditSubmit = async (id: string, updates: Partial<Transaction>) => {
-    await handleUpdateTransaction(id, updates);
-    setEditingTransaction(null);
+    try {
+      console.log("Submitting edit with updates:", updates);
+      // First update the transaction
+      const success = await updateTransaction(id, updates);
+      
+      if (success) {
+        console.log("Update successful, updating local state with:", updates);
+        // Update local state for immediate UI feedback
+        const updatedTransactions = transactions.map(tx => 
+          tx.id === id ? { ...tx, ...updates } : tx
+        );
+        setTransactions(updatedTransactions);
+        setFilteredTransactions(sortTransactions(updatedTransactions, sortColumn, sortDirection));
+        
+        // Clear editing state
+        setEditingTransaction(null);
+      } else {
+        setError('Failed to update transaction');
+      }
+    } catch (err) {
+      console.error('Error in handleEditSubmit:', err);
+      setError('Failed to update transaction. Please try again.');
+    }
   };
 
   const handleCancelEdit = () => {
@@ -318,7 +310,8 @@ function TransactionsPage() {
       txEndDate: '',
       payTo: '',
       enteredBy: '',
-      paid: false,
+      paid: undefined,
+      paidStatus: 'all',
     });
   };
 
@@ -469,7 +462,7 @@ function TransactionsPage() {
         // Extract values
         const enteredDateValue = values[dateIndex].trim();
         const amountValue = parseFloat(values[amountIndex].replace('$', '').trim());
-        const payToValue = values[payToIndex].trim() as 'Sarah' | 'Patrick';
+        const payToValue = values[payToIndex].trim();
         const categoryValue = values[categoryIndex].trim();
         const noteValue = noteIndex !== -1 && values[noteIndex] ? values[noteIndex].trim() : '';
         const optionalValue =
@@ -490,7 +483,7 @@ function TransactionsPage() {
           !enteredDateValue ||
           isNaN(amountValue) ||
           amountValue <= 0 ||
-          !['Sarah', 'Patrick'].includes(payToValue) ||
+          !payToValue ||
           !categoryValue
         ) {
           console.warn(`Row ${i} has invalid data, skipping`);
@@ -547,6 +540,23 @@ function TransactionsPage() {
         fileInputRef.current.value = '';
       }
     }
+  };
+
+  // Add a function to handle column sorting
+  const handleSortChange = (column: keyof Transaction) => {
+    if (column === sortColumn) {
+      // Toggle direction if clicking the same column
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // Set new column with default desc direction
+      setSortColumn(column);
+      setSortDirection('desc');
+    }
+    
+    // Re-sort the filtered transactions
+    setFilteredTransactions(sortTransactions(transactions, 
+      column === sortColumn && sortDirection === 'asc' ? column : column, 
+      column === sortColumn && sortDirection === 'asc' ? 'desc' : 'asc'));
   };
 
   return (
@@ -669,15 +679,11 @@ function TransactionsPage() {
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 >
                   <option value="">All</option>
-                  <option value="Sarah">Sarah</option>
-                  <option value="Patrick">Patrick</option>
-                  {uniqueFields.payTo
-                    .filter(name => name !== 'Sarah' && name !== 'Patrick')
-                    .map(name => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
+                  {payToOptions.map(name => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -690,15 +696,11 @@ function TransactionsPage() {
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 >
                   <option value="">All</option>
-                  <option value="Sarah">Sarah</option>
-                  <option value="Patrick">Patrick</option>
-                  {uniqueFields.enteredBy
-                    .filter(name => name !== 'Sarah' && name !== 'Patrick')
-                    .map(name => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
+                  {enteredByOptions.map(name => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -719,6 +721,20 @@ function TransactionsPage() {
         </div>
       </div>
 
+      {/* Display API error messages */}
+      {apiError && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6" role="alert">
+          <p>{apiError}</p>
+        </div>
+      )}
+      
+      {/* Empty state message when no options are available */}
+      {payToOptions.length === 0 && enteredByOptions.length === 0 && !apiError && (
+        <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-6" role="alert">
+          <p>No transaction data found. You may need to add some transactions first.</p>
+        </div>
+      )}
+
       <AddTransactionForm
         onAdd={handleAddTransaction}
         editingTransaction={editingTransaction}
@@ -735,6 +751,7 @@ function TransactionsPage() {
           onDelete={handleDeleteTransaction}
           onEdit={handleEditTransaction}
           onBulkDelete={handleBulkDelete}
+          onSortChange={handleSortChange}
         />
       )}
     </div>
