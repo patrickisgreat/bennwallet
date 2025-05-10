@@ -1,54 +1,35 @@
-############################################
-# Fly.io configuration for "bennwallet"
-############################################
-app            = "bennwallet"
-primary_region = "sjc"                 # Silicon Valley
+# fly.toml app configuration file generated for bennwallet-prod on 2025-05-10T16:55:58-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-# ─────────────────────────────────────────
-# How we build the image
-# ─────────────────────────────────────────
+app = 'bennwallet-prod'
+primary_region = 'sjc'
+
 [build]
-  dockerfile = "Dockerfile"            # uses the multi-stage Dockerfile in repo root
+  dockerfile = 'Dockerfile'
 
-# ─────────────────────────────────────────
-# Environment variables visible at runtime
-# ─────────────────────────────────────────
 [env]
-  PORT = "8080"                        # server listens on :8080
-  # PostgreSQL config (actual values set in Fly secrets)
-  DB_HOST = "bennwallet-db.internal"   # Fly.io PostgreSQL hostname
-  DB_PORT = "5432"                     # Standard PostgreSQL port
-  DB_USER = "postgres"                 # Default PostgreSQL user
-  DB_NAME = "bennwallet"               # Database name
-  DB_SSL_MODE = "disable"              # SSL mode for internal connections
+  ENVIRONMENT = 'production'
+  NODE_ENV = 'production'
+  PORT = '8080'
+  YNAB_ACCOUNT_ID = ''
+  YNAB_API_TOKEN = 'xIgepVnHjCxstZ30bAsr21TF40xORiT74fSD0GDWe9Y'
+  YNAB_BUDGET_ID = '662ab203-7b47-45e1-8245-ce86ea9b848e'
 
-# ─────────────────────────────────────────
-# Main HTTP service
-# ─────────────────────────────────────────
+[[mounts]]
+  source = 'bennwallet_prod_data'
+  destination = '/data'
+
 [http_service]
-  internal_port        = 8080          # matches the PORT above
-  force_https          = true
-  auto_start_machines  = true          # wake VMs on first request
-  auto_stop_machines   = true          # suspend when idle
-  min_machines_running = 1             # keep one "warm" instance to avoid 429 loops
-  processes            = ["app"]       # default process group
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
 
-  [[http_service.checks]]              # simple health-check at /health
-    method        = "GET"
-    path          = "/health"
-    protocol      = "http"
-    interval      = "30s"
-    timeout       = "5s"
-    grace_period  = "10s"
-
-# ─────────────────────────────────────────
-# CDN-served static assets (built by Vite)
-# ─────────────────────────────────────────
-[[statics]]
-  guest_path = "/app/dist"             # copied here in the final image stage
-  url_prefix = "/"
-
-# Note: We've removed the SQLite volume mount
-# PostgreSQL database is now managed as a separate Fly app
-# Create with: fly postgres create --name bennwallet-db
-# Connect with: fly postgres attach --app bennwallet bennwallet-db
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
