@@ -1,3 +1,15 @@
+## [1.3.3](https://github.com/patrickisgreat/bennwallet/compare/v1.3.2...v1.3.3) (2025-05-10)
+
+### Bug Fixes
+
+* gha again ([fbbdc0d](https://github.com/patrickisgreat/bennwallet/commit/fbbdc0d5c0a681a913beab3c9ca5e8cc6a4359ee))
+* gha region ([31bf8d2](https://github.com/patrickisgreat/bennwallet/commit/31bf8d26916f5b21bfdd51fdeb6cbe8325f863b3))
+* please ([d933785](https://github.com/patrickisgreat/bennwallet/commit/d9337859a07597df789d1c46c0089dacc5892141))
+* please ([c116303](https://github.com/patrickisgreat/bennwallet/commit/c11630310e76ef6b2968edd43495885034f6a688))
+* stuff and things ([55f4d08](https://github.com/patrickisgreat/bennwallet/commit/55f4d0836799f948a823bb4349bc91a6e40b8651))
+* stuff and things ([0aea9a4](https://github.com/patrickisgreat/bennwallet/commit/0aea9a470c4f8946561f0f5c290d32cd5de4c964))
+* stuff and things ([b21dc7e](https://github.com/patrickisgreat/bennwallet/commit/b21dc7e45f7796ff29d4c3fbee8f265fef0c68b3))
+
 ## [1.3.2](https://github.com/patrickisgreat/bennwallet/compare/v1.3.1...v1.3.2) (2025-05-10)
 
 ### Bug Fixes
