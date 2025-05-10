@@ -26,7 +26,10 @@ func GetCategories(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows, err := database.DB.Query("SELECT id, name, description, color FROM categories WHERE user_id = ? ORDER BY name", userId)
+	log.Printf("Getting categories for user ID: %s", userId)
+
+	// Changed from ? to $1 for PostgreSQL compatibility
+	rows, err := database.DB.Query("SELECT id, name, description, color FROM categories WHERE user_id = $1 ORDER BY name", userId)
 	if err != nil {
 		log.Printf("Error querying categories: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -47,6 +50,8 @@ func GetCategories(w http.ResponseWriter, r *http.Request) {
 		c.UserID = userId
 		categories = append(categories, c)
 	}
+
+	log.Printf("Returning %d categories for user %s", len(categories), userId)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(categories)
@@ -75,23 +80,19 @@ func AddCategory(w http.ResponseWriter, r *http.Request) {
 		c.Color = generateRandomColor()
 	}
 
-	result, err := database.DB.Exec(`
+	// Use RETURNING clause to get the inserted ID with PostgreSQL
+	err = database.DB.QueryRow(`
 		INSERT INTO categories (name, description, user_id, color)
-		VALUES (?, ?, ?, ?)
-	`, c.Name, c.Description, c.UserID, c.Color)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, c.Name, c.Description, c.UserID, c.Color).Scan(&c.ID)
 
 	if err != nil {
+		log.Printf("Error inserting category: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	c.ID = int(id)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(c)
 }
@@ -117,8 +118,8 @@ func UpdateCategory(w http.ResponseWriter, r *http.Request) {
 	// Use the user ID from the authentication context
 	_, err = database.DB.Exec(`
 		UPDATE categories 
-		SET name = ?, description = ?, color = ?
-		WHERE id = ? AND user_id = ?
+		SET name = $1, description = $2, color = $3
+		WHERE id = $4 AND user_id = $5
 	`, c.Name, c.Description, c.Color, id, userId)
 
 	if err != nil {
@@ -148,7 +149,7 @@ func DeleteCategory(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	_, err := database.DB.Exec("DELETE FROM categories WHERE id = ? AND user_id = ?", id, userId)
+	_, err := database.DB.Exec("DELETE FROM categories WHERE id = $1 AND user_id = $2", id, userId)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

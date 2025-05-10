@@ -155,7 +155,7 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 	// Prepare statements for better performance
 	stmtCategoryGroup, err := tx.Prepare(`
 		INSERT OR REPLACE INTO ynab_category_groups (id, name, user_id, last_updated)
-		VALUES (?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4)
 	`)
 	if err != nil {
 		log.Printf("DEBUG: Error preparing category group statement: %v", err)
@@ -165,7 +165,7 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 
 	stmtCategory, err := tx.Prepare(`
 		INSERT OR REPLACE INTO ynab_categories (id, group_id, name, user_id, last_updated)
-		VALUES (?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5)
 	`)
 	if err != nil {
 		log.Printf("DEBUG: Error preparing category statement: %v", err)

@@ -16,8 +16,12 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Run migrations
-	err = migrations.RunMigrations(database.DB)
+	// Set RESET_DB environment variable to force recreating test data
+	// This will ensure all test users have categories
+	os.Setenv("RESET_DB", "true")
+
+	// Run migrations with resetDB=true to force dropping tables and recreating
+	err = migrations.RunMigrations(database.DB, true)
 	if err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}

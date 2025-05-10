@@ -127,6 +127,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			username TEXT NOT NULL UNIQUE,
 			name TEXT NOT NULL,
+			email TEXT,
 			role TEXT NOT NULL DEFAULT 'user',
 			status TEXT DEFAULT 'approved',
 			is_admin BOOLEAN DEFAULT FALSE,
@@ -145,7 +146,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			amount NUMERIC(15,2) NOT NULL,
 			description TEXT NOT NULL,
 			date TEXT NOT NULL,
-			transaction_date TIMESTAMP WITH TIME ZONE,
+			transaction_date TEXT,
 			type TEXT NOT NULL,
 			pay_to TEXT,
 			paid BOOLEAN NOT NULL DEFAULT FALSE,
@@ -153,6 +154,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			optional BOOLEAN NOT NULL DEFAULT FALSE,
 			entered_by TEXT NOT NULL,
 			user_id TEXT NOT NULL REFERENCES users(id),
+			note TEXT,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		)

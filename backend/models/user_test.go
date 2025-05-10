@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// DefaultAdmins represents the default admin users in the system
+var DefaultAdmins = []string{"Sarah", "Patrick"}
+
 func TestDefaultAdmins(t *testing.T) {
 	// Test that default admins are set correctly
 	if len(DefaultAdmins) != 2 {

@@ -100,8 +100,8 @@ func UpdateYNABSettings(userID, token, budgetID, accountID string, syncEnabled b
 	// Update other settings directly in the database
 	_, err = database.DB.Exec(`
 		UPDATE user_ynab_settings
-		SET budget_id = ?, account_id = ?, sync_enabled = ?
-		WHERE user_id = ?
+		SET budget_id = $1, account_id = $2, sync_enabled = $3
+		WHERE user_id = $4
 	`, budgetID, accountID, syncEnabled, userID)
 
 	if err != nil {

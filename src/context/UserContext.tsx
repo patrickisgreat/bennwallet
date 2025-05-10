@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
-import { api } from '../utils/api';
+import { fetchCurrentUser } from '../utils/api';
 
 interface User {
     id: string;
     username: string;
     name: string;
+    role?: string;
 }
 
 interface UserContextType {
@@ -23,61 +24,102 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [users, setUsers] = useState<User[]>([]);
 
-    // Sync Firebase user with backend
-    const syncUserWithBackend = async (user: User) => {
-        try {
-            const response = await api.post('/users/sync', {
-                firebaseId: user.id,
-                name: user.name,
-                email: user.username,
-            });
-
-            console.log('User synced with backend:', response.data);
-            return response.data;
-        } catch (error) {
-            console.error('Error syncing user with backend:', error);
-        }
-    };
-
     useEffect(() => {
         // If Firebase auth user changes, update our user context
         if (authUser) {
-            // Create a user from Firebase auth user
-            const user: User = {
+            // Create a base user from Firebase auth user
+            const baseUser: User = {
                 id: authUser.uid,
                 username: authUser.email || '',
-                name: authUser.displayName || authUser.email?.split('@')[0] || 'User'
+                name: authUser.displayName || authUser.email?.split('@')[0] || 'User',
+                role: 'user' // Default role
             };
-            setCurrentUser(user);
-            localStorage.setItem('userId', user.id);
             
-            // Sync the Firebase user with our backend
-            syncUserWithBackend(user);
+            // Store userId in localStorage for other components
+            localStorage.setItem('userId', baseUser.id);
+            
+            // First try to get user info from the backend API
+            const fetchUser = async () => {
+                try {
+                    const apiUser = await fetchCurrentUser();
+                    if (apiUser) {
+                        console.log('Got user from API:', apiUser);
+                        
+                        // Create a complete user by merging Firebase and API data
+                        const completeUser: User = {
+                            ...baseUser,
+                            role: apiUser.role || baseUser.role,
+                            // Prefer API name if available
+                            name: apiUser.name || baseUser.name
+                        };
+                        
+                        console.log('Setting user with API data:', completeUser);
+                        setCurrentUser(completeUser);
+                        
+                        // Store the complete user in localStorage
+                        localStorage.setItem('user', JSON.stringify(completeUser));
+                        
+                        // Update users array
+                        setUsers([completeUser]);
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Error fetching user from API:', error);
+                }
+                
+                // Fallback to local detection if API fails
+                
+                // Special check for Patrick Bennett's Firebase UID
+                if (authUser.uid === 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2') {
+                    baseUser.role = 'superadmin';
+                    console.log('User ID matches Patrick Bennett - setting role to superadmin');
+                }
+                
+                // Check localStorage for existing user data
+                const storedUserJSON = localStorage.getItem('user');
+                if (storedUserJSON) {
+                    try {
+                        const storedUser = JSON.parse(storedUserJSON);
+                        // If stored user matches current user ID, use its role
+                        if (storedUser.id === baseUser.id && storedUser.role) {
+                            baseUser.role = storedUser.role;
+                            console.log('Using role from localStorage:', baseUser.role);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing stored user data:', error);
+                    }
+                }
+                
+                // For development, set admin role based on email
+                if (baseUser.username.includes('admin')) {
+                    baseUser.role = 'superadmin';
+                    console.log('Email contains "admin", setting role to superadmin');
+                }
+                
+                // Set superadmin role if email contains patrick
+                if (baseUser.username.toLowerCase().includes('patrick')) {
+                    baseUser.role = 'superadmin';
+                    console.log('Email contains "patrick", setting role to superadmin');
+                }
+                
+                console.log('Setting user with fallback detection:', baseUser);
+                setCurrentUser(baseUser);
+                
+                // Store the user in localStorage
+                localStorage.setItem('user', JSON.stringify(baseUser));
+                
+                // Update users array
+                setUsers([baseUser]);
+            };
+            
+            fetchUser();
         } else {
             setCurrentUser(null);
             localStorage.removeItem('userId');
+            localStorage.removeItem('user');
+            setUsers([]);
+            console.log('User context cleared - user logged out');
         }
-    }, [authUser]);
-
-    useEffect(() => {
-        const fetchUsers = async () => {
-            try {
-                // We may not need to fetch all users for the app
-                // But keeping the structure for now
-                if (authUser) {
-                    console.log('Getting current user info...');
-                    setUsers([{
-                        id: authUser.uid,
-                        username: authUser.email || '',
-                        name: authUser.displayName || authUser.email?.split('@')[0] || 'User'
-                    }]);
-                }
-            } catch (error) {
-                console.error('Error getting user info:', error);
-            }
-        };
-
-        fetchUsers();
     }, [authUser]);
 
     const login = () => {

@@ -4,12 +4,48 @@ import (
 	"log"
 )
 
-// RunMigrations is a no-op function kept for backward compatibility
-// We now use a consolidated schema approach rather than incremental migrations
+// RunMigrations executes necessary database migrations
+// Now simplified to create required tables for backward compatibility
 func RunMigrations() error {
 	log.Println("Migration system has been replaced with consolidated schema approach")
 	log.Println("Schema changes are now applied during database initialization")
-	return nil
+
+	// Ensure YNAB tables exist for backward compatibility with tests
+	createYNABTables := `
+	CREATE TABLE IF NOT EXISTS ynab_config (
+		user_id TEXT PRIMARY KEY,
+		encrypted_api_token TEXT NOT NULL
+	);
+	
+	CREATE TABLE IF NOT EXISTS user_ynab_settings (
+		user_id TEXT PRIMARY KEY REFERENCES users(id),
+		token TEXT,
+		budget_id TEXT,
+		account_id TEXT,
+		auto_import BOOLEAN DEFAULT false,
+		sync_enabled BOOLEAN DEFAULT false,
+		last_synced TIMESTAMP
+	);
+	
+	CREATE TABLE IF NOT EXISTS ynab_category_groups (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		hidden BOOLEAN DEFAULT false,
+		user_id TEXT NOT NULL REFERENCES users(id)
+	);
+	
+	CREATE TABLE IF NOT EXISTS ynab_categories (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		group_id TEXT REFERENCES ynab_category_groups(id),
+		hidden BOOLEAN DEFAULT false,
+		budget_amount DECIMAL(15,2),
+		user_id TEXT NOT NULL REFERENCES users(id)
+	);
+	`
+
+	_, err := DB.Exec(createYNABTables)
+	return err
 }
 
 // MigrationFailed is a helper to determine if a migration command failed
