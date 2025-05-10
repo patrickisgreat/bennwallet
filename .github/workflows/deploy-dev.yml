@@ -229,17 +229,18 @@ jobs:
         run: |
           echo "Checking for PostgreSQL database..."
           
-          # Check if dev PostgreSQL database exists
-          if ! flyctl postgres list | grep -q "${FLY_DEV_APP_NAME}-db"; then
-            echo "Creating PostgreSQL database cluster..."
-            flyctl postgres create --name ${FLY_DEV_APP_NAME}-db --org personal --region sjc --vm-size shared-cpu-1x --volume-size 1
+          # Check if dev PostgreSQL database exists using MPG
+          if ! flyctl mpg list | grep -q "${FLY_DEV_APP_NAME}-db"; then
+            echo "Creating PostgreSQL database with Managed Postgres..."
+            # Create a managed postgres database with non-interactive flags
+            flyctl mpg create --name ${FLY_DEV_APP_NAME}-db --organization personal --region sjc --plan hobby-v --no-prompt
           else
-            echo "PostgreSQL database cluster already exists."
+            echo "PostgreSQL database already exists."
           fi
           
           # Attach the database to the app (will do nothing if already attached)
           echo "Attaching PostgreSQL to the app..."
-          flyctl postgres attach ${FLY_DEV_APP_NAME}-db --app ${{ env.FLY_DEV_APP_NAME }} || true
+          flyctl mpg attach ${FLY_DEV_APP_NAME}-db --app ${{ env.FLY_DEV_APP_NAME }} --no-prompt || true
 
       - name: Deploy to Fly.io Development
         run: |
