@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"bennwallet/backend/security"
@@ -38,122 +39,415 @@ type YNABConfigUpdateRequest struct {
 func GetYNABConfig(db *sql.DB, userID string) (*YNABConfig, error) {
 	log.Printf("Getting YNAB config for user %s", userID)
 
+	// First check if the tables exist
+	var tablesExist bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables 
+			WHERE table_schema = 'public' 
+			AND table_name = 'ynab_config'
+		)
+	`).Scan(&tablesExist)
+
+	if err != nil {
+		log.Printf("Error checking if ynab_config table exists: %v", err)
+	} else if !tablesExist {
+		log.Printf("WARNING: ynab_config table does not exist!")
+
+		// Try to create the tables
+		ensureYNABConfigTables(db)
+	} else {
+		log.Printf("ynab_config table exists, checking columns...")
+
+		// Check if columns exist
+		var columnsExist bool
+		err := db.QueryRow(`
+			SELECT EXISTS (
+				SELECT column_name 
+				FROM information_schema.columns 
+				WHERE table_schema = 'public' 
+				AND table_name = 'ynab_config'
+				AND column_name = 'encrypted_api_token'
+			)
+		`).Scan(&columnsExist)
+
+		if err != nil {
+			log.Printf("Error checking if encrypted_api_token column exists: %v", err)
+		} else if !columnsExist {
+			log.Printf("WARNING: encrypted_api_token column does not exist in ynab_config table!")
+
+			// Try to create the column
+			_, err := db.Exec(`
+				ALTER TABLE ynab_config 
+				ADD COLUMN IF NOT EXISTS encrypted_api_token TEXT,
+				ADD COLUMN IF NOT EXISTS encrypted_budget_id TEXT,
+				ADD COLUMN IF NOT EXISTS encrypted_account_id TEXT,
+				ADD COLUMN IF NOT EXISTS last_sync_time TIMESTAMP,
+				ADD COLUMN IF NOT EXISTS sync_frequency INTEGER DEFAULT 60
+			`)
+
+			if err != nil {
+				log.Printf("Error adding missing columns to ynab_config table: %v", err)
+			} else {
+				log.Printf("Successfully added missing columns to ynab_config table")
+			}
+		}
+	}
+
 	var config YNABConfig
 
 	// First check the new ynab_config table
 	var lastSyncTime sql.NullTime
 	query := `
-		SELECT id, user_id, encrypted_api_token, encrypted_budget_id, encrypted_account_id, 
-		       last_sync_time, sync_frequency, created_at, updated_at
+		SELECT id, user_id, api_token, budget_id, account_id
 		FROM ynab_config
-		WHERE user_id = ?
+		WHERE user_id = $1
 	`
 	log.Printf("Executing query: %s with userID: %s", query, userID)
 
-	err := db.QueryRow(query, userID).Scan(
-		&config.ID, &config.UserID, &config.EncryptedAPIToken, &config.EncryptedBudgetID,
-		&config.EncryptedAccountID, &lastSyncTime, &config.SyncFrequency,
-		&config.CreatedAt, &config.UpdatedAt,
+	// We only have a subset of columns in the actual table
+	err = db.QueryRow(query, userID).Scan(
+		&config.ID,
+		&config.UserID,
+		&config.EncryptedAPIToken,
+		&config.EncryptedBudgetID,
+		&config.EncryptedAccountID,
 	)
 
-	if err == sql.ErrNoRows {
-		log.Printf("No configuration found in ynab_config table for user %s, checking legacy table", userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("No YNAB config found for user %s in new table, checking legacy table", userID)
+		} else {
+			log.Printf("Error querying YNAB config table: %v", err)
+			// Continue to check legacy table regardless
+		}
+
 		// Check the legacy user_ynab_settings table
 		var token, budgetID, accountID string
 		var lastSynced sql.NullTime
 
 		err = db.QueryRow(`
-			SELECT token, budget_id, account_id, last_synced
-			FROM user_ynab_settings
-			WHERE user_id = ?
+			SELECT token, budget_id, account_id, last_synced 
+			FROM user_ynab_settings 
+			WHERE user_id = $1
 		`, userID).Scan(&token, &budgetID, &accountID, &lastSynced)
 
-		if err == sql.ErrNoRows {
-			// No config found in either table
-			log.Printf("No configuration found in legacy table either for user %s, returning default", userID)
-			config.UserID = userID
-			config.SyncFrequency = 60 // Default to 60 minutes
-			config.HasCredentials = false
-			return &config, nil
-		} else if err != nil {
-			log.Printf("Error querying legacy YNAB settings: %v", err)
-			return nil, fmt.Errorf("error querying legacy YNAB settings: %w", err)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				log.Printf("No YNAB settings found for user %s in legacy table", userID)
+				// Return defaults if not found in either table
+				return &YNABConfig{
+					UserID:         userID,
+					HasCredentials: false,
+					SyncFrequency:  24, // Default 24 hours
+				}, nil
+			}
+			log.Printf("Error querying legacy YNAB settings table: %v", err)
+			return nil, fmt.Errorf("error querying YNAB settings: %w", err)
 		}
 
-		// Config found in legacy table
-		log.Printf("Found configuration in legacy table for user %s", userID)
+		log.Printf("Found YNAB settings in legacy table for user %s", userID)
+
+		// Use legacy settings
 		config.UserID = userID
-
-		// Convert legacy format to new format
-		if token != "" {
-			config.HasCredentials = true
-		}
-
-		// In legacy format, we need to handle the token format
-		if token != "" && token != "[stored in environment variables]" && len(token) > 4 && token[:4] == "enc:" {
-			// Token is stored with "enc:" prefix in local dev
-			config.APIToken = token[4:] // Remove "enc:" prefix
-		}
-
+		config.HasCredentials = token != ""
 		config.BudgetID = budgetID
 		config.AccountID = accountID
-
 		if lastSynced.Valid {
 			config.LastSyncTime = lastSynced.Time
 		}
 
-		config.SyncFrequency = 60 // Default
+		// Special handling for stored token
+		if token != "" {
+			if strings.HasPrefix(token, "enc:") {
+				// For local dev, token is prefixed in DB
+				log.Printf("Token is already encrypted with 'enc:' prefix")
+				config.EncryptedAPIToken = strings.TrimPrefix(token, "enc:")
+			} else {
+				log.Printf("Found unencrypted token in legacy table")
+				config.APIToken = token
+			}
+		}
 
 		return &config, nil
-	} else if err != nil {
-		log.Printf("Error querying YNAB config: %v", err)
-		return nil, fmt.Errorf("error querying YNAB config: %w", err)
 	}
 
-	// Found config in new table
-	log.Printf("Found configuration in ynab_config table for user %s", userID)
+	// If we get here, we found a record in the new table
+	log.Printf("Found YNAB config in new table for user %s", userID)
+
+	// Set the last sync time if it's valid
 	if lastSyncTime.Valid {
 		config.LastSyncTime = lastSyncTime.Time
 	}
 
-	config.HasCredentials = config.EncryptedAPIToken != "" &&
-		config.EncryptedBudgetID != "" &&
-		config.EncryptedAccountID != ""
+	// Set HasCredentials flag based on whether there's an API token
+	config.HasCredentials = config.EncryptedAPIToken != ""
 
-	log.Printf("User %s has credentials: %v", userID, config.HasCredentials)
-
-	// Decrypt the credentials for display in the API response if they exist
-	if config.HasCredentials {
-		// Don't include the API token for security (done in handler)
-		// But include the budget and account IDs
-		if config.EncryptedBudgetID != "" {
-			budgetID, err := security.Decrypt(config.EncryptedBudgetID)
-			if err != nil {
-				log.Printf("Error decrypting budget ID: %v", err)
-			} else {
-				config.BudgetID = budgetID
-				log.Printf("Successfully set BudgetID to: %s", config.BudgetID)
-			}
+	// If API token exists, try to decrypt it for testing but don't return it
+	if config.EncryptedAPIToken != "" {
+		_, err = security.Decrypt(config.EncryptedAPIToken)
+		if err != nil {
+			log.Printf("Warning: Could not decrypt API token: %v", err)
+			// Continue anyway as we don't return the actual token
 		} else {
-			log.Printf("EncryptedBudgetID is empty")
+			log.Printf("Successfully decrypted API token for validation")
 		}
+	}
 
-		if config.EncryptedAccountID != "" {
-			accountID, err := security.Decrypt(config.EncryptedAccountID)
-			if err != nil {
-				log.Printf("Error decrypting account ID: %v", err)
-			} else {
-				config.AccountID = accountID
-				log.Printf("Successfully set AccountID to: %s", config.AccountID)
-			}
+	// Also try to decrypt the budget and account IDs
+	if config.EncryptedBudgetID != "" {
+		decryptedBudgetID, err := security.Decrypt(config.EncryptedBudgetID)
+		if err != nil {
+			log.Printf("Warning: Could not decrypt budget ID: %v", err)
 		} else {
-			log.Printf("EncryptedAccountID is empty")
+			config.BudgetID = decryptedBudgetID
 		}
-	} else {
-		log.Printf("User %s doesn't have credentials, not attempting to decrypt", userID)
+	}
+
+	if config.EncryptedAccountID != "" {
+		decryptedAccountID, err := security.Decrypt(config.EncryptedAccountID)
+		if err != nil {
+			log.Printf("Warning: Could not decrypt account ID: %v", err)
+		} else {
+			config.AccountID = decryptedAccountID
+		}
 	}
 
 	return &config, nil
+}
+
+// ensureYNABConfigTables creates the YNAB config tables if they don't exist
+func ensureYNABConfigTables(db *sql.DB) error {
+	log.Println("Creating YNAB config tables...")
+
+	// Create the new ynab_config table
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS ynab_config (
+			id SERIAL PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			encrypted_api_token TEXT,
+			encrypted_budget_id TEXT,
+			encrypted_account_id TEXT,
+			api_token TEXT,
+			budget_id TEXT,
+			account_id TEXT,
+			last_sync_time TIMESTAMP,
+			sync_frequency INTEGER DEFAULT 60,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			has_credentials BOOLEAN
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("error creating ynab_config table: %w", err)
+	}
+
+	// Create the legacy user_ynab_settings table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_ynab_settings (
+			user_id TEXT PRIMARY KEY,
+			token TEXT,
+			budget_id TEXT,
+			account_id TEXT,
+			last_synced TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("error creating user_ynab_settings table: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateLastSyncTime updates the last sync time for a user
+func UpdateLastSyncTime(db *sql.DB, userID string) error {
+	now := time.Now()
+
+	// Update in the new table
+	_, err := db.Exec(`
+		UPDATE ynab_config
+		SET last_sync_time = $1,
+			updated_at = $2
+		WHERE user_id = $3
+	`, now, now, userID)
+
+	if err != nil {
+		log.Printf("Error updating last sync time in ynab_config: %v", err)
+	}
+
+	// Also update in the legacy table
+	_, err = db.Exec(`
+		UPDATE user_ynab_settings
+		SET last_synced = $1
+		WHERE user_id = $2
+	`, now, userID)
+
+	if err != nil {
+		log.Printf("Error updating last sync time in user_ynab_settings: %v", err)
+		return fmt.Errorf("error updating last sync time: %w", err)
+	}
+
+	return nil
+}
+
+// FixYNABTableSchema checks and updates the ynab_config table schema if needed
+func FixYNABTableSchema(db *sql.DB) error {
+	log.Println("Checking and fixing YNAB config table schema...")
+
+	// First, check if the table exists
+	var exists bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables 
+			WHERE table_schema = 'public' 
+			AND table_name = 'ynab_config'
+		)
+	`).Scan(&exists)
+
+	if err != nil {
+		return fmt.Errorf("error checking if ynab_config table exists: %w", err)
+	}
+
+	if !exists {
+		log.Println("YNAB config table doesn't exist, nothing to fix")
+		return nil
+	}
+
+	// Get the current column names
+	rows, err := db.Query(`
+		SELECT column_name 
+		FROM information_schema.columns 
+		WHERE table_schema = 'public' 
+		AND table_name = 'ynab_config'
+	`)
+	if err != nil {
+		return fmt.Errorf("error getting column names: %w", err)
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var colName string
+		if err := rows.Scan(&colName); err != nil {
+			return fmt.Errorf("error scanning column name: %w", err)
+		}
+		columns[colName] = true
+	}
+
+	log.Printf("Current columns in ynab_config: %v", columns)
+
+	// If api_token exists but encrypted_api_token doesn't, we need to
+	// rename and potentially convert data
+	if columns["api_token"] && !columns["encrypted_api_token"] {
+		log.Println("Found api_token column but not encrypted_api_token, fixing...")
+
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("error starting transaction: %w", err)
+		}
+
+		// Add encrypted columns
+		_, err = tx.Exec(`
+			ALTER TABLE ynab_config 
+			ADD COLUMN encrypted_api_token TEXT,
+			ADD COLUMN encrypted_budget_id TEXT,
+			ADD COLUMN encrypted_account_id TEXT
+		`)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("error adding encrypted columns: %w", err)
+		}
+
+		// Get all configs
+		rows, err := tx.Query(`SELECT user_id, api_token, budget_id, account_id FROM ynab_config`)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("error querying configs: %w", err)
+		}
+
+		// Update each config with encrypted values
+		for rows.Next() {
+			var userID, apiToken, budgetID, accountID string
+			if err := rows.Scan(&userID, &apiToken, &budgetID, &accountID); err != nil {
+				rows.Close()
+				tx.Rollback()
+				return fmt.Errorf("error scanning config: %w", err)
+			}
+
+			encryptedToken, err := security.Encrypt(apiToken)
+			if err != nil {
+				rows.Close()
+				tx.Rollback()
+				return fmt.Errorf("error encrypting token: %w", err)
+			}
+
+			encryptedBudgetID, err := security.Encrypt(budgetID)
+			if err != nil {
+				rows.Close()
+				tx.Rollback()
+				return fmt.Errorf("error encrypting budget ID: %w", err)
+			}
+
+			encryptedAccountID, err := security.Encrypt(accountID)
+			if err != nil {
+				rows.Close()
+				tx.Rollback()
+				return fmt.Errorf("error encrypting account ID: %w", err)
+			}
+
+			_, err = tx.Exec(`
+				UPDATE ynab_config
+				SET encrypted_api_token = $1,
+					encrypted_budget_id = $2,
+					encrypted_account_id = $3
+				WHERE user_id = $4
+			`, encryptedToken, encryptedBudgetID, encryptedAccountID, userID)
+
+			if err != nil {
+				rows.Close()
+				tx.Rollback()
+				return fmt.Errorf("error updating encrypted values: %w", err)
+			}
+		}
+		rows.Close()
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("error committing transaction: %w", err)
+		}
+
+		log.Println("Successfully updated ynab_config table schema")
+	}
+
+	// Ensure other columns exist
+	if !columns["last_sync_time"] {
+		_, err := db.Exec(`ALTER TABLE ynab_config ADD COLUMN last_sync_time TIMESTAMP`)
+		if err != nil {
+			log.Printf("Error adding last_sync_time column: %v", err)
+		}
+	}
+
+	if !columns["sync_frequency"] {
+		_, err := db.Exec(`ALTER TABLE ynab_config ADD COLUMN sync_frequency INTEGER DEFAULT 60`)
+		if err != nil {
+			log.Printf("Error adding sync_frequency column: %v", err)
+		}
+	}
+
+	if !columns["created_at"] {
+		_, err := db.Exec(`ALTER TABLE ynab_config ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`)
+		if err != nil {
+			log.Printf("Error adding created_at column: %v", err)
+		}
+	}
+
+	if !columns["updated_at"] {
+		_, err := db.Exec(`ALTER TABLE ynab_config ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`)
+		if err != nil {
+			log.Printf("Error adding updated_at column: %v", err)
+		}
+	}
+
+	return nil
 }
 
 // UpsertYNABConfig creates or updates a user's YNAB configuration
@@ -189,19 +483,15 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 		syncFrequency = 60
 	}
 
-	now := time.Now()
-
 	if count > 0 {
 		// Update existing config
 		_, err = db.Exec(`
 			UPDATE ynab_config
-			SET encrypted_api_token = $1,
-				encrypted_budget_id = $2,
-				encrypted_account_id = $3,
-				sync_frequency = $4,
-				updated_at = $5
-			WHERE user_id = $6
-		`, encryptedToken, encryptedBudgetID, encryptedAccountID, syncFrequency, now, userID)
+			SET api_token = $1,
+				budget_id = $2,
+				account_id = $3
+			WHERE user_id = $4
+		`, encryptedToken, encryptedBudgetID, encryptedAccountID, userID)
 
 		if err != nil {
 			return fmt.Errorf("error updating YNAB config: %w", err)
@@ -210,63 +500,13 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 		// Insert new config
 		_, err = db.Exec(`
 			INSERT INTO ynab_config
-			(user_id, encrypted_api_token, encrypted_budget_id, encrypted_account_id, 
-			 sync_frequency, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, userID, encryptedToken, encryptedBudgetID, encryptedAccountID,
-			syncFrequency, now, now)
+			(user_id, api_token, budget_id, account_id)
+			VALUES ($1, $2, $3, $4)
+		`, userID, encryptedToken, encryptedBudgetID, encryptedAccountID)
 
 		if err != nil {
 			return fmt.Errorf("error inserting YNAB config: %w", err)
 		}
-	}
-
-	// Also update the legacy table for backward compatibility
-	_, err = db.Exec(`
-		INSERT INTO user_ynab_settings
-		(user_id, token, budget_id, account_id, sync_enabled)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT(user_id) DO UPDATE
-		SET token = excluded.token,
-			budget_id = excluded.budget_id,
-			account_id = excluded.account_id,
-			sync_enabled = excluded.sync_enabled
-	`, userID, "enc:"+config.APIToken, config.BudgetID, config.AccountID, true)
-
-	if err != nil {
-		log.Printf("Error updating legacy YNAB settings: %v", err)
-		// Don't fail the whole operation if this fails
-	}
-
-	return nil
-}
-
-// UpdateLastSyncTime updates the last sync time for a user
-func UpdateLastSyncTime(db *sql.DB, userID string) error {
-	now := time.Now()
-
-	// Update in the new table
-	_, err := db.Exec(`
-		UPDATE ynab_config
-		SET last_sync_time = $1,
-			updated_at = $2
-		WHERE user_id = $3
-	`, now, now, userID)
-
-	if err != nil {
-		log.Printf("Error updating last sync time in ynab_config: %v", err)
-	}
-
-	// Also update in the legacy table
-	_, err = db.Exec(`
-		UPDATE user_ynab_settings
-		SET last_synced = $1
-		WHERE user_id = $2
-	`, now, userID)
-
-	if err != nil {
-		log.Printf("Error updating last sync time in user_ynab_settings: %v", err)
-		return fmt.Errorf("error updating last sync time: %w", err)
 	}
 
 	return nil

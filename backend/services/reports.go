@@ -135,7 +135,7 @@ func GetAccessibleCustomReports(userID string) ([]models.CustomReport, error) {
 		rows, err = database.DB.Query(`
 			SELECT id, name, user_id, description, report_config, is_public, created_at, updated_at
 			FROM custom_reports
-			WHERE user_id = ? OR is_public = 1
+			WHERE user_id = $1 OR is_public = true
 		`, userID)
 	}
 	if err != nil {

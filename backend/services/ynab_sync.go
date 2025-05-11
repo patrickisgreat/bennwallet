@@ -25,7 +25,7 @@ func SyncYNABCategories(userID string, budgetID string) error {
 	// Retry up to 3 times for database operations
 	for retries := 0; retries < 3; retries++ {
 		err := database.DB.QueryRow(`
-			SELECT token FROM user_ynab_settings WHERE user_id = ?
+			SELECT token FROM user_ynab_settings WHERE user_id = $1
 		`, userID).Scan(&token)
 
 		if err != nil {
@@ -154,8 +154,11 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 
 	// Prepare statements for better performance
 	stmtCategoryGroup, err := tx.Prepare(`
-		INSERT OR REPLACE INTO ynab_category_groups (id, name, user_id, last_updated)
+		INSERT INTO ynab_category_groups (id, name, user_id, last_updated)
 		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO UPDATE SET
+		name = $2,
+		last_updated = $4
 	`)
 	if err != nil {
 		log.Printf("DEBUG: Error preparing category group statement: %v", err)
@@ -164,8 +167,12 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 	defer stmtCategoryGroup.Close()
 
 	stmtCategory, err := tx.Prepare(`
-		INSERT OR REPLACE INTO ynab_categories (id, group_id, name, user_id, last_updated)
+		INSERT INTO ynab_categories (id, group_id, name, user_id, last_updated)
 		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO UPDATE SET
+		group_id = $2,
+		name = $3,
+		last_updated = $5
 	`)
 	if err != nil {
 		log.Printf("DEBUG: Error preparing category statement: %v", err)
@@ -212,15 +219,15 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 	// Convert YNAB categories to local categories for use in the transaction form
 	result, err := tx.Exec(`
 		INSERT INTO categories (name, description, user_id, color)
-		SELECT y.name, 'Synced from YNAB', ?, COALESCE(
-			(SELECT color FROM categories WHERE name = y.name AND user_id = ? LIMIT 1),
-			?) 
+		SELECT y.name, 'Synced from YNAB', $1, COALESCE(
+			(SELECT color FROM categories WHERE name = y.name AND user_id = $1 LIMIT 1),
+			$2) 
 		FROM ynab_categories y
-		WHERE y.user_id = ?
+		WHERE y.user_id = $1
 		ON CONFLICT(name, user_id) DO UPDATE SET
 			description = 'Synced from YNAB',
-			last_updated = ?
-	`, userID, userID, generateRandomColor(), userID, syncTime)
+			updated_at = $3
+	`, userID, generateRandomColor(), syncTime)
 
 	if err != nil {
 		log.Printf("DEBUG: Error converting to local categories: %v", err)
@@ -247,7 +254,7 @@ func SyncAllUsersYNABCategories() {
 	// Get all users with sync enabled
 	rows, err := database.DB.Query(`
 		SELECT user_id, budget_id FROM user_ynab_settings 
-		WHERE sync_enabled = 1
+		WHERE sync_enabled = true
 	`)
 	if err != nil {
 		log.Printf("Error fetching users for YNAB sync: %v", err)
