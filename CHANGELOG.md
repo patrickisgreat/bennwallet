@@ -1,3 +1,9 @@
+## [1.3.4](https://github.com/patrickisgreat/bennwallet/compare/v1.3.3...v1.3.4) (2025-05-11)
+
+### Bug Fixes
+
+* ynab configuration saving ([25e0b44](https://github.com/patrickisgreat/bennwallet/commit/25e0b44d5e7b9434fbf1fe8643055cc027799f24))
+
 ## [1.3.3](https://github.com/patrickisgreat/bennwallet/compare/v1.3.2...v1.3.3) (2025-05-10)
 
 ### Bug Fixes
