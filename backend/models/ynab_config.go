@@ -135,15 +135,16 @@ func GetYNABConfig(db *sql.DB, userID string) (*YNABConfig, error) {
 		if err != nil {
 			if err == sql.ErrNoRows {
 				log.Printf("No YNAB settings found for user %s in legacy table", userID)
-				// Return defaults if not found in either table
-				return &YNABConfig{
-					UserID:         userID,
-					HasCredentials: false,
-					SyncFrequency:  24, // Default 24 hours
-				}, nil
+			} else {
+				log.Printf("Error querying legacy YNAB settings table: %v", err)
 			}
-			log.Printf("Error querying legacy YNAB settings table: %v", err)
-			return nil, fmt.Errorf("error querying YNAB settings: %w", err)
+
+			// Return defaults instead of an error if tables are inconsistent
+			return &YNABConfig{
+				UserID:         userID,
+				HasCredentials: false,
+				SyncFrequency:  24, // Default 24 hours
+			}, nil
 		}
 
 		log.Printf("Found YNAB settings in legacy table for user %s", userID)
@@ -454,9 +455,28 @@ func FixYNABTableSchema(db *sql.DB) error {
 func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string) error {
 	log.Printf("Upserting YNAB config for user %s", userID)
 
+	// Ensure the tables exist first
+	var tablesExist bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables 
+			WHERE table_schema = 'public' 
+			AND table_name = 'ynab_config'
+		)
+	`).Scan(&tablesExist)
+
+	if err != nil {
+		log.Printf("Error checking if ynab_config table exists: %v", err)
+	} else if !tablesExist {
+		log.Printf("ynab_config table doesn't exist, creating it now")
+		if err := ensureYNABConfigTables(db); err != nil {
+			return fmt.Errorf("error creating YNAB config tables: %w", err)
+		}
+	}
+
 	// Check if we already have a config for this user
 	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM ynab_config WHERE user_id = $1", userID).Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM ynab_config WHERE user_id = $1", userID).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("error checking for existing YNAB config: %w", err)
 	}
@@ -483,31 +503,102 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 		syncFrequency = 60
 	}
 
-	if count > 0 {
-		// Update existing config
-		_, err = db.Exec(`
-			UPDATE ynab_config
-			SET api_token = $1,
-				budget_id = $2,
-				account_id = $3
-			WHERE user_id = $4
-		`, encryptedToken, encryptedBudgetID, encryptedAccountID, userID)
+	// Check if the table has the needed columns
+	var columnsMap map[string]bool
+	columnsMap, err = getTableColumns(db, "ynab_config")
+	if err != nil {
+		log.Printf("Error getting ynab_config columns: %v", err)
+		columnsMap = map[string]bool{"api_token": true, "budget_id": true, "account_id": true} // Default assumption
+	}
 
+	log.Printf("Columns in ynab_config table: %v", columnsMap)
+
+	if count > 0 {
+		// Update existing config - adjust the query based on available columns
+		var query string
+		var args []interface{}
+
+		if columnsMap["encrypted_api_token"] {
+			// Use encrypted columns
+			query = `
+				UPDATE ynab_config
+				SET encrypted_api_token = $1,
+					encrypted_budget_id = $2,
+					encrypted_account_id = $3
+				WHERE user_id = $4
+			`
+			args = []interface{}{encryptedToken, encryptedBudgetID, encryptedAccountID, userID}
+		} else {
+			// Use regular columns
+			query = `
+				UPDATE ynab_config
+				SET api_token = $1,
+					budget_id = $2,
+					account_id = $3
+				WHERE user_id = $4
+			`
+			args = []interface{}{encryptedToken, encryptedBudgetID, encryptedAccountID, userID}
+		}
+
+		_, err = db.Exec(query, args...)
 		if err != nil {
 			return fmt.Errorf("error updating YNAB config: %w", err)
 		}
 	} else {
-		// Insert new config
-		_, err = db.Exec(`
-			INSERT INTO ynab_config
-			(user_id, api_token, budget_id, account_id)
-			VALUES ($1, $2, $3, $4)
-		`, userID, encryptedToken, encryptedBudgetID, encryptedAccountID)
+		// Insert new config - adjust the query based on available columns
+		var query string
+		var args []interface{}
 
+		if columnsMap["encrypted_api_token"] {
+			// Use encrypted columns
+			query = `
+				INSERT INTO ynab_config
+				(user_id, encrypted_api_token, encrypted_budget_id, encrypted_account_id)
+				VALUES ($1, $2, $3, $4)
+			`
+			args = []interface{}{userID, encryptedToken, encryptedBudgetID, encryptedAccountID}
+		} else {
+			// Use regular columns
+			query = `
+				INSERT INTO ynab_config
+				(user_id, api_token, budget_id, account_id)
+				VALUES ($1, $2, $3, $4)
+			`
+			args = []interface{}{userID, encryptedToken, encryptedBudgetID, encryptedAccountID}
+		}
+
+		_, err = db.Exec(query, args...)
 		if err != nil {
 			return fmt.Errorf("error inserting YNAB config: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// getTableColumns gets a map of column names in a table
+func getTableColumns(db *sql.DB, tableName string) (map[string]bool, error) {
+	columns := make(map[string]bool)
+
+	rows, err := db.Query(`
+		SELECT column_name 
+		FROM information_schema.columns 
+		WHERE table_schema = 'public' 
+		AND table_name = $1
+	`, tableName)
+
+	if err != nil {
+		return columns, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var colName string
+		if err := rows.Scan(&colName); err != nil {
+			return columns, err
+		}
+		columns[colName] = true
+	}
+
+	return columns, nil
 }
