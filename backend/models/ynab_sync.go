@@ -87,16 +87,16 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 			return fmt.Errorf("error decrypting account ID: %w", err)
 		}
 	} else {
-		// Fallback to legacy user_ynab_settings table
+		// Try the legacy table
 		var dbToken string
 		err := database.DB.QueryRow(
-			"SELECT token, budget_id, account_id FROM user_ynab_settings WHERE user_id = ?",
+			"SELECT token, budget_id, account_id FROM user_ynab_settings WHERE user_id = $1",
 			request.UserID,
 		).Scan(&dbToken, &budgetID, &accountID)
 
 		if err != nil {
-			log.Printf("Error getting YNAB settings from legacy table for user %s: %v", request.UserID, err)
-			return fmt.Errorf("error getting YNAB settings: %w", err)
+			log.Printf("Error getting YNAB settings from legacy table: %v", err)
+			return fmt.Errorf("error getting YNAB token from legacy table: %w", err)
 		}
 
 		// Check if token is stored in environment variables
@@ -109,15 +109,8 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 			// For production, get token from environment
 			envToken := os.Getenv(fmt.Sprintf("YNAB_TOKEN_USER_%s", request.UserID))
 			if envToken == "" {
-				// Fallback to default token
-				envToken = os.Getenv("YNAB_TOKEN")
+				return fmt.Errorf("YNAB token not found in environment variables")
 			}
-
-			if envToken == "" {
-				log.Printf("Error: No YNAB token found for user %s in env vars", request.UserID)
-				return fmt.Errorf("no YNAB token found in environment variables")
-			}
-
 			token = envToken
 			log.Printf("Using token from environment variables for user %s", request.UserID)
 		}
@@ -146,7 +139,7 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 		// Get category ID
 		var categoryID string
 		err := database.DB.QueryRow(
-			"SELECT id FROM ynab_categories WHERE user_id = ? AND name = ?",
+			"SELECT id FROM ynab_categories WHERE user_id = $1 AND name = $2",
 			request.UserID, split.CategoryName,
 		).Scan(&categoryID)
 
@@ -154,9 +147,9 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 			log.Printf("Error finding category '%s' for user %s: %v",
 				split.CategoryName, request.UserID, err)
 
-			// Attempt a more permissive search by using LIKE instead of exact match
+			// Try fuzzy matching as fallback for categories not exactly matching
 			err = database.DB.QueryRow(
-				"SELECT id FROM ynab_categories WHERE user_id = ? AND name LIKE ?",
+				"SELECT id FROM ynab_categories WHERE user_id = $1 AND name LIKE $2",
 				request.UserID, "%"+split.CategoryName+"%",
 			).Scan(&categoryID)
 

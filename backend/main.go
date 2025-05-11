@@ -13,6 +13,7 @@ import (
 	"bennwallet/backend/handlers"
 	"bennwallet/backend/middleware"
 	"bennwallet/backend/migrations"
+	"bennwallet/backend/models"
 	"bennwallet/backend/security"
 	"bennwallet/backend/services"
 
@@ -66,15 +67,57 @@ func main() {
 	// Use an encryption key from environment or generate a default one
 	encryptionKey := os.Getenv("ENCRYPTION_KEY")
 	if encryptionKey == "" {
-		log.Println("Warning: ENCRYPTION_KEY not set, using a default key. This is NOT secure for production!")
-		encryptionKey = "default-key-for-development-only"
+		log.Println("Warning: ENCRYPTION_KEY not set in environment, checking .env file...")
+
+		// Try to load from .env.local first, then fall back to .env
+		if data, err := os.ReadFile(".env.local"); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(line, "ENCRYPTION_KEY=") {
+					encryptionKey = strings.TrimPrefix(line, "ENCRYPTION_KEY=")
+					log.Println("Successfully loaded ENCRYPTION_KEY from .env.local file")
+					break
+				}
+			}
+		}
+
+		// If still not found, try .env
+		if encryptionKey == "" {
+			if data, err := os.ReadFile(".env"); err == nil {
+				for _, line := range strings.Split(string(data), "\n") {
+					if strings.HasPrefix(line, "ENCRYPTION_KEY=") {
+						encryptionKey = strings.TrimPrefix(line, "ENCRYPTION_KEY=")
+						log.Println("Successfully loaded ENCRYPTION_KEY from .env file")
+						break
+					}
+				}
+			}
+		}
+
+		// Last resort, use a default key in development
+		if encryptionKey == "" {
+			log.Println("Warning: ENCRYPTION_KEY not found in any file, using a default key. This is NOT secure for production!")
+			encryptionKey = "default-key-for-development-only"
+		}
+	} else {
+		log.Println("Using ENCRYPTION_KEY from environment variables")
 	}
+
+	log.Printf("Initializing encryption with key (length: %d)", len(encryptionKey))
 	security.InitializeEncryption(encryptionKey)
 
 	// Initialize database
 	err := database.InitDB()
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// Fix YNAB config table schema if needed
+	log.Println("Checking and fixing YNAB table schema...")
+	err = models.FixYNABTableSchema(database.DB)
+	if err != nil {
+		log.Printf("Warning: Error fixing YNAB table schema: %v", err)
+	} else {
+		log.Println("YNAB table schema check completed")
 	}
 
 	// Run migrations (including test data seeding if in dev/PR environment)
