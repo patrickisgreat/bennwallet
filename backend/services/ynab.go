@@ -35,7 +35,7 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 		// Try legacy format
 		var dbToken string
 		err := database.DB.QueryRow(
-			"SELECT token FROM user_ynab_settings WHERE user_id = ?",
+			"SELECT token FROM user_ynab_settings WHERE user_id = $1",
 			userID,
 		).Scan(&dbToken)
 
@@ -88,12 +88,12 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 	defer tx.Rollback()
 
 	// First, clear out existing categories for this user
-	_, err = tx.Exec("DELETE FROM ynab_categories WHERE user_id = ?", userID)
+	_, err = tx.Exec("DELETE FROM ynab_categories WHERE user_id = $1", userID)
 	if err != nil {
 		return fmt.Errorf("error deleting existing categories: %w", err)
 	}
 
-	_, err = tx.Exec("DELETE FROM ynab_category_groups WHERE user_id = ?", userID)
+	_, err = tx.Exec("DELETE FROM ynab_category_groups WHERE user_id = $1", userID)
 	if err != nil {
 		return fmt.Errorf("error deleting existing category groups: %w", err)
 	}
@@ -108,8 +108,12 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 
 		// Insert category group
 		_, err = tx.Exec(
-			`INSERT OR REPLACE INTO ynab_category_groups (id, name, user_id, last_updated)
-			VALUES ($1, $2, $3, $4)`,
+			`INSERT INTO ynab_category_groups (id, name, user_id, last_updated)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (id) DO UPDATE SET
+			name = $2,
+			user_id = $3,
+			last_updated = $4`,
 			group.ID, group.Name, userID, now,
 		)
 		if err != nil {
@@ -124,8 +128,13 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 			}
 
 			_, err = tx.Exec(
-				`INSERT OR REPLACE INTO ynab_categories (id, group_id, name, user_id, last_updated)
-				VALUES ($1, $2, $3, $4, $5)`,
+				`INSERT INTO ynab_categories (id, group_id, name, user_id, last_updated)
+				VALUES ($1, $2, $3, $4, $5)
+				ON CONFLICT (id) DO UPDATE SET
+				group_id = $2,
+				name = $3,
+				user_id = $4,
+				last_updated = $5`,
 				category.ID, group.ID, category.Name, userID, now,
 			)
 			if err != nil {
