@@ -68,7 +68,7 @@ func setupYNABTestDB() {
 // insertTestYNABConfig adds a test YNAB configuration to the database
 func insertTestYNABConfig(userID string, encryptedToken string, budgetID string) {
 	_, err := database.DB.Exec(
-		"INSERT INTO ynab_config (user_id, encrypted_api_token, budget_id, account_id, has_credentials) VALUES (?, ?, ?, ?, ?)",
+		"INSERT INTO ynab_config (user_id, encrypted_api_token, budget_id, account_id, has_credentials) VALUES ($1, $2, $3, $4, $5)",
 		userID, encryptedToken, budgetID, "account-123", true,
 	)
 	if err != nil {
@@ -79,7 +79,7 @@ func insertTestYNABConfig(userID string, encryptedToken string, budgetID string)
 // insertLegacyYNABSettings adds a test legacy YNAB configuration
 func insertLegacyYNABSettings(userID string, token string, budgetID string) {
 	_, err := database.DB.Exec(
-		"INSERT INTO user_ynab_settings (user_id, token, budget_id, account_id) VALUES (?, ?, ?, ?)",
+		"INSERT INTO user_ynab_settings (user_id, token, budget_id, account_id) VALUES ($1, $2, $3, $4)",
 		userID, token, budgetID, "account-123",
 	)
 	if err != nil {

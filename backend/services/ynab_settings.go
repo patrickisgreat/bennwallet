@@ -84,7 +84,7 @@ func setupYNABFromEnvForUser(userID string) {
 	var count int
 	err = database.DB.QueryRow(`
 		SELECT COUNT(*) FROM user_ynab_settings 
-		WHERE user_id = ? 
+		WHERE user_id = $1 
 		AND token IS NOT NULL 
 		AND token != ''
 		AND budget_id IS NOT NULL
@@ -188,7 +188,8 @@ func InitialSync() {
 	configRows, err := database.DB.Query(`
 		SELECT user_id, encrypted_budget_id 
 		FROM ynab_config 
-		WHERE encrypted_api_token IS NOT NULL AND encrypted_api_token != ''
+		WHERE user_id = $1 
+		AND encrypted_api_token IS NOT NULL AND encrypted_api_token != ''
 		AND encrypted_budget_id IS NOT NULL AND encrypted_budget_id != ''
 		AND encrypted_account_id IS NOT NULL AND encrypted_account_id != ''
 	`)
@@ -350,7 +351,7 @@ func SetupYNABForUser(userID string) {
 	var count int
 	err = database.DB.QueryRow(`
 		SELECT COUNT(*) FROM user_ynab_settings 
-		WHERE user_id = ? 
+		WHERE user_id = $1 
 		AND token IS NOT NULL 
 		AND token != ''
 		AND budget_id IS NOT NULL

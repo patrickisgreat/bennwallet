@@ -143,7 +143,7 @@ func (h *YNABHandler) SyncYNABCategories(w http.ResponseWriter, r *http.Request)
 		budgetID = config.BudgetID
 	} else {
 		// Try to get from legacy table
-		err := h.db.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = ?", userID).Scan(&budgetID)
+		err := h.db.QueryRow("SELECT budget_id FROM user_ynab_settings WHERE user_id = $1", userID).Scan(&budgetID)
 		if err != nil {
 			log.Printf("Error retrieving budget ID: %v", err)
 			http.Error(w, "YNAB budget ID not found", http.StatusBadRequest)
@@ -176,9 +176,12 @@ func ensureYNABConfigTable(db *sql.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	log.Println("Ensuring YNAB config tables exist...")
+
+	// Create the new ynab_config table
 	_, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS ynab_config (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id SERIAL PRIMARY KEY,
 			user_id TEXT NOT NULL,
 			encrypted_api_token TEXT,
 			encrypted_budget_id TEXT,
@@ -187,7 +190,6 @@ func ensureYNABConfigTable(db *sql.DB) error {
 			sync_frequency INTEGER DEFAULT 60,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			UNIQUE(user_id)
 		);
 	`)
@@ -196,5 +198,23 @@ func ensureYNABConfigTable(db *sql.DB) error {
 		return fmt.Errorf("failed to create YNAB config table: %w", err)
 	}
 
+	// Create the legacy user_ynab_settings table
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS user_ynab_settings (
+			user_id TEXT PRIMARY KEY,
+			token TEXT,
+			budget_id TEXT,
+			account_id TEXT,
+			last_synced TIMESTAMP,
+			auto_import BOOLEAN DEFAULT false,
+			sync_enabled BOOLEAN DEFAULT false
+		);
+	`)
+	if err != nil {
+		log.Printf("Error creating legacy YNAB settings table: %v", err)
+		return fmt.Errorf("failed to create legacy YNAB settings table: %w", err)
+	}
+
+	log.Println("YNAB config tables created successfully")
 	return nil
 }

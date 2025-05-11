@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"log"
 )
 
@@ -31,7 +32,8 @@ func RunMigrations() error {
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		hidden BOOLEAN DEFAULT false,
-		user_id TEXT NOT NULL REFERENCES users(id)
+		user_id TEXT NOT NULL REFERENCES users(id),
+		last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	
 	CREATE TABLE IF NOT EXISTS ynab_categories (
@@ -40,12 +42,54 @@ func RunMigrations() error {
 		group_id TEXT REFERENCES ynab_category_groups(id),
 		hidden BOOLEAN DEFAULT false,
 		budget_amount DECIMAL(15,2),
-		user_id TEXT NOT NULL REFERENCES users(id)
+		user_id TEXT NOT NULL REFERENCES users(id),
+		last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	`
 
 	_, err := DB.Exec(createYNABTables)
-	return err
+	if err != nil {
+		log.Printf("Warning: Error creating YNAB tables: %v", err)
+	}
+
+	// Ensure columns exist that might be missing in some deployments
+	ensureColumns := []struct {
+		table  string
+		column string
+		dtype  string
+	}{
+		{"ynab_category_groups", "last_updated", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"},
+		{"ynab_categories", "last_updated", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"},
+	}
+
+	for _, col := range ensureColumns {
+		// Check if column exists
+		var exists bool
+		err := DB.QueryRow(`
+			SELECT EXISTS (
+				SELECT FROM information_schema.columns 
+				WHERE table_name = $1 AND column_name = $2
+			)
+		`, col.table, col.column).Scan(&exists)
+
+		if err != nil {
+			log.Printf("Warning: Error checking for column %s.%s: %v", col.table, col.column, err)
+			continue
+		}
+
+		if !exists {
+			log.Printf("Adding missing column %s.%s", col.table, col.column)
+			_, err := DB.Exec(fmt.Sprintf(
+				"ALTER TABLE %s ADD COLUMN %s %s",
+				col.table, col.column, col.dtype,
+			))
+			if err != nil {
+				log.Printf("Warning: Error adding column %s.%s: %v", col.table, col.column, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // MigrationFailed is a helper to determine if a migration command failed
