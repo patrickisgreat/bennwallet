@@ -50,6 +50,8 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		{"add_transaction_notes_column", func(db *sql.DB) error {
 			return database.AddTransactionNotesColumn(db)
 		}},
+		// Fix YNAB table schema for proper encryption columns
+		{"fix_ynab_schema", FixYNABSchema},
 		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
 	}
