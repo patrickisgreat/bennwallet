@@ -1,3 +1,9 @@
+## [1.3.10](https://github.com/patrickisgreat/bennwallet/compare/v1.3.9...v1.3.10) (2025-05-12)
+
+### Bug Fixes
+
+* fucking fix this stupid shit ([88bd935](https://github.com/patrickisgreat/bennwallet/commit/88bd9352aa5f8c09bfedf1e4a1cc9a4a8131e75f))
+
 ## [1.3.9](https://github.com/patrickisgreat/bennwallet/compare/v1.3.8...v1.3.9) (2025-05-12)
 
 ### Bug Fixes
