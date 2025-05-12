@@ -120,73 +120,85 @@ jobs:
         run: |
           flyctl apps create "${{ env.APP_NAME }}" --org personal
 
-      - name: Check if managed Postgres cluster exists
+      # Set up PostgreSQL using a regular Fly app with Docker
+      - name: Check if Postgres app exists
         id: check-db
         continue-on-error: true
         run: |
-          if flyctl mpg list --json | jq -e '.[] | select(.name=="${{ env.DB_NAME }}")' > /dev/null; then
+          if flyctl apps list | grep -q "${{ env.DB_NAME }}"; then
             echo "DB_EXISTS=true" >> $GITHUB_ENV
-            echo "Postgres cluster ${{ env.DB_NAME }} exists"
+            echo "Postgres app ${{ env.DB_NAME }} exists"
           else
             echo "DB_EXISTS=false" >> $GITHUB_ENV
-            echo "Postgres cluster ${{ env.DB_NAME }} does not exist"
+            echo "Postgres app ${{ env.DB_NAME }} does not exist"
           fi
 
-      - name: Create managed Postgres cluster if it doesn't exist
+      - name: Create Postgres app if it doesn't exist
         if: env.DB_EXISTS == 'false'
         id: create-db
         run: |
-          echo "Creating managed Postgres cluster ${{ env.DB_NAME }}..."
-          # Use timeout to prevent the workflow from hanging indefinitely
-          # The cluster creation will continue in the background even if the command times out
-          timeout 60s flyctl mpg create \
-            -n ${{ env.DB_NAME }} \
-            -r lax \
-            --plan basic \
-            --volume-size 10 || echo "Command timed out, but cluster creation continues in the background"
-
-      - name: Wait for Postgres cluster to be ready
-        run: |
-          echo "Waiting for Postgres cluster to be ready..."
-          # We'll only wait up to 5 minutes (30 attempts * 10 seconds)
-          MAX_ATTEMPTS=30
-          for i in $(seq 1 $MAX_ATTEMPTS); do
-            echo "Checking DB cluster status (attempt $i of $MAX_ATTEMPTS)..."
-            flyctl mpg list --json > mpg_list.json
-            STATUS=$(jq -r '.[] | select(.name=="${{ env.DB_NAME }}") | .status' mpg_list.json 2>/dev/null || echo "pending")
-            
-            echo "Current status: $STATUS"
-            if [ "$STATUS" = "ready" ]; then
-              echo "Database cluster is ready."
-              exit 0
-            fi
-            
-            # If we've reached the maximum number of attempts, we'll proceed
-            # The attach step will be attempted but may fail if the cluster isn't ready
-            if [ $i -eq $MAX_ATTEMPTS ]; then
-              echo "Maximum wait time exceeded. The cluster is still initializing."
-              echo "Will attempt to proceed with next steps, but they may fail if the cluster isn't ready."
-              exit 0
-            fi
-            
-            echo "Cluster not ready yet (status=$STATUS). Waiting 10 seconds..."
-            sleep 10
-          done
-
-      - name: Attach Postgres to app
-        continue-on-error: true
-        id: attach-db
-        run: |
-          echo "Attaching Postgres cluster to app..."
-          flyctl mpg attach ${{ env.DB_NAME }} --app ${{ env.APP_NAME }} || \
-          echo "::warning::Failed to attach Postgres cluster. It might still be initializing. Set DATABASE_URL manually later."
+          echo "Creating Postgres app ${{ env.DB_NAME }}..."
+          # Create directory for Postgres app
+          mkdir -p postgres-app
+          cd postgres-app
           
-          # Verify if DATABASE_URL is set
-          if ! flyctl secrets list -a ${{ env.APP_NAME }} | grep -q "DATABASE_URL"; then
-            echo "::warning::DATABASE_URL secret was not automatically set. The app may not connect to the database."
-            echo "You may need to manually set it later with:"
-            echo "flyctl mpg attach ${{ env.DB_NAME }} --app ${{ env.APP_NAME }}"
-          fi
+          # Create fly.toml for the Postgres app
+          cat > fly.toml << EOF
+          app = "${{ env.DB_NAME }}"
+          primary_region = "lax"
+          
+          [env]
+            POSTGRES_USER = "postgres"
+            POSTGRES_PASSWORD = "${{ secrets.DB_PASSWORD || 'postgres' }}"
+            POSTGRES_DB = "bennwallet"
+          
+          [http_service]
+            internal_port = 5432
+            force_https = true
+            auto_stop_machines = true
+            auto_start_machines = true
+            min_machines_running = 0
+          
+          [[vm]]
+            memory = "1gb"
+            cpu_kind = "shared"
+            cpus = 1
+          
+          [[mounts]]
+            source = "pg_data"
+            destination = "/var/lib/postgresql/data"
+          EOF
+          
+          # Create Dockerfile for Postgres
+          cat > Dockerfile << EOF
+          FROM postgres:14-alpine
+          
+          # Add initialization scripts if needed
+          # COPY init.sql /docker-entrypoint-initdb.d/
+          
+          EXPOSE 5432
+          EOF
+          
+          # Launch the Postgres app
+          flyctl launch --no-deploy -y
+          
+          # Create volume for Postgres data
+          flyctl volumes create pg_data --size 10 -r lax -y
+          
+          # Deploy the Postgres app
+          flyctl deploy -y
+
+      - name: Configure database connection
+        run: |
+          echo "Setting up database connection for PR app..."
+          # Get the internal hostname for the Postgres app
+          DB_HOST="${{ env.DB_NAME }}.internal"
+          DB_PASSWORD="${{ secrets.DB_PASSWORD || 'postgres' }}"
+          
+          # Set the DATABASE_URL secret on the main app
+          flyctl secrets set \
+            DATABASE_URL="postgres://postgres:${DB_PASSWORD}@${DB_HOST}:5432/bennwallet" \
+            -a ${{ env.APP_NAME }}
 
       - name: Set Firebase credentials in Fly.io
         run: |
