@@ -1,3 +1,9 @@
+## [1.3.15](https://github.com/patrickisgreat/bennwallet/compare/v1.3.14...v1.3.15) (2025-05-12)
+
+### Bug Fixes
+
+* mpg ([be33600](https://github.com/patrickisgreat/bennwallet/commit/be336008e9a7bfdc41c467afb9f67cbc55199e41))
+
 ## [1.3.14](https://github.com/patrickisgreat/bennwallet/compare/v1.3.13...v1.3.14) (2025-05-12)
 
 ### Bug Fixes
