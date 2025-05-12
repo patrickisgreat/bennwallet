@@ -229,22 +229,39 @@ jobs:
           # Check if Postgres MPG database exists
           if ! flyctl mpg list 2>/dev/null | grep -q "bennwallet-prod-db"; then
             echo "Creating Managed PostgreSQL database cluster..."
-            # Create in non-interactive mode by setting CI=true
-            CI=true flyctl mpg create \
+            # Try with development plan first
+            if CI=true flyctl mpg create \
               -n bennwallet-prod-db \
               -r lax \
-              --plan production \
+              --plan development \
               -o personal \
               --nodes 1 \
-              --volume-size 10
+              --volume-size 10; then
+              echo "Managed Postgres cluster created successfully with development plan."
+            else
+              echo "Failed with development plan, trying with minimal settings as fallback..."
+              # Try with minimal settings
+              CI=true flyctl mpg create \
+                -n bennwallet-prod-db \
+                -r lax \
+                -o personal || echo "Failed to create Managed Postgres cluster. Please check Fly.io status or create manually."
+            fi
           else
             echo "Managed PostgreSQL database cluster already exists."
           fi
           
-          # Attach the database to the app (will do nothing if already attached)
-          echo "Attaching Managed PostgreSQL to the app..."
-          # Use -y for confirmation in attach command
-          flyctl mpg attach bennwallet-prod-db -a ${{ env.FLY_PROD_APP_NAME }} -y || true
+          # Verify the database was created
+          echo "Verifying Postgres cluster exists..."
+          if flyctl mpg list 2>/dev/null | grep -q "bennwallet-prod-db"; then
+            echo "Attaching Managed PostgreSQL to the app..."
+            # Use -y for confirmation in attach command
+            flyctl mpg attach bennwallet-prod-db -a ${{ env.FLY_PROD_APP_NAME }} -y || true
+          else
+            echo "WARNING: Postgres cluster creation appears to have failed. Deployment will continue but database connectivity may be affected."
+            echo "Please create the Postgres cluster manually with: flyctl mpg create -n bennwallet-prod-db -r lax -o personal"
+            # Set a temporary DATABASE_URL to allow deployment to proceed
+            flyctl secrets set DATABASE_URL="postgres://placeholder:placeholder@localhost:5432/bennwallet?sslmode=disable" -a ${{ env.FLY_PROD_APP_NAME }}
+          fi
       
       - name: Ensure DATABASE_URL is always correctly set
         run: |
