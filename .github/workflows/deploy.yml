@@ -7,7 +7,7 @@ on:
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
   FLY_PROD_APP_NAME: 'bennwallet'
-  FLY_PROD_DB_NAME: 'bennwallet-db'
+  FLY_PROD_DB_NAME: 'bennwallet-prod-db'
   GO_VERSION: '1.24'
   NODE_VERSION: '20'
 
@@ -59,8 +59,108 @@ jobs:
           path: dist/
           retention-days: 1
 
-  deploy:
-    needs: build
+  deploy-db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+      
+      - name: Check if Postgres app exists
+        id: check-db
+        continue-on-error: true
+        run: |
+          if flyctl apps list | grep -q "${{ env.FLY_PROD_DB_NAME }}"; then
+            echo "DB_EXISTS=true" >> $GITHUB_ENV
+            echo "Postgres app ${{ env.FLY_PROD_DB_NAME }} exists"
+          else
+            echo "DB_EXISTS=false" >> $GITHUB_ENV
+            echo "Postgres app ${{ env.FLY_PROD_DB_NAME }} does not exist"
+          fi
+      
+      - name: Create Postgres app if it doesn't exist
+        if: env.DB_EXISTS == 'false'
+        run: |
+          # Create temporary directory for Postgres app files
+          mkdir -p postgres-app
+          cd postgres-app
+          
+          # Create the Dockerfile for Postgres
+          cat > Dockerfile << EOF
+          FROM postgres:14-alpine
+          
+          # Health check
+          HEALTHCHECK --interval=5s --timeout=5s --start-period=5s --retries=3 \
+            CMD pg_isready -U postgres || exit 1
+          
+          EXPOSE 5432
+          EOF
+          
+          # Create fly.toml for the Postgres app
+          cat > fly.toml << EOF
+          app = "${{ env.FLY_PROD_DB_NAME }}"
+          primary_region = "lax"
+          
+          [env]
+            POSTGRES_USER = "postgres"
+            POSTGRES_PASSWORD = "${{ secrets.DB_PASSWORD || 'postgres' }}"
+            POSTGRES_DB = "bennwallet"
+          
+          [[services]]
+            internal_port = 5432
+            protocol = "tcp"
+            
+            [services.concurrency]
+              hard_limit = 25
+              soft_limit = 20
+              type = "connections"
+              
+            [[services.ports]]
+              port = 5432
+              
+            [[services.tcp_checks]]
+              grace_period = "1s"
+              interval = "15s"
+              restart_limit = 6
+              timeout = "2s"
+          
+          [[vm]]
+            memory = "1gb"
+            cpu_kind = "shared"
+            cpus = 1
+          
+          [[mounts]]
+            source = "postgres_data"
+            destination = "/var/lib/postgresql/data"
+          EOF
+          
+          # Create the app
+          flyctl apps create "${{ env.FLY_PROD_DB_NAME }}" --org personal
+          
+          # Create volume for Postgres data
+          flyctl volumes create postgres_data --app "${{ env.FLY_PROD_DB_NAME }}" --size 10 -r lax
+          
+          # Deploy the Postgres app
+          flyctl deploy --app "${{ env.FLY_PROD_DB_NAME }}" -y
+          
+          echo "Waiting for Postgres to be ready..."
+          for i in {1..12}; do
+            echo "Checking Postgres status (attempt $i/12)..."
+            if flyctl status --app "${{ env.FLY_PROD_DB_NAME }}" | grep -q "running"; then
+              echo "Postgres is running!"
+              break
+            fi
+            if [ $i -eq 12 ]; then
+              echo "Postgres not ready after 2 minutes, but continuing anyway"
+            else
+              echo "Postgres not ready yet, waiting 10 seconds..."
+              sleep 10
+            fi
+          done
+
+  deploy-app:
+    needs: [build, deploy-db]
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -92,6 +192,20 @@ jobs:
         run: |
           flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal
 
+      - name: Set DATABASE_URL and other secrets
+        run: |
+          echo "Setting up database connection and other secrets..."
+          DB_HOST="${{ env.FLY_PROD_DB_NAME }}.internal"
+          DB_PASSWORD="${{ secrets.DB_PASSWORD || 'postgres' }}"
+          
+          # Set the DATABASE_URL secret and other critical secrets
+          flyctl secrets set \
+            DATABASE_URL="postgres://postgres:${DB_PASSWORD}@${DB_HOST}:5432/bennwallet" \
+            YNAB_API_TOKEN="${{ secrets.YNAB_API_TOKEN }}" \
+            YNAB_BUDGET_ID="${{ secrets.YNAB_BUDGET_ID }}" \
+            YNAB_ACCOUNT_ID="${{ secrets.YNAB_ACCOUNT_ID }}" \
+            -a ${{ env.FLY_PROD_APP_NAME }}
+
       - name: Set Firebase credentials in Fly.io
         run: |
           echo "Setting Firebase credentials in Fly.io secrets..."
@@ -104,112 +218,22 @@ jobs:
             flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
           fi
           rm /tmp/firebase-credentials.json
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
-      # Set up PostgreSQL using a regular Fly app with Docker
-      - name: Check if Postgres app exists
-        id: check-db
-        continue-on-error: true
-        run: |
-          if flyctl apps list | grep -q "${{ env.FLY_PROD_DB_NAME }}"; then
-            echo "DB_EXISTS=true" >> $GITHUB_ENV
-            echo "Postgres app ${{ env.FLY_PROD_DB_NAME }} exists"
-          else
-            echo "DB_EXISTS=false" >> $GITHUB_ENV
-            echo "Postgres app ${{ env.FLY_PROD_DB_NAME }} does not exist"
-          fi
-
-      - name: Create Postgres app if it doesn't exist
-        if: env.DB_EXISTS == 'false'
-        id: create-db
-        run: |
-          echo "Creating Postgres app ${{ env.FLY_PROD_DB_NAME }}..."
-          # Create directory for Postgres app
-          mkdir -p postgres-app
-          cd postgres-app
-          
-          # Create fly.toml for the Postgres app
-          cat > fly.toml << EOF
-          app = "${{ env.FLY_PROD_DB_NAME }}"
-          primary_region = "lax"
-          
-          [env]
-            POSTGRES_USER = "postgres"
-            POSTGRES_PASSWORD = "${{ secrets.DB_PASSWORD || 'postgres' }}"
-            POSTGRES_DB = "bennwallet"
-          
-          [http_service]
-            internal_port = 5432
-            force_https = true
-            auto_stop_machines = true
-            auto_start_machines = true
-            min_machines_running = 1
-          
-          [[vm]]
-            memory = "1gb"
-            cpu_kind = "shared"
-            cpus = 1
-          
-          [[mounts]]
-            source = "pg_data"
-            destination = "/var/lib/postgresql/data"
-          EOF
-          
-          # Create Dockerfile for Postgres
-          cat > Dockerfile << EOF
-          FROM postgres:14-alpine
-          
-          # Add initialization scripts if needed
-          # COPY init.sql /docker-entrypoint-initdb.d/
-          
-          EXPOSE 5432
-          EOF
-          
-          # Launch the Postgres app
-          flyctl launch --no-deploy -y
-          
-          # Create volume for Postgres data
-          flyctl volumes create pg_data --size 10 -r lax -y
-          
-          # Deploy the Postgres app
-          flyctl deploy -y
-
-      - name: Configure database connection
-        run: |
-          echo "Setting up database connection for main app..."
-          # Get the internal hostname for the Postgres app
-          DB_HOST="${{ env.FLY_PROD_DB_NAME }}.internal"
-          DB_PASSWORD="${{ secrets.DB_PASSWORD || 'postgres' }}"
-          
-          # Set the DATABASE_URL secret on the main app
-          flyctl secrets set \
-            DATABASE_URL="postgres://postgres:${DB_PASSWORD}@${DB_HOST}:5432/bennwallet" \
-            -a ${{ env.FLY_PROD_APP_NAME }}
 
       - name: Check and create required volumes
         id: check-volume
         run: |
           if ! flyctl volumes list --app "${{ env.FLY_PROD_APP_NAME }}" | grep -q "bennwallet_prod_data"; then
             echo "Creating volume for production..."
-            flyctl volumes create bennwallet_prod_data --size 1 --app "${{ env.FLY_PROD_APP_NAME }}" --region sjc -y
+            flyctl volumes create bennwallet_prod_data --size 1 --app "${{ env.FLY_PROD_APP_NAME }}" --region lax -y
           else
             echo "Production volume already exists."
           fi
-
-      - name: Set YNAB secrets
-        run: |
-          flyctl secrets set \
-            YNAB_API_TOKEN="${{ secrets.YNAB_API_TOKEN }}" \
-            YNAB_BUDGET_ID="${{ secrets.YNAB_BUDGET_ID }}" \
-            YNAB_ACCOUNT_ID="${{ secrets.YNAB_ACCOUNT_ID }}" \
-            -a ${{ env.FLY_PROD_APP_NAME }}
 
       - name: Create fly.toml
         run: |
           cat > fly.toml << EOF
           app = "${{ env.FLY_PROD_APP_NAME }}"
-          primary_region = "sjc"
+          primary_region = "lax"
 
           [build]
             dockerfile = "Dockerfile"
@@ -256,16 +280,26 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           NODE_ENV: production
 
+      - name: Check app status
+        run: |
+          echo "Checking app status..."
+          for i in {1..12}; do
+            echo "Checking app status (attempt $i/12)..."
+            if flyctl status --app "${{ env.FLY_PROD_APP_NAME }}" | grep -q "running"; then
+              echo "App is running!"
+              break
+            fi
+            if [ $i -eq 12 ]; then
+              echo "::warning::App not ready after 2 minutes. Check logs for issues."
+            else
+              echo "App not ready yet, waiting 10 seconds..."
+              sleep 10
+            fi
+          done
+
       - name: Run database migrations
         run: |
           echo "Running database migrations on production..."
           flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate"
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
-      - name: Verify migrations
-        run: |
-          echo "Verifying migrations status..."
-          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate --dry-run"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
