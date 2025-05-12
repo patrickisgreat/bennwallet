@@ -52,6 +52,8 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		}},
 		// Fix YNAB table schema for proper encryption columns
 		{"fix_ynab_schema", FixYNABSchema},
+		// Ensure admin users exist with proper privileges
+		{"ensure_admin_user", EnsureAdminUser},
 		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
 	}
@@ -98,8 +100,8 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 
 			// Special case for fix_ynab_schema - we want to run this again even if it's been applied
 			// to handle any foreign key issues that might have occurred in production
-			if migration.name == "fix_ynab_schema" {
-				log.Printf("Running fix_ynab_schema again to ensure database is properly configured...")
+			if migration.name == "fix_ynab_schema" || migration.name == "ensure_admin_user" {
+				log.Printf("Running %s again to ensure database is properly configured...", migration.name)
 				err := migration.fn(db)
 				if err != nil {
 					return fmt.Errorf("failed to reapply migration %s: %w", migration.name, err)
