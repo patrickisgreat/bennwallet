@@ -231,9 +231,9 @@ jobs:
             echo "Creating Managed PostgreSQL database cluster..."
             flyctl mpg create bennwallet-prod-db \
               --region sjc \
-              --initial-cluster-size dedicated-cpu-1x \
+              --plan production \
               --organization personal \
-              --vm-size dedicated-cpu-1x \
+              --nodes 1 \
               --volume-size 10 \
               --yes
           else
