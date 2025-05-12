@@ -54,6 +54,8 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		{"fix_ynab_schema", FixYNABSchema},
 		// Ensure admin users exist with proper privileges
 		{"ensure_admin_user", EnsureAdminUser},
+		// Fix YNAB API URLs by removing the extra .com
+		{"fix_ynab_api_urls", FixYNABAPIURLs},
 		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
 	}

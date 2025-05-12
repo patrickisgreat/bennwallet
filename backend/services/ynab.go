@@ -52,7 +52,7 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 	}
 
 	// Make API request to YNAB
-	url := fmt.Sprintf("https://api.youneedabudget.com.com/v1/budgets/%s/categories", budgetID)
+	url := fmt.Sprintf("https://api.youneedabudget.com/v1/budgets/%s/categories", budgetID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
