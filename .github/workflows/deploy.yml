@@ -139,7 +139,7 @@ jobs:
           flyctl apps create "${{ env.FLY_PROD_DB_NAME }}" --org personal
           
           # Create volume for Postgres data
-          flyctl volumes create postgres_data --app "${{ env.FLY_PROD_DB_NAME }}" --size 10 -r lax
+          flyctl volumes create postgres_data --app "${{ env.FLY_PROD_DB_NAME }}" --size 10 -r lax -y
           
           # Deploy the Postgres app
           flyctl deploy --app "${{ env.FLY_PROD_DB_NAME }}" -y
