@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -29,6 +30,12 @@ var (
 )
 
 func main() {
+	// Check if running in migration mode
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		runMigrations()
+		return
+	}
+
 	// Parse command line flags
 	flag.Parse()
 
@@ -273,4 +280,70 @@ func registerRoutes(r *mux.Router) {
 	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.UpdateCustomReport).Methods("PUT")
 	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.DeleteCustomReport).Methods("DELETE")
 	protectedRouter.HandleFunc("/reports/custom/{id}/run", handlers.RunCustomReport).Methods("POST")
+}
+
+// runMigrations handles the migrate command-line functionality
+func runMigrations() {
+	// Parse flags for migration command
+	migrateCmd := flag.NewFlagSet("migrate", flag.ExitOnError)
+	reset := migrateCmd.Bool("reset", false, "Reset database before migrations (WARNING: DELETES ALL DATA)")
+	dryRun := migrateCmd.Bool("dry-run", false, "Check which migrations would be applied without executing them")
+
+	// Parse the remaining command-line arguments
+	args := os.Args[2:] // Skip "migrate" command
+	if err := migrateCmd.Parse(args); err != nil {
+		log.Fatalf("Failed to parse migration flags: %v", err)
+	}
+
+	// Check if reset was requested through environment variable
+	resetEnv := os.Getenv("RESET_DB") == "true"
+	if resetEnv {
+		*reset = true
+	}
+
+	// Connect to database
+	log.Println("Connecting to database...")
+	db, err := database.CreatePostgresDB()
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	// Confirm dangerous operations in production
+	if *reset && (os.Getenv("APP_ENV") == "production" || os.Getenv("NODE_ENV") == "production") {
+		log.Println("⚠️ WARNING: You are about to RESET the PRODUCTION database! ⚠️")
+		log.Println("This will DELETE ALL DATA in the database.")
+		log.Println("To proceed, set CONFIRM_PROD_RESET=yes in environment.")
+
+		if os.Getenv("CONFIRM_PROD_RESET") != "yes" {
+			log.Fatalf("Production database reset was not confirmed. Aborting.")
+		}
+	}
+
+	// Check which migrations need to be applied (dry run)
+	if *dryRun {
+		pendingMigrations, err := migrations.GetPendingMigrations(db)
+		if err != nil {
+			log.Fatalf("Failed to check pending migrations: %v", err)
+		}
+
+		if len(pendingMigrations) == 0 {
+			fmt.Println("✅ Database schema is up to date. No migrations needed.")
+		} else {
+			fmt.Println("🔍 Pending migrations that would be applied:")
+			for _, migration := range pendingMigrations {
+				fmt.Printf("  - %s\n", migration)
+			}
+		}
+		return
+	}
+
+	// Run the migrations
+	log.Println("Running migrations...")
+	err = migrations.RunMigrations(db, *reset)
+	if err != nil {
+		log.Fatalf("Migration failed: %v", err)
+	}
+
+	log.Println("✅ Database migrations completed successfully!")
 }
