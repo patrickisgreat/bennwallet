@@ -87,7 +87,7 @@ jobs:
       - name: Create app if it doesn't exist
         if: env.APP_EXISTS == 'false'
         run: |
-          flyctl apps create "${{ env.FLY_DEV_APP_NAME }}" --org personal --non-interactive
+          flyctl apps create "${{ env.FLY_DEV_APP_NAME }}" --org personal
 
       - name: Check if managed Postgres cluster exists
         id: check-db
@@ -106,7 +106,7 @@ jobs:
         id: create-db
         run: |
           echo "Creating managed Postgres cluster ${{ env.FLY_DEV_DB_NAME }}..."
-          flyctl mpg create --name ${{ env.FLY_DEV_DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD || 'postgres' }} --plan basic --yes --non-interactive
+          flyctl mpg create --name ${{ env.FLY_DEV_DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD || 'postgres' }} --plan basic --yes
 
       - name: Wait for Postgres cluster to be ready
         run: |
@@ -130,7 +130,7 @@ jobs:
       - name: Attach Postgres to app
         run: |
           echo "Attaching Postgres cluster to app..."
-          flyctl mpg attach ${{ env.FLY_DEV_DB_NAME }} --app ${{ env.FLY_DEV_APP_NAME }} --yes
+          flyctl mpg attach ${{ env.FLY_DEV_DB_NAME }} --app ${{ env.FLY_DEV_APP_NAME }}
 
       - name: Create development fly.toml
         run: |
@@ -181,7 +181,7 @@ jobs:
         run: |
           if ! flyctl volumes list --app "${{ env.FLY_DEV_APP_NAME }}" | grep -q "${{ env.VOLUME_NAME }}"; then
             echo "Creating volume ${{ env.VOLUME_NAME }}..."
-            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.FLY_DEV_APP_NAME }}" --region sjc --size 1 --yes
+            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.FLY_DEV_APP_NAME }}" --region sjc --size 1 -y
           else
             echo "Volume ${{ env.VOLUME_NAME }} already exists"
           fi
@@ -193,13 +193,13 @@ jobs:
           ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           EOT
           
-          flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a "${{ env.FLY_DEV_APP_NAME }}" --yes
+          flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a "${{ env.FLY_DEV_APP_NAME }}"
           rm /tmp/firebase-credentials.json
 
       - name: Deploy to Fly.io Development
         run: |
           echo "Deploying to app: ${{ env.FLY_DEV_APP_NAME }}"
-          flyctl deploy --remote-only --app "${{ env.FLY_DEV_APP_NAME }}" --yes
+          flyctl deploy --remote-only --app "${{ env.FLY_DEV_APP_NAME }}" -y
         env:
           NODE_ENV: development
           ENVIRONMENT: development
@@ -209,6 +209,6 @@ jobs:
       - name: Run database migrations
         run: |
           echo "Running database migrations on development..."
-          flyctl ssh console -a ${{ env.FLY_DEV_APP_NAME }} -C "/app/bennwallet migrate" --yes
+          flyctl ssh console -a ${{ env.FLY_DEV_APP_NAME }} -C "/app/bennwallet migrate"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
