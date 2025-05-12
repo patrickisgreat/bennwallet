@@ -154,29 +154,56 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 
 	// Prepare statements for better performance
 	stmtCategoryGroup, err := tx.Prepare(`
-		INSERT INTO ynab_category_groups (id, name, user_id, last_updated)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO ynab_category_groups (id, name, user_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4)
 		ON CONFLICT (id) DO UPDATE SET
 		name = $2,
-		last_updated = $4
+		updated_at = $4
 	`)
 	if err != nil {
-		log.Printf("DEBUG: Error preparing category group statement: %v", err)
-		return fmt.Errorf("error preparing statement: %w", err)
+		if strings.Contains(err.Error(), "last_updated") {
+			// Try with created_at/updated_at instead
+			stmtCategoryGroup, err = tx.Prepare(`
+				INSERT INTO ynab_category_groups (id, name, user_id, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $4)
+				ON CONFLICT (id) DO UPDATE SET
+				name = $2,
+				updated_at = $4
+			`)
+		}
+
+		if err != nil {
+			log.Printf("DEBUG: Error preparing category group statement: %v", err)
+			return fmt.Errorf("error preparing statement: %w", err)
+		}
 	}
 	defer stmtCategoryGroup.Close()
 
 	stmtCategory, err := tx.Prepare(`
-		INSERT INTO ynab_categories (id, group_id, name, user_id, last_updated)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO ynab_categories (id, group_id, name, user_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
 		ON CONFLICT (id) DO UPDATE SET
 		group_id = $2,
 		name = $3,
-		last_updated = $5
+		updated_at = $5
 	`)
 	if err != nil {
-		log.Printf("DEBUG: Error preparing category statement: %v", err)
-		return fmt.Errorf("error preparing statement: %w", err)
+		if strings.Contains(err.Error(), "last_updated") {
+			// Try with created_at/updated_at instead
+			stmtCategory, err = tx.Prepare(`
+				INSERT INTO ynab_categories (id, group_id, name, user_id, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $5)
+				ON CONFLICT (id) DO UPDATE SET
+				group_id = $2,
+				name = $3,
+				updated_at = $5
+			`)
+		}
+
+		if err != nil {
+			log.Printf("DEBUG: Error preparing category statement: %v", err)
+			return fmt.Errorf("error preparing statement: %w", err)
+		}
 	}
 	defer stmtCategory.Close()
 
@@ -188,7 +215,7 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 		}
 
 		// Insert or update category group
-		_, err = stmtCategoryGroup.Exec(group.ID, group.Name, userID, syncTime)
+		_, err = stmtCategoryGroup.Exec(group.ID, group.Name, userID, syncTime, syncTime)
 		if err != nil {
 			log.Printf("DEBUG: Error inserting category group %s: %v", group.ID, err)
 			return fmt.Errorf("error inserting category group: %w", err)
@@ -203,7 +230,7 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 				continue
 			}
 
-			_, err = stmtCategory.Exec(cat.ID, group.ID, cat.Name, userID, syncTime)
+			_, err = stmtCategory.Exec(cat.ID, group.ID, cat.Name, userID, syncTime, syncTime)
 			if err != nil {
 				log.Printf("DEBUG: Error inserting category %s: %v", cat.ID, err)
 				return fmt.Errorf("error inserting category: %w", err)
