@@ -1,3 +1,9 @@
+## [1.3.9](https://github.com/patrickisgreat/bennwallet/compare/v1.3.8...v1.3.9) (2025-05-12)
+
+### Bug Fixes
+
+* prod psql schema change syncs ([721af13](https://github.com/patrickisgreat/bennwallet/commit/721af13a52ae31f2b842eb0b5e4f8455239462e1))
+
 ## [1.3.8](https://github.com/patrickisgreat/bennwallet/compare/v1.3.7...v1.3.8) (2025-05-12)
 
 ### Bug Fixes
