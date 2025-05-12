@@ -103,44 +103,30 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-// CreatePostgresSchema creates all tables needed for the application
-// This is the complete schema definition in one place
+// CreatePostgresSchema creates all the tables needed for PostgreSQL
+// This is a clean schema definition for first-time database creation
 func CreatePostgresSchema(db *sql.DB) error {
-	log.Println("Creating complete PostgreSQL schema...")
-
-	// Create schema_versions table to track schema updates
+	// Create migrations table first to track schema versions
 	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS schema_versions (
+		CREATE TABLE IF NOT EXISTS migrations (
 			id SERIAL PRIMARY KEY,
-			name TEXT NOT NULL UNIQUE,
-			version TEXT NOT NULL,
+			name TEXT UNIQUE NOT NULL,
 			applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
+		);
 	`)
 	if err != nil {
-		return fmt.Errorf("failed to create schema_versions table: %w", err)
+		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
-	// Create users table
+	// Create base tables
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			username TEXT NOT NULL UNIQUE,
 			name TEXT NOT NULL,
-			email TEXT,
-			role TEXT NOT NULL DEFAULT 'user',
-			status TEXT DEFAULT 'approved',
-			is_admin BOOLEAN DEFAULT FALSE,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create users table: %w", err)
-	}
+			role TEXT NOT NULL
+		);
 
-	// Create transactions table
-	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS transactions (
 			id TEXT PRIMARY KEY,
 			amount NUMERIC(15,2) NOT NULL,
@@ -154,49 +140,18 @@ func CreatePostgresSchema(db *sql.DB) error {
 			optional BOOLEAN NOT NULL DEFAULT FALSE,
 			entered_by TEXT NOT NULL,
 			user_id TEXT NOT NULL REFERENCES users(id),
-			note TEXT,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create transactions table: %w", err)
-	}
+			note TEXT
+		);
 
-	// Create categories table
-	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS categories (
 			id SERIAL PRIMARY KEY,
 			name TEXT NOT NULL,
 			description TEXT,
 			user_id TEXT NOT NULL REFERENCES users(id),
 			color TEXT,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(name, user_id)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create categories table: %w", err)
-	}
+		);
 
-	// Create transaction_categories join table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS transaction_categories (
-			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-			category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-			amount NUMERIC(15,2) NOT NULL,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(transaction_id, category_id)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create transaction_categories table: %w", err)
-	}
-
-	// Create permissions table
-	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS permissions (
 			id SERIAL PRIMARY KEY,
 			granted_user_id TEXT NOT NULL REFERENCES users(id),
@@ -206,14 +161,8 @@ func CreatePostgresSchema(db *sql.DB) error {
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			expires_at TIMESTAMP WITH TIME ZONE,
 			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create permissions table: %w", err)
-	}
+		);
 
-	// Create YNAB config table
-	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS ynab_config (
 			id SERIAL PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id),
@@ -229,14 +178,8 @@ func CreatePostgresSchema(db *sql.DB) error {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			has_credentials BOOLEAN DEFAULT FALSE,
 			UNIQUE(user_id)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create ynab_config table: %w", err)
-	}
+		);
 
-	// Create YNAB settings table
-	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS user_ynab_settings (
 			user_id TEXT PRIMARY KEY REFERENCES users(id),
 			token TEXT,
@@ -245,14 +188,8 @@ func CreatePostgresSchema(db *sql.DB) error {
 			auto_import BOOLEAN DEFAULT false,
 			sync_enabled BOOLEAN DEFAULT false,
 			last_synced TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create user_ynab_settings table: %w", err)
-	}
+		);
 
-	// Create YNAB category groups table
-	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS ynab_category_groups (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -262,18 +199,11 @@ func CreatePostgresSchema(db *sql.DB) error {
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create ynab_category_groups table: %w", err)
-	}
+		);
 
-	// Create YNAB categories table
-	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS ynab_categories (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
-			group_id TEXT REFERENCES ynab_category_groups(id),
 			category_group_id TEXT REFERENCES ynab_category_groups(id),
 			hidden BOOLEAN DEFAULT false,
 			budget_amount DECIMAL(15,2),
@@ -281,47 +211,14 @@ func CreatePostgresSchema(db *sql.DB) error {
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
+		);
 	`)
+
 	if err != nil {
-		return fmt.Errorf("failed to create ynab_categories table: %w", err)
+		return fmt.Errorf("failed to create base schema: %w", err)
 	}
 
-	// Create saved filters table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS saved_filters (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			resource_type TEXT NOT NULL,
-			filter_config TEXT NOT NULL,
-			is_default BOOLEAN DEFAULT FALSE,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create saved_filters table: %w", err)
-	}
-
-	// Create custom reports table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS custom_reports (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			description TEXT,
-			report_config TEXT NOT NULL,
-			is_public BOOLEAN DEFAULT FALSE,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create custom_reports table: %w", err)
-	}
-
-	log.Println("Successfully created complete PostgreSQL schema")
+	log.Println("PostgreSQL schema created successfully")
 	return nil
 }
 
