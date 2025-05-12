@@ -232,7 +232,7 @@ jobs:
             # Create in non-interactive mode by setting CI=true
             CI=true flyctl mpg create \
               -n bennwallet-prod-db \
-              -r sjc \
+              -r lax \
               --plan production \
               -o personal \
               --nodes 1 \
