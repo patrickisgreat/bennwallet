@@ -118,7 +118,7 @@ jobs:
       - name: Create app if it doesn't exist
         if: env.APP_EXISTS == 'false'
         run: |
-          flyctl apps create "${{ env.APP_NAME }}" --org personal --non-interactive
+          flyctl apps create "${{ env.APP_NAME }}" --org personal
 
       - name: Check if managed Postgres cluster exists
         id: check-db
@@ -137,7 +137,7 @@ jobs:
         id: create-db
         run: |
           echo "Creating managed Postgres cluster ${{ env.DB_NAME }}..."
-          flyctl mpg create --name ${{ env.DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD || 'postgres' }} --plan basic --yes --non-interactive
+          flyctl mpg create --name ${{ env.DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD || 'postgres' }} --plan basic --yes
 
       - name: Wait for Postgres cluster to be ready
         run: |
@@ -161,7 +161,7 @@ jobs:
       - name: Attach Postgres to app
         run: |
           echo "Attaching Postgres cluster to app..."
-          flyctl mpg attach ${{ env.DB_NAME }} --app ${{ env.APP_NAME }} --yes
+          flyctl mpg attach ${{ env.DB_NAME }} --app ${{ env.APP_NAME }}
 
       - name: Set Firebase credentials in Fly.io
         run: |
@@ -174,7 +174,7 @@ jobs:
           EOT
 
           # Set the secret from the file
-          flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a "${{ env.APP_NAME }}" --yes
+          flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a "${{ env.APP_NAME }}"
 
           # Clean up
           rm /tmp/firebase-credentials.json
@@ -185,13 +185,13 @@ jobs:
         run: |
           if ! flyctl volumes list --app "${{ env.APP_NAME }}" | grep -q "${{ env.VOLUME_NAME }}"; then
             echo "Creating volume ${{ env.VOLUME_NAME }}..."
-            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1 --yes
+            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1 -y
           else
             echo "Volume ${{ env.VOLUME_NAME }} already exists"
           fi
 
       - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only --app "${{ env.APP_NAME }}" --yes
+        run: flyctl deploy --remote-only --app "${{ env.APP_NAME }}" -y
         env:
           NODE_ENV: development
           APP_ENV: development

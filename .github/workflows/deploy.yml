@@ -90,7 +90,7 @@ jobs:
       - name: Create prod app if it doesn't exist
         if: env.APP_EXISTS == 'false'
         run: |
-          flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal --non-interactive
+          flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal
 
       - name: Set Firebase credentials in Fly.io
         run: |
@@ -98,10 +98,10 @@ jobs:
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > /tmp/firebase-credentials.json
           if command -v jq &> /dev/null; then
             cat /tmp/firebase-credentials.json | jq . > /tmp/formatted-credentials.json
-            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/formatted-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }} --yes
+            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/formatted-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
             rm /tmp/formatted-credentials.json
           else
-            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }} --yes
+            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
           fi
           rm /tmp/firebase-credentials.json
         env:
@@ -125,7 +125,7 @@ jobs:
         id: create-db
         run: |
           echo "Creating managed Postgres cluster ${{ env.FLY_PROD_DB_NAME }}..."
-          flyctl mpg create --name ${{ env.FLY_PROD_DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD }} --plan basic --yes --non-interactive
+          flyctl mpg create --name ${{ env.FLY_PROD_DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD }} --plan basic --yes
 
       - name: Wait for Postgres cluster to be ready
         run: |
@@ -149,14 +149,14 @@ jobs:
       - name: Attach Postgres to app
         run: |
           echo "Attaching Postgres cluster to app..."
-          flyctl mpg attach ${{ env.FLY_PROD_DB_NAME }} --app ${{ env.FLY_PROD_APP_NAME }} --yes
+          flyctl mpg attach ${{ env.FLY_PROD_DB_NAME }} --app ${{ env.FLY_PROD_APP_NAME }}
 
       - name: Check and create required volumes
         id: check-volume
         run: |
           if ! flyctl volumes list --app "${{ env.FLY_PROD_APP_NAME }}" | grep -q "bennwallet_prod_data"; then
             echo "Creating volume for production..."
-            flyctl volumes create bennwallet_prod_data --size 1 --app "${{ env.FLY_PROD_APP_NAME }}" --region sjc --yes
+            flyctl volumes create bennwallet_prod_data --size 1 --app "${{ env.FLY_PROD_APP_NAME }}" --region sjc -y
           else
             echo "Production volume already exists."
           fi
@@ -167,7 +167,7 @@ jobs:
             YNAB_API_TOKEN="${{ secrets.YNAB_API_TOKEN }}" \
             YNAB_BUDGET_ID="${{ secrets.YNAB_BUDGET_ID }}" \
             YNAB_ACCOUNT_ID="${{ secrets.YNAB_ACCOUNT_ID }}" \
-            -a ${{ env.FLY_PROD_APP_NAME }} --yes
+            -a ${{ env.FLY_PROD_APP_NAME }}
 
       - name: Create fly.toml
         run: |
@@ -215,7 +215,7 @@ jobs:
           EOF
 
       - name: Deploy to Fly.io Production
-        run: flyctl deploy --remote-only --app ${{ env.FLY_PROD_APP_NAME }} --yes
+        run: flyctl deploy --remote-only --app ${{ env.FLY_PROD_APP_NAME }} -y
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           NODE_ENV: production
@@ -223,13 +223,13 @@ jobs:
       - name: Run database migrations
         run: |
           echo "Running database migrations on production..."
-          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate" --yes
+          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       - name: Verify migrations
         run: |
           echo "Verifying migrations status..."
-          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate --dry-run" --yes
+          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate --dry-run"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
