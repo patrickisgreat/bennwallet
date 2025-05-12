@@ -6,7 +6,7 @@ on:
 
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-  FLY_PROD_APP_NAME: 'bennwallet'
+  FLY_PROD_APP_NAME: 'bennwallet-prod'
   FLY_PROD_DB_NAME: 'bennwallet-prod-db'
   GO_VERSION: '1.24'
   NODE_VERSION: '20'
@@ -143,6 +143,9 @@ jobs:
           
           # Deploy the Postgres app
           flyctl deploy --app "${{ env.FLY_PROD_DB_NAME }}" -y
+          
+          # Allocate IPs for the database
+          flyctl ips allocate-v4 --app "${{ env.FLY_PROD_DB_NAME }}" -y
           
           echo "Waiting for Postgres to be ready..."
           for i in {1..12}; do

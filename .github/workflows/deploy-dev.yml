@@ -144,6 +144,9 @@ jobs:
           # Deploy the Postgres app
           flyctl deploy --app "${{ env.FLY_DEV_DB_NAME }}" -y
           
+          # Allocate IPs for the database
+          flyctl ips allocate-v4 --app "${{ env.FLY_DEV_DB_NAME }}" -y
+          
           echo "Waiting for Postgres to be ready..."
           for i in {1..12}; do
             echo "Checking Postgres status (attempt $i/12)..."
