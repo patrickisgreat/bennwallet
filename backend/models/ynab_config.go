@@ -453,11 +453,41 @@ func FixYNABTableSchema(db *sql.DB) error {
 
 // UpsertYNABConfig creates or updates a user's YNAB configuration
 func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string) error {
-	log.Printf("Upserting YNAB config for user %s", userID)
+	log.Printf("Upserting YNAB config for user %s with new token: %s*** (first few chars)",
+		userID, config.APIToken[:4])
+
+	// First check if there's an existing token to detect changes
+	var existingToken string
+	err := db.QueryRow(`
+		SELECT COALESCE(encrypted_api_token, '') 
+		FROM ynab_config 
+		WHERE user_id = $1
+	`, userID).Scan(&existingToken)
+
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Error checking existing token: %v", err)
+	} else if err == nil && existingToken != "" {
+		log.Printf("Found existing token (length: %d)", len(existingToken))
+
+		// Try to decrypt it to check if we need to update
+		decryptedToken, err := security.Decrypt(existingToken)
+		if err != nil {
+			log.Printf("Error decrypting existing token: %v", err)
+		} else {
+			log.Printf("Existing decrypted token prefix: %s***", decryptedToken[:4])
+
+			// Check if tokens are different
+			if decryptedToken != config.APIToken {
+				log.Printf("Tokens are different - updating with new token")
+			} else {
+				log.Printf("Tokens are identical - no update needed")
+			}
+		}
+	}
 
 	// First ensure the user exists in the users table
 	var userExists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID).Scan(&userExists)
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID).Scan(&userExists)
 	if err != nil {
 		log.Printf("Error checking if user exists: %v", err)
 		// Continue anyway - the constraint will catch this if needed
