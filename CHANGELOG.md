@@ -1,3 +1,9 @@
+## [1.3.18](https://github.com/patrickisgreat/bennwallet/compare/v1.3.17...v1.3.18) (2025-05-12)
+
+### Bug Fixes
+
+* workflows ([dfdeae8](https://github.com/patrickisgreat/bennwallet/commit/dfdeae81b864c3db62a6e17a562c717c3a4a0fb7))
+
 ## [1.3.17](https://github.com/patrickisgreat/bennwallet/compare/v1.3.16...v1.3.17) (2025-05-12)
 
 ### Bug Fixes
