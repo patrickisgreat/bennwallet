@@ -50,14 +50,6 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		{"add_transaction_notes_column", func(db *sql.DB) error {
 			return database.AddTransactionNotesColumn(db)
 		}},
-		// Fix YNAB table schema for proper encryption columns
-		{"fix_ynab_schema", FixYNABSchema},
-		// Ensure admin users exist with proper privileges
-		{"ensure_admin_user", EnsureAdminUser},
-		// Fix YNAB API URLs by removing the extra .com
-		{"fix_ynab_api_urls", FixYNABAPIURLs},
-		// Fix YNAB categories tables schema
-		{"fix_ynab_categories_schema", FixYNABCategoriesSchema},
 		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
 	}

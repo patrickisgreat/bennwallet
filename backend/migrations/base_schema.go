@@ -55,30 +55,53 @@ func CreateBaseSchema(db *sql.DB) error {
 
 		CREATE TABLE IF NOT EXISTS ynab_config (
 			id SERIAL PRIMARY KEY,
-			user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
-			api_token TEXT NOT NULL,
-			budget_id TEXT NOT NULL,
-			account_id TEXT NOT NULL
+			user_id TEXT NOT NULL REFERENCES users(id),
+			encrypted_api_token TEXT,
+			encrypted_budget_id TEXT,
+			encrypted_account_id TEXT,
+			api_token TEXT,
+			budget_id TEXT,
+			account_id TEXT,
+			last_sync_time TIMESTAMP,
+			sync_frequency INTEGER DEFAULT 60,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			has_credentials BOOLEAN DEFAULT FALSE,
+			UNIQUE(user_id)
 		);
 
 		CREATE TABLE IF NOT EXISTS user_ynab_settings (
-			id SERIAL PRIMARY KEY,
-			user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
-			last_sync TIMESTAMP WITH TIME ZONE
+			user_id TEXT PRIMARY KEY REFERENCES users(id),
+			token TEXT,
+			budget_id TEXT,
+			account_id TEXT,
+			auto_import BOOLEAN DEFAULT false,
+			sync_enabled BOOLEAN DEFAULT false,
+			last_synced TIMESTAMP
 		);
 
 		CREATE TABLE IF NOT EXISTS ynab_category_groups (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			category_group_id TEXT NOT NULL,
-			user_id TEXT NOT NULL REFERENCES users(id)
+			hidden BOOLEAN DEFAULT false,
+			user_id TEXT NOT NULL REFERENCES users(id),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
 
 		CREATE TABLE IF NOT EXISTS ynab_categories (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
-			category_group_id TEXT NOT NULL REFERENCES ynab_category_groups(id),
-			user_id TEXT NOT NULL REFERENCES users(id)
+			group_id TEXT REFERENCES ynab_category_groups(id),
+			category_group_id TEXT REFERENCES ynab_category_groups(id),
+			hidden BOOLEAN DEFAULT false,
+			budget_amount DECIMAL(15,2),
+			user_id TEXT NOT NULL REFERENCES users(id),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
 
