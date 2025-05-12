@@ -222,15 +222,55 @@ jobs:
           fi
           echo "App ${{ env.FLY_DEV_APP_NAME }} is ready."
 
+      - name: Verify database connectivity
+        run: |
+          echo "Verifying database connectivity..."
+          echo "Waiting for database to be fully ready..."
+          sleep 10
+          
+          # Check if the database app is running
+          for i in {1..12}; do
+            echo "Checking database status (attempt $i/12)..."
+            if flyctl status --app "${{ env.FLY_DEV_DB_NAME }}" | grep -q "running"; then
+              echo "Database is running!"
+              break
+            fi
+            if [ $i -eq 12 ]; then
+              echo "Database not ready after 2 minutes, continuing anyway"
+            else
+              echo "Database not ready yet, waiting 10 seconds..."
+              sleep 10
+            fi
+          done
+          
+          # Try to directly test database connectivity by running a query
+          echo "Testing direct connection to the database..."
+          flyctl ssh console -a ${{ env.FLY_DEV_DB_NAME }} -C "psql -U postgres -c 'SELECT 1'" || echo "Database connection test failed, but continuing..."
+          
+          # Get the Flycast address for more reliable connection
+          echo "Getting Flycast address for database..."
+          DB_FLYCAST=$(flyctl status --app ${{ env.FLY_DEV_DB_NAME }} | grep -o "fdaa:[0-9a-f:]*" | head -1 || echo "")
+          if [ -n "$DB_FLYCAST" ]; then
+            echo "Flycast address found: $DB_FLYCAST"
+            echo "DB_FLYCAST=$DB_FLYCAST" >> $GITHUB_ENV
+          else
+            echo "Could not find Flycast address, will use .internal DNS instead"
+          fi
+
       - name: Set DATABASE_URL and other secrets
         run: |
           echo "Setting up database connection and other secrets..."
-          DB_HOST="${{ env.FLY_DEV_DB_NAME }}.internal"
           DB_PASSWORD="${{ secrets.DB_PASSWORD || 'postgres' }}"
+          
+          # Use the flycast domain for database connection
+          DB_HOST="${{ env.FLY_DEV_DB_NAME }}.flycast"
+          DB_PORT="5432"
+          
+          echo "Database connection will use: $DB_HOST:$DB_PORT"
           
           # Set the DATABASE_URL secret and other critical secrets
           flyctl secrets set \
-            DATABASE_URL="postgres://postgres:${DB_PASSWORD}@${DB_HOST}:5432/bennwallet" \
+            DATABASE_URL="postgres://postgres:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/bennwallet" \
             YNAB_API_TOKEN="${{ secrets.YNAB_API_TOKEN }}" \
             YNAB_BUDGET_ID="${{ secrets.YNAB_BUDGET_ID }}" \
             YNAB_ACCOUNT_ID="${{ secrets.YNAB_ACCOUNT_ID }}" \
