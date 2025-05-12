@@ -11,8 +11,9 @@ primary_region = 'sjc'
 
   [build.args]
     YNAB_ACCOUNT_ID = ''
-    YNAB_API_TOKEN = 'xIgepVnHjCxstZ30bAsr21TF40xORiT74fSD0GDWe9Y'
-    YNAB_BUDGET_ID = '662ab203-7b47-45e1-8245-ce86ea9b848e'
+    # Secrets should be set using fly secrets set, not in this file
+    YNAB_API_TOKEN = ''
+    YNAB_BUDGET_ID = ''
 
 [env]
   APP_ENV = 'development'
@@ -21,8 +22,9 @@ primary_region = 'sjc'
   PORT = '8080'
   RESET_DB = 'true'
   YNAB_ACCOUNT_ID = ''
-  YNAB_API_TOKEN = 'xIgepVnHjCxstZ30bAsr21TF40xORiT74fSD0GDWe9Y'
-  YNAB_BUDGET_ID = '662ab203-7b47-45e1-8245-ce86ea9b848e'
+  # Secrets should be set using fly secrets set, not in this file
+  YNAB_API_TOKEN = ''
+  YNAB_BUDGET_ID = ''
 
 [[mounts]]
   source = 'bennwallet_data'
