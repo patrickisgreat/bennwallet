@@ -259,7 +259,7 @@ func (c *YNABClient) SyncCategories(ctx context.Context, userID string) error {
 
 	// Make API request to YNAB
 	req, err := http.NewRequestWithContext(ctx, "GET",
-		fmt.Sprintf("https://api.youneedabudget.com.com/v1/budgets/%s/categories", budgetID), nil)
+		fmt.Sprintf("https://api.youneedabudget.com/v1/budgets/%s/categories", budgetID), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -335,7 +335,7 @@ func (c *YNABClient) SyncTransactions(ctx context.Context, userID string) error 
 
 	// Make API request to YNAB
 	req, err := http.NewRequestWithContext(ctx, "GET",
-		fmt.Sprintf("https://api.youneedabudget.com.com/v1/budgets/%s/accounts/%s/transactions", budgetID, accountID), nil)
+		fmt.Sprintf("https://api.youneedabudget.com/v1/budgets/%s/accounts/%s/transactions", budgetID, accountID), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

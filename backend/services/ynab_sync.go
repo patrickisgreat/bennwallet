@@ -54,7 +54,7 @@ func SyncYNABCategories(userID string, budgetID string) error {
 		log.Printf("DEBUG: Removed 'enc:' prefix from token")
 	}
 
-	url := fmt.Sprintf("https://api.youneedabudget.com.com/v1/budgets/%s/categories", budgetID)
+	url := fmt.Sprintf("https://api.youneedabudget.com/v1/budgets/%s/categories", budgetID)
 	log.Printf("DEBUG: Making request to YNAB API: %s", url)
 
 	req, err := http.NewRequest("GET", url, nil)
