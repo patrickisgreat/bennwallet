@@ -1,3 +1,9 @@
+## [1.3.13](https://github.com/patrickisgreat/bennwallet/compare/v1.3.12...v1.3.13) (2025-05-12)
+
+### Bug Fixes
+
+* remove ([4f5e2d2](https://github.com/patrickisgreat/bennwallet/commit/4f5e2d235c918c8517c57f992f9689d1df725cf2))
+
 ## [1.3.12](https://github.com/patrickisgreat/bennwallet/compare/v1.3.11...v1.3.12) (2025-05-12)
 
 ### Bug Fixes
