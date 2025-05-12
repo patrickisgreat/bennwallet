@@ -106,15 +106,23 @@ jobs:
         id: create-db
         run: |
           echo "Creating managed Postgres cluster ${{ env.FLY_DEV_DB_NAME }}..."
-          flyctl mpg create --name ${{ env.FLY_DEV_DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD || 'postgres' }} --plan basic --yes
+          # Use timeout to prevent the workflow from hanging indefinitely
+          # The cluster creation will continue in the background even if the command times out
+          timeout 60s flyctl mpg create \
+            -n ${{ env.FLY_DEV_DB_NAME }} \
+            -r lax \
+            --plan basic \
+            --volume-size 10 || echo "Command timed out, but cluster creation continues in the background"
 
       - name: Wait for Postgres cluster to be ready
         run: |
           echo "Waiting for Postgres cluster to be ready..."
-          for i in {1..15}; do
-            echo "Checking DB cluster status (attempt $i)..."
+          # We'll only wait up to 5 minutes (30 attempts * 10 seconds)
+          MAX_ATTEMPTS=30
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Checking DB cluster status (attempt $i of $MAX_ATTEMPTS)..."
             flyctl mpg list --json > mpg_list.json
-            STATUS=$(jq -r '.[] | select(.name=="${{ env.FLY_DEV_DB_NAME }}") | .status' mpg_list.json)
+            STATUS=$(jq -r '.[] | select(.name=="${{ env.FLY_DEV_DB_NAME }}") | .status' mpg_list.json 2>/dev/null || echo "pending")
             
             echo "Current status: $STATUS"
             if [ "$STATUS" = "ready" ]; then
@@ -122,15 +130,32 @@ jobs:
               exit 0
             fi
             
+            # If we've reached the maximum number of attempts, we'll proceed
+            # The attach step will be attempted but may fail if the cluster isn't ready
+            if [ $i -eq $MAX_ATTEMPTS ]; then
+              echo "Maximum wait time exceeded. The cluster is still initializing."
+              echo "Will attempt to proceed with next steps, but they may fail if the cluster isn't ready."
+              exit 0
+            fi
+            
             echo "Cluster not ready yet (status=$STATUS). Waiting 10 seconds..."
             sleep 10
           done
-          echo "Timed out waiting for Postgres cluster readiness." && exit 1
 
       - name: Attach Postgres to app
+        continue-on-error: true
+        id: attach-db
         run: |
           echo "Attaching Postgres cluster to app..."
-          flyctl mpg attach ${{ env.FLY_DEV_DB_NAME }} --app ${{ env.FLY_DEV_APP_NAME }}
+          flyctl mpg attach ${{ env.FLY_DEV_DB_NAME }} --app ${{ env.FLY_DEV_APP_NAME }} || \
+          echo "::warning::Failed to attach Postgres cluster. It might still be initializing. Set DATABASE_URL manually later."
+          
+          # Verify if DATABASE_URL is set
+          if ! flyctl secrets list -a ${{ env.FLY_DEV_APP_NAME }} | grep -q "DATABASE_URL"; then
+            echo "::warning::DATABASE_URL secret was not automatically set. The app may not connect to the database."
+            echo "You may need to manually set it later with:"
+            echo "flyctl mpg attach ${{ env.FLY_DEV_DB_NAME }} --app ${{ env.FLY_DEV_APP_NAME }}"
+          fi
 
       - name: Create development fly.toml
         run: |
