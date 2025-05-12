@@ -190,10 +190,24 @@ jobs:
             echo "APP_EXISTS=false" >> $GITHUB_ENV
           fi
 
-      - name: Create prod app if it doesn't exist
-        if: env.APP_EXISTS == 'false'
+      - name: Debug - List Fly.io apps
         run: |
-          flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal
+          echo "Listing all Fly.io apps:"
+          flyctl apps list
+          echo "-----------------------"
+
+      - name: Create prod app
+        run: |
+          echo "Creating app ${{ env.FLY_PROD_APP_NAME }}..."
+          # Force create even if it exists (will just return an error we can ignore)
+          flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal || echo "App may already exist, continuing..."
+          
+          # Verify it exists now
+          if ! flyctl apps list | grep -q "${{ env.FLY_PROD_APP_NAME }}"; then
+            echo "Failed to create app ${{ env.FLY_PROD_APP_NAME }}"
+            exit 1
+          fi
+          echo "App ${{ env.FLY_PROD_APP_NAME }} is ready."
 
       - name: Set DATABASE_URL and other secrets
         run: |
