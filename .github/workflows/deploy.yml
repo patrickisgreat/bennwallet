@@ -216,7 +216,7 @@ jobs:
 
           # Create 2 volumes in the sjc region as required
           echo "Creating volume bennwallet_prod_data in sjc region..."
-          flyctl volume create bennwallet_prod_data -r sjc -n 2 --size 1 --app ${{ env.FLY_PROD_APP_NAME }} || true
+          flyctl volume create bennwallet_prod_data -r sjc -n 2 --size 1 -a ${{ env.FLY_PROD_APP_NAME }} -y || true
 
           # List current volumes to verify
           echo "Current volumes:"
@@ -229,21 +229,22 @@ jobs:
           # Check if Postgres MPG database exists
           if ! flyctl mpg list 2>/dev/null | grep -q "bennwallet-prod-db"; then
             echo "Creating Managed PostgreSQL database cluster..."
-            flyctl mpg create \
+            # Create in non-interactive mode by setting CI=true
+            CI=true flyctl mpg create \
               -n bennwallet-prod-db \
               -r sjc \
               --plan production \
               -o personal \
               --nodes 1 \
-              --volume-size 10 \
-              --yes
+              --volume-size 10
           else
             echo "Managed PostgreSQL database cluster already exists."
           fi
           
           # Attach the database to the app (will do nothing if already attached)
           echo "Attaching Managed PostgreSQL to the app..."
-          flyctl mpg attach bennwallet-prod-db -a ${{ env.FLY_PROD_APP_NAME }} --yes || true
+          # Use -y for confirmation in attach command
+          flyctl mpg attach bennwallet-prod-db -a ${{ env.FLY_PROD_APP_NAME }} -y || true
       
       - name: Ensure DATABASE_URL is always correctly set
         run: |

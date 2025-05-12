@@ -135,11 +135,11 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-      - name: Check if volume exists and create if needed
+      - name: Ensure volume is created (will not recreate if it exists)
         run: |
           if ! flyctl volumes list --app "${{ env.APP_NAME }}" | grep -q "${{ env.VOLUME_NAME }}"; then
             echo "Creating volume ${{ env.VOLUME_NAME }}..."
-            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1 --yes
+            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1 -y
           else
             echo "Volume ${{ env.VOLUME_NAME }} already exists"
           fi
