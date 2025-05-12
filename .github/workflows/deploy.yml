@@ -162,6 +162,15 @@ jobs:
             fi
           done
 
+      # Attach the Postgres database to the app using the official method
+      - name: Attach Postgres to App
+        run: |
+          echo "Attaching Postgres database to the application..."
+          # Create app if it doesn't exist yet to ensure we can attach to it
+          flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal || echo "App already exists, continuing..."
+          # Attach the database
+          flyctl postgres attach "${{ env.FLY_PROD_DB_NAME }}" --app "${{ env.FLY_PROD_APP_NAME }}" -y
+
   deploy-app:
     needs: [build, deploy-db]
     runs-on: ubuntu-latest

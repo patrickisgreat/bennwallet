@@ -1,0 +1,176 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [aws-main, aws-dev]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+  TF_VERSION: '1.6.0'
+  AWS_REGION: 'us-west-2' # Update to your preferred region
+
+permissions:
+  id-token: write # Required for AWS OIDC auth
+  contents: read
+  deployments: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      image_tag: ${{ steps.set-env.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set environment variables
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/aws-main" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "VITE_API_URL=https://api.bennwallet.com" > .env
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "VITE_API_URL=https://dev-api.bennwallet.com" > .env
+          fi
+          
+          # Generate image tag from commit SHA
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          echo "image_tag=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/
+          retention-days: 1
+
+  deploy-infrastructure:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.build.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/
+      
+      - name: Initialize Terraform
+        working-directory: terraform/environments/${{ needs.build.outputs.environment }}
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: terraform/environments/${{ needs.build.outputs.environment }}
+        run: |
+          terraform plan \
+            -var="aws_account_id=${{ secrets.AWS_ACCOUNT_ID }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="ynab_api_token=${{ secrets.YNAB_API_TOKEN }}" \
+            -var="ynab_budget_id=${{ secrets.YNAB_BUDGET_ID }}" \
+            -var="ynab_account_id=${{ secrets.YNAB_ACCOUNT_ID }}" \
+            -var="firebase_credentials='${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}'" \
+            -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: terraform/environments/${{ needs.build.outputs.environment }}
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Get ECR Repository URL
+        id: get-ecr
+        working-directory: terraform/environments/${{ needs.build.outputs.environment }}
+        run: |
+          ECR_REPO_URL=$(terraform output -raw ecr_repository_url)
+          echo "ecr_repo_url=${ECR_REPO_URL}" >> $GITHUB_OUTPUT
+    
+    outputs:
+      ecr_repo_url: ${{ steps.get-ecr.outputs.ecr_repo_url }}
+
+  build-and-push-image:
+    needs: [build, deploy-infrastructure]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.build.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          ECR_REPOSITORY_URL: ${{ needs.deploy-infrastructure.outputs.ecr_repo_url }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        run: |
+          docker build -t $ECR_REPOSITORY_URL:$IMAGE_TAG -t $ECR_REPOSITORY_URL:latest .
+          docker push $ECR_REPOSITORY_URL:$IMAGE_TAG
+          docker push $ECR_REPOSITORY_URL:latest
+      
+      - name: Force ECS service update
+        run: |
+          aws ecs update-service --cluster bennwallet-${{ needs.build.outputs.environment }} \
+            --service bennwallet-${{ needs.build.outputs.environment }} \
+            --force-new-deployment
+      
+      - name: Wait for ECS service to be stable
+        run: |
+          aws ecs wait services-stable \
+            --cluster bennwallet-${{ needs.build.outputs.environment }} \
+            --services bennwallet-${{ needs.build.outputs.environment }}
+      
+      - name: Run database migrations
+        run: |
+          echo "Running database migrations via ECS task..."
+          aws ecs run-task \
+            --cluster bennwallet-${{ needs.build.outputs.environment }} \
+            --task-definition bennwallet-${{ needs.build.outputs.environment }} \
+            --overrides '{"containerOverrides": [{"name": "bennwallet-${{ needs.build.outputs.environment }}", "command": ["./bennwallet", "migrate"]}]}' \
+            --network-configuration "awsvpcConfiguration={subnets=[$(aws ecs describe-services --cluster bennwallet-${{ needs.build.outputs.environment }} --services bennwallet-${{ needs.build.outputs.environment }} --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets' --output text | tr '\t' ',')],securityGroups=[$(aws ecs describe-services --cluster bennwallet-${{ needs.build.outputs.environment }} --services bennwallet-${{ needs.build.outputs.environment }} --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups[]' --output text)],assignPublicIp=ENABLED}" \
+            --launch-type FARGATE 

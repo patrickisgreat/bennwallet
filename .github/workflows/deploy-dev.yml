@@ -188,6 +188,15 @@ jobs:
           flyctl ssh console -a ${{ env.FLY_DEV_DB_NAME }} -C "psql -U postgres -c 'CREATE DATABASE bennwallet;'"
           echo "Database reset completed!"
 
+      # Attach the Postgres database to the app using the official method
+      - name: Attach Postgres to App
+        run: |
+          echo "Attaching Postgres database to the application..."
+          # Create app if it doesn't exist yet to ensure we can attach to it
+          flyctl apps create "${{ env.FLY_DEV_APP_NAME }}" --org personal || echo "App already exists, continuing..."
+          # Attach the database
+          flyctl postgres attach "${{ env.FLY_DEV_DB_NAME }}" --app "${{ env.FLY_DEV_APP_NAME }}" -y
+
   deploy-app:
     needs: [build, deploy-db]
     runs-on: ubuntu-latest
