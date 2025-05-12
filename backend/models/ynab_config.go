@@ -518,26 +518,21 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 		var query string
 		var args []interface{}
 
-		if columnsMap["encrypted_api_token"] {
-			// Use encrypted columns
-			query = `
-				UPDATE ynab_config
-				SET encrypted_api_token = $1,
-					encrypted_budget_id = $2,
-					encrypted_account_id = $3
-				WHERE user_id = $4
-			`
-			args = []interface{}{encryptedToken, encryptedBudgetID, encryptedAccountID, userID}
-		} else {
-			// Use regular columns
-			query = `
-				UPDATE ynab_config
-				SET api_token = $1,
-					budget_id = $2,
-					account_id = $3
-				WHERE user_id = $4
-			`
-			args = []interface{}{encryptedToken, encryptedBudgetID, encryptedAccountID, userID}
+		// Always update both column sets to ensure compatibility
+		query = `
+			UPDATE ynab_config
+			SET encrypted_api_token = $1,
+				encrypted_budget_id = $2,
+				encrypted_account_id = $3,
+				api_token = $4,
+				budget_id = $5,
+				account_id = $6
+			WHERE user_id = $7
+		`
+		args = []interface{}{
+			encryptedToken, encryptedBudgetID, encryptedAccountID, // Encrypted columns
+			encryptedToken, encryptedBudgetID, encryptedAccountID, // Regular columns (using encrypted values)
+			userID,
 		}
 
 		_, err = db.Exec(query, args...)
@@ -549,22 +544,17 @@ func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string
 		var query string
 		var args []interface{}
 
-		if columnsMap["encrypted_api_token"] {
-			// Use encrypted columns
-			query = `
-				INSERT INTO ynab_config
-				(user_id, encrypted_api_token, encrypted_budget_id, encrypted_account_id)
-				VALUES ($1, $2, $3, $4)
-			`
-			args = []interface{}{userID, encryptedToken, encryptedBudgetID, encryptedAccountID}
-		} else {
-			// Use regular columns
-			query = `
-				INSERT INTO ynab_config
-				(user_id, api_token, budget_id, account_id)
-				VALUES ($1, $2, $3, $4)
-			`
-			args = []interface{}{userID, encryptedToken, encryptedBudgetID, encryptedAccountID}
+		// Always insert to both column sets to ensure compatibility
+		query = `
+			INSERT INTO ynab_config
+			(user_id, encrypted_api_token, encrypted_budget_id, encrypted_account_id, 
+			 api_token, budget_id, account_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`
+		args = []interface{}{
+			userID,
+			encryptedToken, encryptedBudgetID, encryptedAccountID, // Encrypted columns
+			encryptedToken, encryptedBudgetID, encryptedAccountID, // Regular columns (using encrypted values)
 		}
 
 		_, err = db.Exec(query, args...)
