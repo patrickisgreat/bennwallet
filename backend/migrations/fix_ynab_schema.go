@@ -141,6 +141,77 @@ func FixYNABSchema(db *sql.DB) error {
 		log.Println("Successfully removed NOT NULL constraints")
 	}
 
+	// Check if we need to handle a foreign key constraint
+	var hasForeignKey bool
+	err = db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.table_constraints 
+			WHERE constraint_name = 'ynab_config_user_id_fkey' 
+			AND table_name = 'ynab_config'
+		)
+	`).Scan(&hasForeignKey)
+
+	if err != nil {
+		log.Printf("Error checking for foreign key constraint: %v", err)
+	} else if hasForeignKey {
+		log.Println("Found foreign key constraint on user_id, checking for orphaned records...")
+
+		// Check if we have any entries that would violate the constraint
+		rows, err := db.Query(`
+			SELECT y.user_id
+			FROM ynab_config y
+			LEFT JOIN users u ON y.user_id = u.id
+			WHERE u.id IS NULL
+		`)
+
+		if err != nil {
+			log.Printf("Error checking for orphaned records: %v", err)
+		} else {
+			// Create users for any orphaned records
+			tx, err := db.Begin()
+			if err != nil {
+				log.Printf("Error starting transaction: %v", err)
+			} else {
+				orphanedUsers := make([]string, 0)
+				for rows.Next() {
+					var userID string
+					if err := rows.Scan(&userID); err != nil {
+						log.Printf("Error scanning user ID: %v", err)
+						continue
+					}
+					orphanedUsers = append(orphanedUsers, userID)
+				}
+				rows.Close()
+
+				if len(orphanedUsers) > 0 {
+					log.Printf("Found %d orphaned records, creating users...", len(orphanedUsers))
+
+					for _, userID := range orphanedUsers {
+						_, err = tx.Exec(`
+							INSERT INTO users (id, username, name, role)
+							VALUES ($1, $2, $3, 'user')
+							ON CONFLICT (id) DO NOTHING
+						`, userID, fmt.Sprintf("user_%s", userID), fmt.Sprintf("User %s", userID))
+
+						if err != nil {
+							log.Printf("Error creating user for orphaned record: %v", err)
+						}
+					}
+
+					if err := tx.Commit(); err != nil {
+						log.Printf("Error committing transaction: %v", err)
+						tx.Rollback()
+					} else {
+						log.Println("Successfully created users for orphaned records")
+					}
+				} else {
+					log.Println("No orphaned records found")
+					tx.Rollback()
+				}
+			}
+		}
+	}
+
 	// Now run the normal schema fix function
 	err = models.FixYNABTableSchema(db)
 	if err != nil {

@@ -95,6 +95,16 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 			}
 		} else {
 			log.Printf("Skipping already applied migration: %s", migration.name)
+
+			// Special case for fix_ynab_schema - we want to run this again even if it's been applied
+			// to handle any foreign key issues that might have occurred in production
+			if migration.name == "fix_ynab_schema" {
+				log.Printf("Running fix_ynab_schema again to ensure database is properly configured...")
+				err := migration.fn(db)
+				if err != nil {
+					return fmt.Errorf("failed to reapply migration %s: %w", migration.name, err)
+				}
+			}
 		}
 	}
 
