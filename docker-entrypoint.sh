@@ -39,6 +39,28 @@ if [[ -n "$DATABASE_URL" || -n "$DB_HOST" ]]; then
   fi
   
   echo "PostgreSQL setup complete."
+  
+  # Auto-run migrations only in production, unless disabled
+  if [[ "$NODE_ENV" == "production" || "$APP_ENV" == "production" ]] && [[ "$SKIP_AUTO_MIGRATIONS" != "true" ]]; then
+    echo "Production environment detected, checking for pending migrations..."
+    
+    # Run a dry-run first to see if any migrations are pending
+    PENDING_MIGRATIONS=$(/app/bennwallet migrate --dry-run | grep -c "would be applied" || true)
+    
+    if [[ "$PENDING_MIGRATIONS" -gt 0 ]]; then
+      echo "Found $PENDING_MIGRATIONS pending migrations. Applying them now..."
+      /app/bennwallet migrate
+      
+      if [ $? -ne 0 ]; then
+        echo "⚠️ Warning: Migration failed, but continuing application startup."
+        echo "Please check the logs and run migrations manually if needed."
+      else
+        echo "✅ Migrations completed successfully."
+      fi
+    else
+      echo "✅ Database schema is up to date. No migrations needed."
+    fi
+  fi
 fi
 
 # Run the application
