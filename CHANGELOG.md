@@ -1,3 +1,9 @@
+## [1.3.21](https://github.com/patrickisgreat/bennwallet/compare/v1.3.20...v1.3.21) (2025-05-12)
+
+### Bug Fixes
+
+* deployments ([30f03db](https://github.com/patrickisgreat/bennwallet/commit/30f03db0313d78ecba18e19f0bfca549571f9205))
+
 ## [1.3.20](https://github.com/patrickisgreat/bennwallet/compare/v1.3.19...v1.3.20) (2025-05-12)
 
 ### Bug Fixes
