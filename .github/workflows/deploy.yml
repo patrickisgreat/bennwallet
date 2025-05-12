@@ -222,32 +222,40 @@ jobs:
           echo "Current volumes:"
           flyctl volumes list --app ${{ env.FLY_PROD_APP_NAME }}
 
-      - name: Check and setup PostgreSQL
+      - name: Check and setup Managed PostgreSQL
         run: |
-          echo "Checking for PostgreSQL database..."
+          echo "Checking for Managed PostgreSQL database..."
           
-          # Check if bennwallet-prod-db exists
-          if ! flyctl postgres list | grep -q "bennwallet-prod-db"; then
-            echo "Creating PostgreSQL database cluster..."
-            flyctl postgres create --name bennwallet-prod-db --org personal --region sjc --vm-size shared-cpu-1x --volume-size 1
+          # Check if Postgres MPG database exists
+          if ! flyctl mpg list 2>/dev/null | grep -q "bennwallet-prod-db"; then
+            echo "Creating Managed PostgreSQL database cluster..."
+            flyctl mpg create bennwallet-prod-db \
+              --region sjc \
+              --initial-cluster-size dedicated-cpu-1x \
+              --organization personal \
+              --vm-size dedicated-cpu-1x \
+              --volume-size 10 \
+              --yes
           else
-            echo "PostgreSQL database cluster already exists."
+            echo "Managed PostgreSQL database cluster already exists."
           fi
           
           # Attach the database to the app (will do nothing if already attached)
-          echo "Attaching PostgreSQL to the app..."
-          flyctl postgres attach bennwallet-prod-db --app ${{ env.FLY_PROD_APP_NAME }} || true
+          echo "Attaching Managed PostgreSQL to the app..."
+          flyctl mpg attach bennwallet-prod-db -a ${{ env.FLY_PROD_APP_NAME }} --yes || true
       
       - name: Ensure DATABASE_URL is always correctly set
         run: |
           echo "Making sure database connection is properly configured..."
-          # Get the current database connection string, regardless of prior attachment
-          CONNECTION_STRING=$(flyctl postgres connect -a bennwallet-prod-db --postgres-url)
           
-          # Always explicitly set the DATABASE_URL secret for the app
-          flyctl secrets set DATABASE_URL="$CONNECTION_STRING" -a ${{ env.FLY_PROD_APP_NAME }}
-          
-          echo "Database connection URL has been explicitly set"
+          # For MPG, the connection string is set automatically during attachment
+          # But we can confirm it's properly set by checking secrets
+          echo "Verifying DATABASE_URL secret exists..."
+          if ! flyctl secrets list -a ${{ env.FLY_PROD_APP_NAME }} | grep -q "DATABASE_URL"; then
+            echo "Warning: DATABASE_URL secret not found. This should have been set by the mpg attach command."
+          else
+            echo "DATABASE_URL secret is properly set."
+          fi
 
       - name: Set YNAB secrets
         run: |
