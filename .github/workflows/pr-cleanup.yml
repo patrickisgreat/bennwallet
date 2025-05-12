@@ -33,11 +33,11 @@ jobs:
             echo "APP_EXISTS=false" >> $GITHUB_ENV
           fi
 
-      - name: Destroy PR environment
+      - name: Destroy PR app
         if: env.APP_EXISTS == 'true'
         run: |
-          echo "Destroying PR environment: ${{ env.APP_NAME }}"
-          flyctl apps destroy "${{ env.APP_NAME }}" --yes
+          echo "Destroying app ${{ env.APP_NAME }}..."
+          flyctl apps destroy "${{ env.APP_NAME }}" -y
 
       - name: Comment on PR
         uses: actions/github-script@v7
