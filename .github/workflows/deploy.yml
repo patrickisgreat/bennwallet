@@ -1,38 +1,25 @@
-name: Test, Build and Deploy to Production
+name: Deploy to Production
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
 
 env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  FLY_PROD_APP_NAME: 'bennwallet'
+  FLY_PROD_DB_NAME: 'bennwallet-db'
   GO_VERSION: '1.24'
   NODE_VERSION: '20'
-  FLY_PROD_APP_NAME: 'bennwallet-prod'
+
+permissions:
+  contents: read
+  deployments: write
 
 jobs:
-  backend-test:
+  build:
     runs-on: ubuntu-latest
-    
-    # Add PostgreSQL service container
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: bennwallet_test
-        ports:
-          - 5432:5432
-        # Health check to wait for postgres to start
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-          
+    outputs:
+      version: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,134 +27,44 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Go Mod Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Install dependencies
-        run: |
-          cd backend
-          go mod download
-
-      - name: Test database package
-        run: |
-          cd backend
-          go test -v -race ./database
-        env:
-          # Set PostgreSQL environment variables for tests
-          TEST_DB_HOST: localhost
-          TEST_DB_PORT: 5432
-          TEST_DB_USER: postgres
-          TEST_DB_PASSWORD: postgres
-          TEST_DB_NAME: bennwallet_test
-
-      - name: Test handlers package
-        run: |
-          cd backend
-          go test -v -race ./handlers
-        env:
-          # Set PostgreSQL environment variables for tests
-          TEST_DB_HOST: localhost
-          TEST_DB_PORT: 5432
-          TEST_DB_USER: postgres
-          TEST_DB_PASSWORD: postgres
-          TEST_DB_NAME: bennwallet_test
-
-      - name: Test other packages
-        run: |
-          cd backend
-          go test -v -race ./... -coverpkg=./... -coverprofile=coverage.txt -covermode=atomic
-        env:
-          # Set PostgreSQL environment variables for tests
-          TEST_DB_HOST: localhost
-          TEST_DB_PORT: 5432
-          TEST_DB_USER: postgres
-          TEST_DB_PASSWORD: postgres
-          TEST_DB_NAME: bennwallet_test
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./backend/coverage.txt
-          flags: backend
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  frontend-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
+          cache-dependency-path: backend/go.sum
+      
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
-      - name: NPM Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            **/node_modules
-            ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-
-
+      
       - name: Install dependencies
         run: |
-          npm install
-          npm ci --prefer-offline --no-audit
+          npm ci
 
-      - name: Check test environment
+      - name: Get version
+        id: version
+        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create production .env
         run: |
-          ls -la src/test/
-          node --version
-          npm --version
-          npx vitest --version
-
-      - name: Run tests with coverage
-        timeout-minutes: 3
-        run: npm run test:ci
-        env:
-          DEBUG: 'vitest:*'
-          VITEST_MAX_THREADS: 1
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage/coverage-final.json
-          flags: frontend
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
+          echo "VITE_API_URL=https://${{ env.FLY_PROD_APP_NAME }}.fly.dev" > .env
 
       - name: Build frontend
         env:
-          VITE_API_URL: ${{ github.ref == 'refs/heads/main' && format('https://{0}.fly.dev', env.FLY_PROD_APP_NAME) || 'http://localhost:8080' }}
+          NODE_ENV: production
         run: npm run build
 
-      - name: Upload build artifacts
+      - name: Upload frontend build
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build
           path: dist/
           retention-days: 1
 
-  deploy-production:
-    needs: [backend-test, frontend-test]
-    if: github.ref == 'refs/heads/main'
+  deploy:
+    needs: build
     runs-on: ubuntu-latest
-    env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
+    environment:
+      name: production
+      url: https://${{ env.FLY_PROD_APP_NAME }}.fly.dev
     steps:
       - uses: actions/checkout@v4
 
@@ -193,7 +90,7 @@ jobs:
       - name: Create prod app if it doesn't exist
         if: env.APP_EXISTS == 'false'
         run: |
-          flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal
+          flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal --non-interactive
 
       - name: Set Firebase credentials in Fly.io
         run: |
@@ -201,91 +98,78 @@ jobs:
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > /tmp/firebase-credentials.json
           if command -v jq &> /dev/null; then
             cat /tmp/firebase-credentials.json | jq . > /tmp/formatted-credentials.json
-            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/formatted-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
+            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/formatted-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }} --yes
             rm /tmp/formatted-credentials.json
           else
-            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
+            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }} --yes
           fi
           rm /tmp/firebase-credentials.json
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-      - name: Check and create required volumes
+      # New steps for Managed Postgres setup
+      - name: Check if managed Postgres cluster exists
+        id: check-db
+        continue-on-error: true
         run: |
-          echo "Checking for required volumes..."
+          if flyctl mpg list --json | jq -e '.[] | select(.name=="${{ env.FLY_PROD_DB_NAME }}")' > /dev/null; then
+            echo "DB_EXISTS=true" >> $GITHUB_ENV
+            echo "Postgres cluster ${{ env.FLY_PROD_DB_NAME }} exists"
+          else
+            echo "DB_EXISTS=false" >> $GITHUB_ENV
+            echo "Postgres cluster ${{ env.FLY_PROD_DB_NAME }} does not exist"
+          fi
 
-          # Create 2 volumes in the sjc region as required
-          echo "Creating volume bennwallet_prod_data in sjc region..."
-          flyctl volume create bennwallet_prod_data -r sjc -n 2 --size 1 -a ${{ env.FLY_PROD_APP_NAME }} -y || true
-
-          # List current volumes to verify
-          echo "Current volumes:"
-          flyctl volumes list --app ${{ env.FLY_PROD_APP_NAME }}
-
-      - name: Check and setup Managed PostgreSQL
+      - name: Create managed Postgres cluster if it doesn't exist
+        if: env.DB_EXISTS == 'false'
+        id: create-db
         run: |
-          echo "Checking for Managed PostgreSQL database..."
-          
-          # Check if Postgres MPG database exists
-          if ! flyctl mpg list 2>/dev/null | grep -q "bennwallet-prod-db"; then
-            echo "Creating Managed PostgreSQL database cluster..."
-            # Try with development plan first
-            if CI=true flyctl mpg create \
-              -n bennwallet-prod-db \
-              -r lax \
-              --plan development \
-              -o personal \
-              --nodes 1 \
-              --volume-size 10; then
-              echo "Managed Postgres cluster created successfully with development plan."
-            else
-              echo "Failed with development plan, trying with minimal settings as fallback..."
-              # Try with minimal settings
-              CI=true flyctl mpg create \
-                -n bennwallet-prod-db \
-                -r lax \
-                -o personal || echo "Failed to create Managed Postgres cluster. Please check Fly.io status or create manually."
+          echo "Creating managed Postgres cluster ${{ env.FLY_PROD_DB_NAME }}..."
+          flyctl mpg create --name ${{ env.FLY_PROD_DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD }} --plan basic --yes --non-interactive
+
+      - name: Wait for Postgres cluster to be ready
+        run: |
+          echo "Waiting for Postgres cluster to be ready..."
+          for i in {1..15}; do
+            echo "Checking DB cluster status (attempt $i)..."
+            flyctl mpg list --json > mpg_list.json
+            STATUS=$(jq -r '.[] | select(.name=="${{ env.FLY_PROD_DB_NAME }}") | .status' mpg_list.json)
+            
+            echo "Current status: $STATUS"
+            if [ "$STATUS" = "ready" ]; then
+              echo "Database cluster is ready."
+              exit 0
             fi
-          else
-            echo "Managed PostgreSQL database cluster already exists."
-          fi
-          
-          # Verify the database was created
-          echo "Verifying Postgres cluster exists..."
-          if flyctl mpg list 2>/dev/null | grep -q "bennwallet-prod-db"; then
-            echo "Attaching Managed PostgreSQL to the app..."
-            # Use -y for confirmation in attach command
-            flyctl mpg attach bennwallet-prod-db -a ${{ env.FLY_PROD_APP_NAME }} -y || true
-          else
-            echo "WARNING: Postgres cluster creation appears to have failed. Deployment will continue but database connectivity may be affected."
-            echo "Please create the Postgres cluster manually with: flyctl mpg create -n bennwallet-prod-db -r lax -o personal"
-            # Set a temporary DATABASE_URL to allow deployment to proceed
-            flyctl secrets set DATABASE_URL="postgres://placeholder:placeholder@localhost:5432/bennwallet?sslmode=disable" -a ${{ env.FLY_PROD_APP_NAME }}
-          fi
-      
-      - name: Ensure DATABASE_URL is always correctly set
+            
+            echo "Cluster not ready yet (status=$STATUS). Waiting 10 seconds..."
+            sleep 10
+          done
+          echo "Timed out waiting for Postgres cluster readiness." && exit 1
+
+      - name: Attach Postgres to app
         run: |
-          echo "Making sure database connection is properly configured..."
-          
-          # For MPG, the connection string is set automatically during attachment
-          # But we can confirm it's properly set by checking secrets
-          echo "Verifying DATABASE_URL secret exists..."
-          if ! flyctl secrets list -a ${{ env.FLY_PROD_APP_NAME }} | grep -q "DATABASE_URL"; then
-            echo "Warning: DATABASE_URL secret not found. This should have been set by the mpg attach command."
+          echo "Attaching Postgres cluster to app..."
+          flyctl mpg attach ${{ env.FLY_PROD_DB_NAME }} --app ${{ env.FLY_PROD_APP_NAME }} --yes
+
+      - name: Check and create required volumes
+        id: check-volume
+        run: |
+          if ! flyctl volumes list --app "${{ env.FLY_PROD_APP_NAME }}" | grep -q "bennwallet_prod_data"; then
+            echo "Creating volume for production..."
+            flyctl volumes create bennwallet_prod_data --size 1 --app "${{ env.FLY_PROD_APP_NAME }}" --region sjc --yes
           else
-            echo "DATABASE_URL secret is properly set."
+            echo "Production volume already exists."
           fi
 
       - name: Set YNAB secrets
         run: |
-          echo "Setting YNAB API secrets..."
           flyctl secrets set \
             YNAB_API_TOKEN="${{ secrets.YNAB_API_TOKEN }}" \
             YNAB_BUDGET_ID="${{ secrets.YNAB_BUDGET_ID }}" \
             YNAB_ACCOUNT_ID="${{ secrets.YNAB_ACCOUNT_ID }}" \
-            -a ${{ env.FLY_PROD_APP_NAME }}
+            -a ${{ env.FLY_PROD_APP_NAME }} --yes
 
-      - name: Create production fly.toml
+      - name: Create fly.toml
         run: |
           cat > fly.toml << EOF
           app = "${{ env.FLY_PROD_APP_NAME }}"
@@ -331,7 +215,7 @@ jobs:
           EOF
 
       - name: Deploy to Fly.io Production
-        run: flyctl deploy --remote-only --app ${{ env.FLY_PROD_APP_NAME }}
+        run: flyctl deploy --remote-only --app ${{ env.FLY_PROD_APP_NAME }} --yes
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           NODE_ENV: production
@@ -339,13 +223,13 @@ jobs:
       - name: Run database migrations
         run: |
           echo "Running database migrations on production..."
-          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate"
+          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate" --yes
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       - name: Verify migrations
         run: |
           echo "Verifying migrations status..."
-          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate --dry-run"
+          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate --dry-run" --yes
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

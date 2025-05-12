@@ -31,10 +31,13 @@ jobs:
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
           APP_NAME="bennwallet-pr-${PR_NUMBER}"
+          DB_NAME="bennwallet-pr-${PR_NUMBER}-db"
           VOLUME_NAME="bennwalletpr${PR_NUMBER}_data"
           echo "APP_NAME=${APP_NAME}" >> $GITHUB_ENV
+          echo "DB_NAME=${DB_NAME}" >> $GITHUB_ENV
           echo "VOLUME_NAME=${VOLUME_NAME}" >> $GITHUB_ENV
           echo "app_name=${APP_NAME}" >> $GITHUB_OUTPUT
+          echo "db_name=${DB_NAME}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: |
@@ -48,7 +51,7 @@ jobs:
       - name: Set up Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Create fly.toml for PR
+      - name: Create fly.toml for the PR app
         run: |
           cat > fly.toml << EOF
           app = "${{ env.APP_NAME }}"
@@ -69,7 +72,6 @@ jobs:
             PR_DEPLOYMENT = "true"
             RESET_DB = "true"
             PR_NUMBER = "${{ github.event.pull_request.number }}"
-            DATABASE_URL = "postgres://postgres:${{ secrets.DB_PASSWORD }}@${{ env.APP_NAME }}-db.internal:5432/bennwallet"
             YNAB_API_TOKEN = "${{ secrets.YNAB_API_TOKEN }}"
             YNAB_BUDGET_ID = "${{ secrets.YNAB_BUDGET_ID }}"
             YNAB_ACCOUNT_ID = "${{ secrets.YNAB_ACCOUNT_ID }}"
@@ -98,6 +100,7 @@ jobs:
       - name: Debug - Display app name and volume name
         run: |
           echo "APP_NAME: ${{ env.APP_NAME }}"
+          echo "DB_NAME: ${{ env.DB_NAME }}"
           echo "VOLUME_NAME: ${{ env.VOLUME_NAME }}"
           cat fly.toml | grep -E 'app|source'
 
@@ -115,7 +118,50 @@ jobs:
       - name: Create app if it doesn't exist
         if: env.APP_EXISTS == 'false'
         run: |
-          flyctl apps create "${{ env.APP_NAME }}" --org personal
+          flyctl apps create "${{ env.APP_NAME }}" --org personal --non-interactive
+
+      - name: Check if managed Postgres cluster exists
+        id: check-db
+        continue-on-error: true
+        run: |
+          if flyctl mpg list --json | jq -e '.[] | select(.name=="${{ env.DB_NAME }}")' > /dev/null; then
+            echo "DB_EXISTS=true" >> $GITHUB_ENV
+            echo "Postgres cluster ${{ env.DB_NAME }} exists"
+          else
+            echo "DB_EXISTS=false" >> $GITHUB_ENV
+            echo "Postgres cluster ${{ env.DB_NAME }} does not exist"
+          fi
+
+      - name: Create managed Postgres cluster if it doesn't exist
+        if: env.DB_EXISTS == 'false'
+        id: create-db
+        run: |
+          echo "Creating managed Postgres cluster ${{ env.DB_NAME }}..."
+          flyctl mpg create --name ${{ env.DB_NAME }} --region sjc --password ${{ secrets.DB_PASSWORD || 'postgres' }} --plan basic --yes --non-interactive
+
+      - name: Wait for Postgres cluster to be ready
+        run: |
+          echo "Waiting for Postgres cluster to be ready..."
+          for i in {1..15}; do
+            echo "Checking DB cluster status (attempt $i)..."
+            flyctl mpg list --json > mpg_list.json
+            STATUS=$(jq -r '.[] | select(.name=="${{ env.DB_NAME }}") | .status' mpg_list.json)
+            
+            echo "Current status: $STATUS"
+            if [ "$STATUS" = "ready" ]; then
+              echo "Database cluster is ready."
+              exit 0
+            fi
+            
+            echo "Cluster not ready yet (status=$STATUS). Waiting 10 seconds..."
+            sleep 10
+          done
+          echo "Timed out waiting for Postgres cluster readiness." && exit 1
+
+      - name: Attach Postgres to app
+        run: |
+          echo "Attaching Postgres cluster to app..."
+          flyctl mpg attach ${{ env.DB_NAME }} --app ${{ env.APP_NAME }} --yes
 
       - name: Set Firebase credentials in Fly.io
         run: |
@@ -128,7 +174,7 @@ jobs:
           EOT
 
           # Set the secret from the file
-          flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a "${{ env.APP_NAME }}"
+          flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a "${{ env.APP_NAME }}" --yes
 
           # Clean up
           rm /tmp/firebase-credentials.json
@@ -139,13 +185,13 @@ jobs:
         run: |
           if ! flyctl volumes list --app "${{ env.APP_NAME }}" | grep -q "${{ env.VOLUME_NAME }}"; then
             echo "Creating volume ${{ env.VOLUME_NAME }}..."
-            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1 -y
+            flyctl volumes create "${{ env.VOLUME_NAME }}" --app "${{ env.APP_NAME }}" --region sjc --size 1 --yes
           else
             echo "Volume ${{ env.VOLUME_NAME }} already exists"
           fi
 
       - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only --app "${{ env.APP_NAME }}"
+        run: flyctl deploy --remote-only --app "${{ env.APP_NAME }}" --yes
         env:
           NODE_ENV: development
           APP_ENV: development
