@@ -1,93 +1,15 @@
 package database
 
 import (
-	"fmt"
 	"log"
 )
 
 // RunMigrations executes necessary database migrations
 // Now simplified to create required tables for backward compatibility
 func RunMigrations() error {
-	log.Println("Migration system has been replaced with consolidated schema approach")
 	log.Println("Schema changes are now applied during database initialization")
-
-	// Ensure YNAB tables exist for backward compatibility with tests
-	createYNABTables := `
-	CREATE TABLE IF NOT EXISTS ynab_config (
-		user_id TEXT PRIMARY KEY,
-		encrypted_api_token TEXT NOT NULL
-	);
-	
-	CREATE TABLE IF NOT EXISTS user_ynab_settings (
-		user_id TEXT PRIMARY KEY REFERENCES users(id),
-		token TEXT,
-		budget_id TEXT,
-		account_id TEXT,
-		auto_import BOOLEAN DEFAULT false,
-		sync_enabled BOOLEAN DEFAULT false,
-		last_synced TIMESTAMP
-	);
-	
-	CREATE TABLE IF NOT EXISTS ynab_category_groups (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		hidden BOOLEAN DEFAULT false,
-		user_id TEXT NOT NULL REFERENCES users(id),
-		last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-	
-	CREATE TABLE IF NOT EXISTS ynab_categories (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		group_id TEXT REFERENCES ynab_category_groups(id),
-		hidden BOOLEAN DEFAULT false,
-		budget_amount DECIMAL(15,2),
-		user_id TEXT NOT NULL REFERENCES users(id),
-		last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-	`
-
-	_, err := DB.Exec(createYNABTables)
-	if err != nil {
-		log.Printf("Warning: Error creating YNAB tables: %v", err)
-	}
-
-	// Ensure columns exist that might be missing in some deployments
-	ensureColumns := []struct {
-		table  string
-		column string
-		dtype  string
-	}{
-		{"ynab_category_groups", "last_updated", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"},
-		{"ynab_categories", "last_updated", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"},
-	}
-
-	for _, col := range ensureColumns {
-		// Check if column exists
-		var exists bool
-		err := DB.QueryRow(`
-			SELECT EXISTS (
-				SELECT FROM information_schema.columns 
-				WHERE table_name = $1 AND column_name = $2
-			)
-		`, col.table, col.column).Scan(&exists)
-
-		if err != nil {
-			log.Printf("Warning: Error checking for column %s.%s: %v", col.table, col.column, err)
-			continue
-		}
-
-		if !exists {
-			log.Printf("Adding missing column %s.%s", col.table, col.column)
-			_, err := DB.Exec(fmt.Sprintf(
-				"ALTER TABLE %s ADD COLUMN %s %s",
-				col.table, col.column, col.dtype,
-			))
-			if err != nil {
-				log.Printf("Warning: Error adding column %s.%s: %v", col.table, col.column, err)
-			}
-		}
-	}
+	log.Println("All migrations have been consolidated into the base schema")
+	log.Println("No migrations will be performed - database is created fresh")
 
 	return nil
 }
