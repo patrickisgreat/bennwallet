@@ -455,9 +455,31 @@ func FixYNABTableSchema(db *sql.DB) error {
 func UpsertYNABConfig(db *sql.DB, config *YNABConfigUpdateRequest, userID string) error {
 	log.Printf("Upserting YNAB config for user %s", userID)
 
+	// First ensure the user exists in the users table
+	var userExists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID).Scan(&userExists)
+	if err != nil {
+		log.Printf("Error checking if user exists: %v", err)
+		// Continue anyway - the constraint will catch this if needed
+	} else if !userExists {
+		log.Printf("User %s does not exist in users table, creating dummy user", userID)
+
+		// Create a dummy user to satisfy the foreign key constraint
+		_, err = db.Exec(`
+			INSERT INTO users (id, username, name, role) 
+			VALUES ($1, $2, $3, 'user')
+			ON CONFLICT (id) DO NOTHING
+		`, userID, fmt.Sprintf("user_%s", userID), fmt.Sprintf("User %s", userID))
+
+		if err != nil {
+			log.Printf("Error creating dummy user: %v", err)
+			return fmt.Errorf("error creating user entry: %w", err)
+		}
+	}
+
 	// Ensure the tables exist first
 	var tablesExist bool
-	err := db.QueryRow(`
+	err = db.QueryRow(`
 		SELECT EXISTS (
 			SELECT FROM information_schema.tables 
 			WHERE table_schema = 'public' 
