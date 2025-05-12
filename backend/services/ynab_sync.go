@@ -154,20 +154,22 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 
 	// Prepare statements for better performance
 	stmtCategoryGroup, err := tx.Prepare(`
-		INSERT INTO ynab_category_groups (id, name, user_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $4)
+		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, created_at, updated_at)
+		VALUES ($1, $2, $1, $3, $4, $4)
 		ON CONFLICT (id) DO UPDATE SET
 		name = $2,
+		category_group_id = $1,
 		updated_at = $4
 	`)
 	if err != nil {
 		if strings.Contains(err.Error(), "last_updated") {
 			// Try with created_at/updated_at instead
 			stmtCategoryGroup, err = tx.Prepare(`
-				INSERT INTO ynab_category_groups (id, name, user_id, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $4)
+				INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, created_at, updated_at)
+				VALUES ($1, $2, $1, $3, $4, $4)
 				ON CONFLICT (id) DO UPDATE SET
 				name = $2,
+				category_group_id = $1,
 				updated_at = $4
 			`)
 		}
@@ -215,7 +217,7 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 		}
 
 		// Insert or update category group
-		_, err = stmtCategoryGroup.Exec(group.ID, group.Name, userID, syncTime, syncTime)
+		_, err = stmtCategoryGroup.Exec(group.ID, group.Name, userID, syncTime)
 		if err != nil {
 			log.Printf("DEBUG: Error inserting category group %s: %v", group.ID, err)
 			return fmt.Errorf("error inserting category group: %w", err)
