@@ -183,6 +183,10 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 
 	// Create request to YNAB API
 	url := fmt.Sprintf("https://api.youneedabudget.com/v1/budgets/%s/transactions", budgetID)
+
+	// Log debug info about this request
+	security.LogYNABAPIRequest(url, token, budgetID, accountID)
+
 	payload := struct {
 		Transaction YNABTransaction `json:"transaction"`
 	}{
