@@ -1,3 +1,9 @@
+## [1.3.7](https://github.com/patrickisgreat/bennwallet/compare/v1.3.6...v1.3.7) (2025-05-12)
+
+### Bug Fixes
+
+* postgres issues ([3230302](https://github.com/patrickisgreat/bennwallet/commit/32303023be685e1387958235e54f7ceaa670b100))
+
 ## [1.3.6](https://github.com/patrickisgreat/bennwallet/compare/v1.3.5...v1.3.6) (2025-05-12)
 
 ### Bug Fixes
