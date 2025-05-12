@@ -17,22 +17,6 @@ func TestStoreAndGetSecret(t *testing.T) {
 	database.DB = testDB
 	defer func() { database.DB = oldDB }()
 
-	// Create test tables
-	_, err := testDB.Exec(`
-		DROP TABLE IF EXISTS user_ynab_settings CASCADE;
-		CREATE TABLE user_ynab_settings (
-			user_id TEXT PRIMARY KEY,
-			token TEXT,
-			budget_id TEXT,
-			account_id TEXT,
-			sync_enabled BOOLEAN DEFAULT false,
-			last_synced TIMESTAMP
-		)
-	`)
-	if err != nil {
-		t.Fatalf("Failed to create test table: %v", err)
-	}
-
 	// Test cases
 	testCases := []struct {
 		name      string
@@ -53,8 +37,18 @@ func TestStoreAndGetSecret(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Ensure the user exists (required by foreign key constraint)
+			_, err := testDB.Exec(`
+				INSERT INTO users (id, username, name, role)
+				VALUES ($1, $2, $3, $4)
+				ON CONFLICT (id) DO NOTHING
+			`, tc.userID, "user_"+tc.userID, "User "+tc.userID, "user")
+			if err != nil {
+				t.Fatalf("Failed to create test user: %v", err)
+			}
+
 			// Store a secret
-			err := StoreSecret(tc.userID, SecretYNABToken, tc.secretVal)
+			err = StoreSecret(tc.userID, SecretYNABToken, tc.secretVal)
 			if err != nil {
 				t.Fatalf("Failed to store secret: %v", err)
 			}
@@ -83,22 +77,6 @@ func TestStoreSecretWithFlyEnv(t *testing.T) {
 	database.DB = testDB
 	defer func() { database.DB = oldDB }()
 
-	// Create test tables
-	_, err := testDB.Exec(`
-		DROP TABLE IF EXISTS user_ynab_settings CASCADE;
-		CREATE TABLE user_ynab_settings (
-			user_id TEXT PRIMARY KEY,
-			token TEXT,
-			budget_id TEXT,
-			account_id TEXT,
-			sync_enabled BOOLEAN DEFAULT false,
-			last_synced TIMESTAMP
-		)
-	`)
-	if err != nil {
-		t.Fatalf("Failed to create test table: %v", err)
-	}
-
 	// Set FLY_APP_NAME environment variable
 	oldFlyAppName := os.Getenv("FLY_APP_NAME")
 	os.Setenv("FLY_APP_NAME", "test-app")
@@ -108,10 +86,21 @@ func TestStoreSecretWithFlyEnv(t *testing.T) {
 	userID := "testuser3"
 	secretVal := "fly-secret-token"
 
+	// Ensure the user exists (required by foreign key constraint)
+	_, err := testDB.Exec(`
+		INSERT INTO users (id, username, name, role)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO NOTHING
+	`, userID, "user_"+userID, "User "+userID, "user")
+	if err != nil {
+		t.Fatalf("Failed to create test user: %v", err)
+	}
+
 	// Insert a row first - needed since fly.io mode doesn't actually store in DB
 	_, err = testDB.Exec(`
 		INSERT INTO user_ynab_settings (user_id, token, budget_id, account_id)
 		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id) DO UPDATE SET token = $2
 	`, userID, "stored in fly.io secrets", "", "")
 	if err != nil {
 		t.Fatalf("Failed to insert initial row: %v", err)
@@ -145,21 +134,7 @@ func TestUpdateYNABSettings(t *testing.T) {
 	database.DB = testDB
 	defer func() { database.DB = oldDB }()
 
-	// Create test tables
-	_, err := testDB.Exec(`
-		DROP TABLE IF EXISTS user_ynab_settings CASCADE;
-		CREATE TABLE user_ynab_settings (
-			user_id TEXT PRIMARY KEY,
-			token TEXT,
-			budget_id TEXT,
-			account_id TEXT,
-			sync_enabled BOOLEAN DEFAULT false,
-			last_synced TIMESTAMP
-		)
-	`)
-	if err != nil {
-		t.Fatalf("Failed to create test table: %v", err)
-	}
+	// No need to create tables - SetupTestDB already creates them with the correct schema
 
 	// Test updating YNAB settings
 	userID := "testuser4"
@@ -167,6 +142,16 @@ func TestUpdateYNABSettings(t *testing.T) {
 	budgetID := "budget-123"
 	accountID := "account-456"
 	syncEnabled := true
+
+	// First ensure the user exists (required by foreign key constraint)
+	_, err := testDB.Exec(`
+		INSERT INTO users (id, username, name, role)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO NOTHING
+	`, userID, "testuser4", "Test User 4", "user")
+	if err != nil {
+		t.Fatalf("Failed to create test user: %v", err)
+	}
 
 	// Update settings
 	err = UpdateYNABSettings(userID, token, budgetID, accountID, syncEnabled)

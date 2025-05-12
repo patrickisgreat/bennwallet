@@ -83,9 +83,45 @@ func SetupTestDB(t testing.TB) (*sql.DB, func()) {
 		t.Fatalf("Failed to create test database connection: %v", err)
 	}
 
+	// First drop all existing tables to avoid conflicts
+	_, err = db.Exec(`
+		DO $$ 
+		DECLARE
+			r RECORD;
+		BEGIN
+			-- Disable foreign key checks during table deletion
+			EXECUTE 'SET CONSTRAINTS ALL DEFERRED';
+			
+			-- Drop all tables in the public schema
+			FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+				EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
+			END LOOP;
+			
+			-- Re-enable foreign key checks
+			EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
+		END $$;
+	`)
+	if err != nil {
+		t.Logf("Warning: Failed to drop existing tables: %v", err)
+	}
+
 	// Create schema
 	if err := CreatePostgresSchema(db); err != nil {
 		t.Fatalf("Failed to create test schema: %v", err)
+	}
+
+	// Insert test user for foreign key constraints
+	_, err = db.Exec(`
+		INSERT INTO users (id, username, name, role, status, is_admin) 
+		VALUES 
+		('test-user-id', 'testuser', 'Test User', 'admin', 'approved', true),
+		('1', 'sarah', 'Sarah', 'admin', 'approved', true),
+		('2', 'patrick', 'Patrick', 'admin', 'approved', true),
+		('admin1', 'admin1', 'Admin One', 'admin', 'approved', true)
+		ON CONFLICT (id) DO NOTHING
+	`)
+	if err != nil {
+		t.Logf("Warning: Failed to insert test users: %v", err)
 	}
 
 	// Return the db and a cleanup function
