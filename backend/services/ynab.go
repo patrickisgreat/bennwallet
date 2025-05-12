@@ -53,6 +53,10 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 
 	// Make API request to YNAB
 	url := fmt.Sprintf("https://api.youneedabudget.com/v1/budgets/%s/categories", budgetID)
+
+	// Log debug info about this request
+	security.LogYNABAPIRequest(url, token, budgetID, "")
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
@@ -108,16 +112,29 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 
 		// Insert category group
 		_, err = tx.Exec(
-			`INSERT INTO ynab_category_groups (id, name, user_id, last_updated)
-			VALUES ($1, $2, $3, $4)
+			`INSERT INTO ynab_category_groups (id, name, user_id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $4)
 			ON CONFLICT (id) DO UPDATE SET
 			name = $2,
-			user_id = $3,
-			last_updated = $4`,
+			updated_at = $4`,
 			group.ID, group.Name, userID, now,
 		)
 		if err != nil {
-			return fmt.Errorf("error inserting category group %s: %w", group.Name, err)
+			if err.Error() == "pq: column \"last_updated\" of relation \"ynab_category_groups\" does not exist" {
+				// Try again without the last_updated column
+				_, err = tx.Exec(
+					`INSERT INTO ynab_category_groups (id, name, user_id, created_at, updated_at)
+					VALUES ($1, $2, $3, $4, $4)
+					ON CONFLICT (id) DO UPDATE SET
+					name = $2,
+					updated_at = $4`,
+					group.ID, group.Name, userID, now,
+				)
+			}
+
+			if err != nil {
+				return fmt.Errorf("error inserting category group %s: %w", group.Name, err)
+			}
 		}
 
 		// Insert categories
@@ -128,17 +145,31 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 			}
 
 			_, err = tx.Exec(
-				`INSERT INTO ynab_categories (id, group_id, name, user_id, last_updated)
-				VALUES ($1, $2, $3, $4, $5)
+				`INSERT INTO ynab_categories (id, group_id, name, user_id, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $5)
 				ON CONFLICT (id) DO UPDATE SET
 				group_id = $2,
 				name = $3,
-				user_id = $4,
-				last_updated = $5`,
+				updated_at = $5`,
 				category.ID, group.ID, category.Name, userID, now,
 			)
 			if err != nil {
-				return fmt.Errorf("error inserting category %s: %w", category.Name, err)
+				if err.Error() == "pq: column \"last_updated\" of relation \"ynab_categories\" does not exist" {
+					// Try again without the last_updated column
+					_, err = tx.Exec(
+						`INSERT INTO ynab_categories (id, group_id, name, user_id, created_at, updated_at)
+						VALUES ($1, $2, $3, $4, $5, $5)
+						ON CONFLICT (id) DO UPDATE SET
+						group_id = $2,
+						name = $3,
+						updated_at = $5`,
+						category.ID, group.ID, category.Name, userID, now,
+					)
+				}
+
+				if err != nil {
+					return fmt.Errorf("error inserting category %s: %w", category.Name, err)
+				}
 			}
 		}
 	}
