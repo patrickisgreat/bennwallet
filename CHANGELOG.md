@@ -1,3 +1,9 @@
+## [1.3.14](https://github.com/patrickisgreat/bennwallet/compare/v1.3.13...v1.3.14) (2025-05-12)
+
+### Bug Fixes
+
+* figgitty fuck ([b9ff48e](https://github.com/patrickisgreat/bennwallet/commit/b9ff48ea25953f7ea16c50b0418c67b13c558532))
+
 ## [1.3.13](https://github.com/patrickisgreat/bennwallet/compare/v1.3.12...v1.3.13) (2025-05-12)
 
 ### Bug Fixes
