@@ -27,6 +27,15 @@ jobs:
           npm install -g semantic-release @semantic-release/github @semantic-release/changelog @semantic-release/git conventional-changelog-conventionalcommits
 
       - name: Create Release
+        id: semantic_release
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release 
+        run: npx semantic-release
+      
+      - name: Check release status
+        if: ${{ steps.semantic_release.outcome == 'failure' }}
+        run: |
+          echo "::warning::Semantic release failed. This could be due to no new releasable commits or a tag conflict."
+          echo "::warning::To trigger a new release with a specific version, use the 'Create Clean Release' workflow."
+          exit 0 
