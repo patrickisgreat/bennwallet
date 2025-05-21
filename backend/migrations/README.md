@@ -127,7 +127,7 @@ The application includes functionality to automatically reset and seed the datab
 
 ## Important Notes
 
-- This functionality is deliberately disabled in production environments (when `APP_ENV=production` or `NODE_ENV=production`).
+- This functionality is deliberately disabled in production environments (when `APP_ENV=production` or `NODE_ENV=production`)..
 - The system has safeguards to prevent accidental data loss in production.
 - Test data includes sample users, transactions, categories, and permissions.
 
