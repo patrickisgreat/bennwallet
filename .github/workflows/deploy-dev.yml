@@ -79,6 +79,28 @@ jobs:
             echo "Postgres app ${{ env.FLY_DEV_DB_NAME }} does not exist"
           fi
       
+      - name: Handle existing Postgres app
+        if: env.DB_EXISTS == 'true'
+        run: |
+          echo "Postgres app exists, checking its status..."
+          APP_STATUS=$(flyctl status --app "${{ env.FLY_DEV_DB_NAME }}" | grep -o "failed\|error\|crashed\|suspended" || echo "")
+          
+          if [ -n "$APP_STATUS" ]; then
+            echo "Postgres app is in a bad state ($APP_STATUS). Will destroy and recreate it."
+            echo "DB_RECREATE=true" >> $GITHUB_ENV
+            
+            # Destroy the app with force flag
+            flyctl apps destroy "${{ env.FLY_DEV_DB_NAME }}" --force
+            
+            # Reset the DB_EXISTS flag since we just destroyed it
+            echo "DB_EXISTS=false" >> $GITHUB_ENV
+            
+            # Wait to ensure the app is fully destroyed
+            sleep 10
+          else
+            echo "Postgres app appears to be healthy, will not recreate."
+          fi
+      
       - name: Create Postgres app if it doesn't exist
         if: env.DB_EXISTS == 'false'
         run: |
@@ -90,8 +112,8 @@ jobs:
           cat > Dockerfile << EOF
           FROM postgres:14-alpine
           
-          # Health check
-          HEALTHCHECK --interval=5s --timeout=5s --start-period=5s --retries=3 \
+          # Health check with more generous timing
+          HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
             CMD pg_isready -U postgres || exit 1
           
           EXPOSE 5432
@@ -120,10 +142,10 @@ jobs:
               port = 5432
               
             [[services.tcp_checks]]
-              grace_period = "1s"
+              grace_period = "30s"
               interval = "15s"
-              restart_limit = 6
-              timeout = "2s"
+              restart_limit = 10
+              timeout = "5s"
           
           [[vm]]
             memory = "1gb"
