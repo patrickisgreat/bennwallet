@@ -101,8 +101,8 @@ jobs:
           # Install jq for JSON parsing
           sudo apt-get update && sudo apt-get install -y jq
           
-          # Extract component name using jq
-          COMPONENT_NAME=$(echo $COMPONENTS | jq -r '.spec.services[0].name')
+          # Extract component name using jq - fix for array structure
+          COMPONENT_NAME=$(echo $COMPONENTS | jq -r '.[0].spec.services[0].name')
           echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
           echo "Using component name: $COMPONENT_NAME"
 

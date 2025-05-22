@@ -106,21 +106,29 @@ jobs:
           # Install jq for JSON parsing
           sudo apt-get update && sudo apt-get install -y jq
           
-          # Get app ID
+          # Get app ID - fix array access for jq
           APP_LIST=$(doctl apps list --output json)
-          APP_ID=$(echo $APP_LIST | jq -r '.[] | select(.spec.name == "${{ env.APP_NAME }}") | .id')
+          echo "APP_LIST: $APP_LIST"
+          APP_NAME="${{ env.APP_NAME }}"
+          
+          # Extract app ID from array using jq
+          APP_ID=$(echo $APP_LIST | jq -r '.[] | select(.spec.name == "'$APP_NAME'") | .id')
           echo "Created app with ID: $APP_ID"
           echo "Add this ID to GitHub secrets as DO_APP_ID_${{ env.ENV == 'production' && 'PROD' || 'DEV' }}"
           
-          # Get database ID
+          # Get database ID - fix array access for jq
           DB_LIST=$(doctl databases list --output json)
-          DB_ID=$(echo $DB_LIST | jq -r '.[] | select(.name == "bennwallet-${{ github.event.inputs.environment }}-db") | .id')
+          echo "DB_LIST: $DB_LIST"
+          DB_NAME="bennwallet-${{ github.event.inputs.environment }}-db"
+          
+          # Extract database ID from array using jq
+          DB_ID=$(echo $DB_LIST | jq -r '.[] | select(.name == "'$DB_NAME'") | .id')
           echo "Database ID: $DB_ID"
           echo "Add this ID to GitHub secrets as DO_DB_ID_${{ env.ENV == 'production' && 'PROD' || 'DEV' }}"
           
-          # Get app URL
+          # Get app URL - fix for array access
           APP_INFO=$(doctl apps get $APP_ID --output json)
-          APP_URL=$(echo $APP_INFO | jq -r '.default_ingress')
+          APP_URL=$(echo $APP_INFO | jq -r '.[0].default_ingress')
           echo "App URL: $APP_URL"
           echo "Add this URL to GitHub secrets as ${{ env.ENV == 'production' && 'PROD' || 'DEV' }}_APP_URL"
           echo "Also add https://$APP_URL to GitHub secrets as ${{ env.ENV == 'production' && 'PROD' || 'DEV' }}_API_URL"
