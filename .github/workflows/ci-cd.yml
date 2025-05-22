@@ -111,29 +111,44 @@ jobs:
           echo "Waiting for Digital Ocean automatic deployment (triggered by GitHub push)..."
           sleep 60  # Give DO some time to start the deployment
           
-          # Create new deployment to make sure we have a clean one
-          DEPLOYMENT_ID=$(doctl apps create-deployment ${{ env.APP_ID }} --wait --format ID --no-header)
-          echo "Created deployment ID: $DEPLOYMENT_ID"
+          # Create new deployment
+          echo "Creating deployment..."
+          doctl apps create-deployment ${{ env.APP_ID }} --wait
           
-          # Now monitor the deployment
+          # Monitor deployment status
           for i in {1..15}; do
-            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }})
-            echo "Current deployments: $DEPLOYMENTS"
+            # Get list of all deployments
+            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }} --output json)
+            echo "Checking deployments..."
             
-            # Check for the latest deployment status
-            DEPLOYMENT_INFO=$(doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID)
-            echo "Latest deployment info: $DEPLOYMENT_INFO"
+            # Find the active deployment ID
+            ACTIVE_DEPLOYMENT_ID=$(echo $DEPLOYMENTS | jq -r '.[] | select(.phase=="ACTIVE") | .id')
             
-            # Extract progress using grep
-            LATEST_STATUS=$(echo "$DEPLOYMENT_INFO" | grep -o "Progress:.*" || echo "Status not found")
-            echo "Latest deployment status: $LATEST_STATUS"
+            if [[ -z "$ACTIVE_DEPLOYMENT_ID" ]]; then
+              echo "No active deployment found yet, waiting..."
+              sleep 10
+              continue
+            fi
             
-            if [[ "$LATEST_STATUS" == *"Progress: 7/7"* ]]; then
+            echo "Found active deployment: $ACTIVE_DEPLOYMENT_ID"
+            
+            # Get deployment info
+            DEPLOYMENT_INFO=$(doctl apps get-deployment ${{ env.APP_ID }} $ACTIVE_DEPLOYMENT_ID --output json)
+            echo "Active deployment info: $DEPLOYMENT_INFO"
+            
+            # Check progress
+            PROGRESS=$(echo $DEPLOYMENT_INFO | jq -r '.progress.success_steps')
+            TOTAL_STEPS=$(echo $DEPLOYMENT_INFO | jq -r '.progress.total_steps')
+            PHASE=$(echo $DEPLOYMENT_INFO | jq -r '.phase')
+            
+            echo "Deployment progress: $PROGRESS/$TOTAL_STEPS, Phase: $PHASE"
+            
+            if [[ "$PHASE" == "ACTIVE" && "$PROGRESS" == "$TOTAL_STEPS" ]]; then
               echo "Deployment completed successfully!"
               break
-            elif [[ "$LATEST_STATUS" == *"error"* ]]; then
+            elif [[ "$PHASE" == "ERROR" ]]; then
               echo "Deployment has errors. Getting more details..."
-              doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --verbose
+              doctl apps get-deployment ${{ env.APP_ID }} $ACTIVE_DEPLOYMENT_ID --verbose
               exit 1
             fi
             
@@ -154,7 +169,16 @@ jobs:
         if: env.ENV == 'development'
         run: |
           echo "Resetting and seeding development database..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
+          # Reset the database first
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset"
+          
+          # Run migrations to set up tables
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
+          
+          # Seed test data from seed_test_data.go
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export APP_ENV=development && /app/bennwallet seed-dev-data"
+          
+          echo "Database reset and seeded successfully"
 
   backup-dev:
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
