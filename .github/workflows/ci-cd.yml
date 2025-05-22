@@ -13,6 +13,7 @@ env:
   DO_APP_ID_PROD: ${{ secrets.DO_APP_ID_PROD }}
   DO_DB_ID_DEV: ${{ secrets.DO_DB_ID_DEV }}
   DO_DB_ID_PROD: ${{ secrets.DO_DB_ID_PROD }}
+  DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
 jobs:
   test:
@@ -88,15 +89,20 @@ jobs:
       - name: Get app info
         run: |
           echo "Getting app info:"
-          doctl apps get ${{ env.APP_ID }} --format Name,DefaultIngress,ActiveDeployment.ID
+          doctl apps get ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }}
 
       - name: Get component list and store component name
         run: |
           echo "Getting component list:"
-          doctl apps get ${{ env.APP_ID }} --format Spec.Services.Name --no-header
+          # Get the raw JSON output and extract the first service name using jq
+          COMPONENTS=$(doctl apps get ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --output json)
+          echo "Components: $COMPONENTS"
           
-          # Get and store the component name
-          COMPONENT_NAME=$(doctl apps get ${{ env.APP_ID }} --format Spec.Services[0].Name --no-header | tr -d '\n')
+          # Install jq for JSON parsing
+          sudo apt-get update && sudo apt-get install -y jq
+          
+          # Extract component name using jq
+          COMPONENT_NAME=$(echo $COMPONENTS | jq -r '.spec.services[0].name')
           echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
           echo "Using component name: $COMPONENT_NAME"
 
@@ -106,24 +112,28 @@ jobs:
           sleep 60  # Give DO some time to start the deployment
           
           # Create new deployment to make sure we have a clean one
-          DEPLOYMENT_ID=$(doctl apps create-deployment ${{ env.APP_ID }} --wait --format ID --no-header)
+          DEPLOYMENT_ID=$(doctl apps create-deployment ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --wait --format ID --no-header)
           echo "Created deployment ID: $DEPLOYMENT_ID"
           
           # Now monitor the deployment
           for i in {1..15}; do
-            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }} --format ID,Status,Progress --no-header)
+            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }})
             echo "Current deployments: $DEPLOYMENTS"
             
             # Check for the latest deployment status
-            LATEST_STATUS=$(doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --format Progress --no-header)
+            DEPLOYMENT_INFO=$(doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }})
+            echo "Latest deployment info: $DEPLOYMENT_INFO"
+            
+            # Extract progress using grep
+            LATEST_STATUS=$(echo "$DEPLOYMENT_INFO" | grep -o "Progress:.*" || echo "Status not found")
             echo "Latest deployment status: $LATEST_STATUS"
             
-            if [[ "$LATEST_STATUS" == "7/7" ]]; then
+            if [[ "$LATEST_STATUS" == *"Progress: 7/7"* ]]; then
               echo "Deployment completed successfully!"
               break
-            elif [[ "$LATEST_STATUS" == *"errors"* ]]; then
+            elif [[ "$LATEST_STATUS" == *"error"* ]]; then
               echo "Deployment has errors. Getting more details..."
-              doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --verbose
+              doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --verbose
               exit 1
             fi
             
@@ -138,13 +148,13 @@ jobs:
       - name: Run database migrations
         run: |
           echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --command "/app/bennwallet migrate"
       
       - name: Reset and seed dev database
         if: env.ENV == 'development'
         run: |
           echo "Resetting and seeding development database..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
 
   backup-dev:
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
@@ -159,7 +169,7 @@ jobs:
       - name: Backup development database
         run: |
           echo "Creating development database backup..."
-          doctl databases backup ${{ env.DO_DB_ID_DEV }}
+          doctl databases backup ${{ env.DO_DB_ID_DEV }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }}
 
   backup-prod:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -174,4 +184,4 @@ jobs:
       - name: Backup production database
         run: |
           echo "Creating production database backup..."
-          doctl databases backup ${{ env.DO_DB_ID_PROD }} 
+          doctl databases backup ${{ env.DO_DB_ID_PROD }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} 
