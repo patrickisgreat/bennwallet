@@ -5,13 +5,10 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
-	"strconv"
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
-
-	"github.com/gorilla/mux"
 )
 
 func GetCategories(w http.ResponseWriter, r *http.Request) {
@@ -28,10 +25,15 @@ func GetCategories(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Getting categories for user ID: %s", userId)
 
-	// Changed from ? to $1 for PostgreSQL compatibility
-	rows, err := database.DB.Query("SELECT id, name, description, color FROM categories WHERE user_id = $1 ORDER BY name", userId)
+	// Changed from categories to ynab_categories table
+	rows, err := database.DB.Query(`
+		SELECT id, name, name as description, '#3498DB' as color 
+		FROM ynab_categories 
+		WHERE user_id = $1 AND hidden = false
+		ORDER BY name
+	`, userId)
 	if err != nil {
-		log.Printf("Error querying categories: %v", err)
+		log.Printf("Error querying ynab_categories: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -57,7 +59,7 @@ func GetCategories(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(categories)
 }
 
-func AddCategory(w http.ResponseWriter, r *http.Request) {
+func CreateCategory(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from authentication context
 	userId := middleware.GetUserIDFromContext(r)
 	if userId == "" {
@@ -65,36 +67,9 @@ func AddCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var c models.Category
-	err := json.NewDecoder(r.Body).Decode(&c)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Set the user ID from the authentication context
-	c.UserID = userId
-
-	// Generate a random color if not provided
-	if c.Color == "" {
-		c.Color = generateRandomColor()
-	}
-
-	// Use RETURNING clause to get the inserted ID with PostgreSQL
-	err = database.DB.QueryRow(`
-		INSERT INTO categories (name, description, user_id, color)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, c.Name, c.Description, c.UserID, c.Color).Scan(&c.ID)
-
-	if err != nil {
-		log.Printf("Error inserting category: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(c)
+	// Since we're switching to YNAB categories which are synced from YNAB,
+	// creating a category directly should be discouraged
+	http.Error(w, "Creating categories directly is disabled. Please sync categories from YNAB instead.", http.StatusNotImplemented)
 }
 
 func UpdateCategory(w http.ResponseWriter, r *http.Request) {
@@ -105,33 +80,10 @@ func UpdateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vars := mux.Vars(r)
-	id := vars["id"]
+	// Since we're switching to YNAB categories which are synced from YNAB,
+	// updating a category directly should be discouraged
+	http.Error(w, "Updating categories directly is disabled. Please sync categories from YNAB instead.", http.StatusNotImplemented)
 
-	var c models.Category
-	err := json.NewDecoder(r.Body).Decode(&c)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Use the user ID from the authentication context
-	_, err = database.DB.Exec(`
-		UPDATE categories 
-		SET name = $1, description = $2, color = $3
-		WHERE id = $4 AND user_id = $5
-	`, c.Name, c.Description, c.Color, id, userId)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Return the updated category
-	c.ID, _ = strconv.Atoi(id) // Convert id to int
-	c.UserID = userId
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(c)
 }
 
 func DeleteCategory(w http.ResponseWriter, r *http.Request) {
@@ -146,16 +98,9 @@ func DeleteCategory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	vars := mux.Vars(r)
-	id := vars["id"]
-
-	_, err := database.DB.Exec("DELETE FROM categories WHERE id = $1 AND user_id = $2", id, userId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
+	// Since we're switching to YNAB categories which are synced from YNAB,
+	// deleting a category directly should be discouraged
+	http.Error(w, "Deleting categories directly is disabled. Please sync categories from YNAB instead.", http.StatusNotImplemented)
 }
 
 func generateRandomColor() string {

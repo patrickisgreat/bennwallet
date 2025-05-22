@@ -145,3 +145,106 @@ func CheckDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+// CheckTransactionCategories returns diagnostics about transaction categories
+func CheckTransactionCategories(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from authentication context
+	userID := middleware.GetUserIDFromContext(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized: No user ID found", http.StatusUnauthorized)
+		return
+	}
+
+	// Check if user is an admin
+	var isAdmin bool
+	err := database.DB.QueryRow("SELECT role IN ('admin', 'superadmin') FROM users WHERE id = $1", userID).Scan(&isAdmin)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	// Get transaction count
+	var transactionCount int
+	err = database.DB.QueryRow("SELECT COUNT(*) FROM transactions").Scan(&transactionCount)
+	if err != nil {
+		http.Error(w, "Error counting transactions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get transaction_categories count
+	var categoryAssociationCount int
+	err = database.DB.QueryRow("SELECT COUNT(*) FROM transaction_categories").Scan(&categoryAssociationCount)
+	if err != nil {
+		http.Error(w, "Error counting transaction_categories: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get transactions with categories
+	var transactionsWithCategories int
+	err = database.DB.QueryRow(`
+		SELECT COUNT(DISTINCT transaction_id) 
+		FROM transaction_categories
+	`).Scan(&transactionsWithCategories)
+	if err != nil {
+		http.Error(w, "Error counting transactions with categories: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get YNAB categories count
+	var ynabCategoriesCount int
+	err = database.DB.QueryRow("SELECT COUNT(*) FROM ynab_categories").Scan(&ynabCategoriesCount)
+	if err != nil {
+		http.Error(w, "Error counting YNAB categories: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Sample of 5 transactions with their category associations
+	rows, err := database.DB.Query(`
+		SELECT t.id, t.description, t.user_id, 
+		       (SELECT COUNT(*) FROM transaction_categories tc WHERE tc.transaction_id = t.id) as category_count
+		FROM transactions t
+		ORDER BY t.id
+		LIMIT 5
+	`)
+	if err != nil {
+		http.Error(w, "Error querying transaction samples: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type TransactionSample struct {
+		ID            string `json:"id"`
+		Description   string `json:"description"`
+		UserID        string `json:"user_id"`
+		CategoryCount int    `json:"category_count"`
+	}
+
+	var samples []TransactionSample
+	for rows.Next() {
+		var sample TransactionSample
+		err := rows.Scan(&sample.ID, &sample.Description, &sample.UserID, &sample.CategoryCount)
+		if err != nil {
+			log.Printf("Error scanning transaction sample: %v", err)
+			continue
+		}
+		samples = append(samples, sample)
+	}
+
+	// Build response
+	response := struct {
+		TotalTransactions          int                 `json:"total_transactions"`
+		TotalCategoryAssociations  int                 `json:"total_category_associations"`
+		TransactionsWithCategories int                 `json:"transactions_with_categories"`
+		TotalYNABCategories        int                 `json:"total_ynab_categories"`
+		TransactionSamples         []TransactionSample `json:"transaction_samples"`
+	}{
+		TotalTransactions:          transactionCount,
+		TotalCategoryAssociations:  categoryAssociationCount,
+		TransactionsWithCategories: transactionsWithCategories,
+		TotalYNABCategories:        ynabCategoriesCount,
+		TransactionSamples:         samples,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}

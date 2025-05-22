@@ -91,21 +91,6 @@ jobs:
           echo "Getting app info:"
           doctl apps get ${{ env.APP_ID }}
 
-      - name: Get component list and store component name
-        run: |
-          echo "Getting component list:"
-          # Get the raw JSON output and extract the first service name using jq
-          COMPONENTS=$(doctl apps get ${{ env.APP_ID }} --output json)
-          echo "Components: $COMPONENTS"
-          
-          # Install jq for JSON parsing
-          sudo apt-get update && sudo apt-get install -y jq
-          
-          # Extract component name using jq - fix for array structure
-          COMPONENT_NAME=$(echo $COMPONENTS | jq -r '.[0].spec.services[0].name')
-          echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
-          echo "Using component name: $COMPONENT_NAME"
-
       - name: Wait for DO automatic deployment
         run: |
           echo "Waiting for Digital Ocean automatic deployment (triggered by GitHub push)..."
@@ -160,25 +145,13 @@ jobs:
             fi
           done
       
-      - name: Run database migrations
-        run: |
-          echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "/app/bennwallet migrate"
-      
       - name: Reset and seed dev database
         if: env.ENV == 'development'
         run: |
           echo "Resetting and seeding development database..."
-          # Reset the database first
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset"
-          
-          # Run migrations to set up tables
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "/app/bennwallet migrate"
-          
-          # Seed test data from seed_test_data.go
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "export APP_ENV=development && /app/bennwallet seed-dev-data"
-          
-          echo "Database reset and seeded successfully"
+          # We don't need to run migrations or reset the database in CI/CD
+          # The application will now handle migrations automatically on startup in development
+          echo "Note: Automatic migrations will run during application startup in development environment"
 
   backup-dev:
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'

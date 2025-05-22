@@ -1,7 +1,15 @@
 export interface Category {
-  id: number;
+  id: string;
   name: string;
-  description: string;
+  description?: string;
   color?: string;
-  userId: number;
+  userId: string;
+  categoryGroupId?: string;
+  hidden?: boolean;
+}
+
+export interface CategoryGroup {
+  id: string;
+  name: string;
+  categories: Category[];
 } 

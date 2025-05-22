@@ -285,8 +285,8 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		if err == nil && hasTransactionCategoriesTable {
 			// Fetch associated categories
 			catRows, err := database.DB.Query(`
-				SELECT c.id, c.name, c.description, c.color, c.user_id
-				FROM categories c
+				SELECT c.id, c.name, c.name as description, '#3498DB' as color, c.user_id
+				FROM ynab_categories c
 				JOIN transaction_categories tc ON c.id = tc.category_id
 				WHERE tc.transaction_id = $1
 			`, t.ID)
@@ -537,8 +537,8 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 	if err == nil && hasTransactionCategoriesTable {
 		// Fetch associated categories
 		catRows, err := database.DB.Query(`
-			SELECT c.id, c.name, c.description, c.color, c.user_id
-			FROM categories c
+			SELECT c.id, c.name, c.name as description, '#3498DB' as color, c.user_id
+			FROM ynab_categories c
 			JOIN transaction_categories tc ON c.id = tc.category_id
 			WHERE tc.transaction_id = $1
 		`, t.ID)
@@ -552,6 +552,7 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 					categories = append(categories, cat)
 				}
 			}
+			catRows.Close() // Close here to avoid resource leak
 			if len(categories) > 0 {
 				t.Categories = categories
 			}
@@ -763,27 +764,17 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 	if len(t.Categories) > 0 {
 		for _, category := range t.Categories {
 			// Ensure the category exists and get its ID
-			var categoryID int
+			var categoryID string
 			err = tx.QueryRow(`
-				SELECT id FROM categories 
+				SELECT id FROM ynab_categories 
 				WHERE name = $1 AND user_id = $2
 			`, category.Name, userID).Scan(&categoryID)
 
 			if err != nil {
 				if err == sql.ErrNoRows {
-					// Category doesn't exist, create it
-					log.Printf("Category %s not found, creating it", category.Name)
-					err = tx.QueryRow(`
-						INSERT INTO categories (name, description, user_id, color)
-						VALUES ($1, $2, $3, $4)
-						RETURNING id
-					`, category.Name, category.Description, userID, category.Color).Scan(&categoryID)
-
-					if err != nil {
-						log.Printf("Error creating category %s: %v", category.Name, err)
-						http.Error(w, "Error creating category: "+err.Error(), http.StatusInternalServerError)
-						return
-					}
+					// Category doesn't exist - now we can't create it, so just log a warning
+					log.Printf("Warning: Category %s not found in YNAB categories", category.Name)
+					continue
 				} else {
 					log.Printf("Error finding category %s: %v", category.Name, err)
 					http.Error(w, "Error finding category: "+err.Error(), http.StatusInternalServerError)
@@ -803,14 +794,14 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			log.Printf("Associated transaction %s with category %s (ID: %d)", t.ID, category.Name, categoryID)
+			log.Printf("Associated transaction %s with category %s (ID: %s)", t.ID, category.Name, categoryID)
 		}
 	} else if t.Type != "" {
 		// If we have a 'type' field but no explicit categories, try to use it as a category
 		// This is for backward compatibility with the previous approach
-		var categoryID int
+		var categoryID string
 		err = tx.QueryRow(`
-			SELECT id FROM categories 
+			SELECT id FROM ynab_categories 
 			WHERE name = $1 AND user_id = $2
 		`, t.Type, userID).Scan(&categoryID)
 
@@ -825,7 +816,7 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Error associating transaction with type-derived category: %v", err)
 				// This is not a critical error, so we'll just log it but continue
 			} else {
-				log.Printf("Associated transaction %s with category derived from type: %s (ID: %d)", t.ID, t.Type, categoryID)
+				log.Printf("Associated transaction %s with category derived from type: %s (ID: %s)", t.ID, t.Type, categoryID)
 			}
 		} else if err != sql.ErrNoRows {
 			// If it's an error other than "not found", log it
@@ -844,8 +835,8 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 	// If we were successful, try to load the categories for the response
 	if len(t.Categories) == 0 {
 		rows, err := database.DB.Query(`
-			SELECT c.id, c.name, c.description, c.color, c.user_id
-			FROM categories c
+			SELECT c.id, c.name, c.name as description, '#3498DB' as color, c.user_id
+			FROM ynab_categories c
 			JOIN transaction_categories tc ON c.id = tc.category_id
 			WHERE tc.transaction_id = $1
 		`, t.ID)
@@ -1132,27 +1123,17 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		// Add new category associations
 		for _, category := range t.Categories {
 			// Ensure the category exists and get its ID
-			var categoryID int
+			var categoryID string
 			err = tx.QueryRow(`
-				SELECT id FROM categories 
+				SELECT id FROM ynab_categories 
 				WHERE name = $1 AND user_id = $2
 			`, category.Name, userID).Scan(&categoryID)
 
 			if err != nil {
 				if err == sql.ErrNoRows {
-					// Category doesn't exist, create it
-					log.Printf("Category %s not found, creating it", category.Name)
-					err = tx.QueryRow(`
-						INSERT INTO categories (name, description, user_id, color)
-						VALUES ($1, $2, $3, $4)
-						RETURNING id
-					`, category.Name, category.Description, userID, category.Color).Scan(&categoryID)
-
-					if err != nil {
-						log.Printf("Error creating category %s: %v", category.Name, err)
-						http.Error(w, "Error creating category: "+err.Error(), http.StatusInternalServerError)
-						return
-					}
+					// Category doesn't exist - now we can't create it, so just log a warning
+					log.Printf("Warning: Category %s not found in YNAB categories", category.Name)
+					continue
 				} else {
 					log.Printf("Error finding category %s: %v", category.Name, err)
 					http.Error(w, "Error finding category: "+err.Error(), http.StatusInternalServerError)
@@ -1172,13 +1153,13 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			log.Printf("Associated transaction %s with category %s (ID: %d)", t.ID, category.Name, categoryID)
+			log.Printf("Associated transaction %s with category %s (ID: %s)", t.ID, category.Name, categoryID)
 		}
 	} else if hasTransactionCategoriesTable && t.Type != "" && len(t.Categories) == 0 {
 		// Backward compatibility: if no explicit categories but Type field is set, use it as a category
-		var categoryID int
+		var categoryID string
 		err = tx.QueryRow(`
-			SELECT id FROM categories 
+			SELECT id FROM ynab_categories 
 			WHERE name = $1 AND user_id = $2
 		`, t.Type, userID).Scan(&categoryID)
 
@@ -1200,7 +1181,7 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Error associating transaction with type-derived category: %v", err)
 				// Not a critical error, just log it
 			} else {
-				log.Printf("Associated transaction %s with category derived from type: %s (ID: %d)", id, t.Type, categoryID)
+				log.Printf("Associated transaction %s with category derived from type: %s (ID: %s)", id, t.Type, categoryID)
 			}
 		}
 	}

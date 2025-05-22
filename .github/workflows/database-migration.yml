@@ -40,22 +40,18 @@ jobs:
             echo "ENV=development" >> $GITHUB_ENV
           fi
       
-      - name: Get component name
+      - name: Check environment and trigger deployment
         run: |
-          # Get the raw JSON output and extract the first service name using jq
-          COMPONENTS=$(doctl apps get ${{ env.APP_ID }} --output json)
-          
-          # Install jq for JSON parsing
-          sudo apt-get update && sudo apt-get install -y jq
-          
-          # Extract component name using jq - fix for array structure
-          COMPONENT_NAME=$(echo $COMPONENTS | jq -r '.[0].spec.services[0].name')
-          echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
-          echo "Using component name: $COMPONENT_NAME"
-      
-      - name: Run database migrations
-        run: |
-          echo "Running migrations for ${{ env.ENV }} environment..."
-          # Create a deployment with a post-deployment command
-          doctl apps update ${{ env.APP_ID }} --spec <(echo '{"envs":[{"key":"RUN_MIGRATIONS","value":"true","scope":"RUN_TIME"}]}')
-          doctl apps create-deployment ${{ env.APP_ID }} --force-rebuild --wait 
+          if [[ "${{ env.ENV }}" == "development" ]]; then
+            echo "Development environment detected."
+            echo "Migrations will run automatically on application startup."
+            echo "Triggering a new deployment to apply migrations..."
+            doctl apps create-deployment ${{ env.APP_ID }} --force-rebuild --wait
+          else
+            echo "Production environment detected."
+            echo "For production environments, please run migrations manually using:"
+            echo "  - Connect to the app: doctl ssh ${{ env.APP_ID }}"
+            echo "  - Run migrations: cd /app && ./bennwallet migrate"
+            echo ""
+            echo "IMPORTANT: Migrations in production should be run with caution and manual verification."
+          fi 
