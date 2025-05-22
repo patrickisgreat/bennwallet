@@ -13,6 +13,7 @@ env:
   DO_APP_ID_PROD: ${{ secrets.DO_APP_ID_PROD }}
   DO_DB_ID_DEV: ${{ secrets.DO_DB_ID_DEV }}
   DO_DB_ID_PROD: ${{ secrets.DO_DB_ID_PROD }}
+  DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
 jobs:
   test:
@@ -85,33 +86,99 @@ jobs:
             echo "ENV=development" >> $GITHUB_ENV
           fi
       
+      - name: Get app info
+        run: |
+          echo "Getting app info:"
+          doctl apps get ${{ env.APP_ID }}
+
+      - name: Get component list and store component name
+        run: |
+          echo "Getting component list:"
+          # Get the raw JSON output and extract the first service name using jq
+          COMPONENTS=$(doctl apps get ${{ env.APP_ID }} --output json)
+          echo "Components: $COMPONENTS"
+          
+          # Install jq for JSON parsing
+          sudo apt-get update && sudo apt-get install -y jq
+          
+          # Extract component name using jq - fix for array structure
+          COMPONENT_NAME=$(echo $COMPONENTS | jq -r '.[0].spec.services[0].name')
+          echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
+          echo "Using component name: $COMPONENT_NAME"
+
       - name: Wait for DO automatic deployment
         run: |
           echo "Waiting for Digital Ocean automatic deployment (triggered by GitHub push)..."
           sleep 60  # Give DO some time to start the deployment
           
-          for i in {1..10}; do
-            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }} --format ID,Status,Progress --no-header)
-            echo "Current deployments: $DEPLOYMENTS"
+          # Create new deployment
+          echo "Creating deployment..."
+          doctl apps create-deployment ${{ env.APP_ID }} --wait
+          
+          # Monitor deployment status
+          for i in {1..15}; do
+            # Get list of all deployments
+            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }} --output json)
+            echo "Checking deployments..."
             
-            if [[ $DEPLOYMENTS == *"ACTIVE"* ]]; then
-              echo "Deployment is active"
-              break
+            # Find the active deployment ID
+            ACTIVE_DEPLOYMENT_ID=$(echo $DEPLOYMENTS | jq -r '.[] | select(.phase=="ACTIVE") | .id')
+            
+            if [[ -z "$ACTIVE_DEPLOYMENT_ID" ]]; then
+              echo "No active deployment found yet, waiting..."
+              sleep 10
+              continue
             fi
-            echo "Waiting for deployment... checking again in 15 seconds"
-            sleep 15
+            
+            echo "Found active deployment: $ACTIVE_DEPLOYMENT_ID"
+            
+            # Get deployment info
+            DEPLOYMENT_INFO=$(doctl apps get-deployment ${{ env.APP_ID }} $ACTIVE_DEPLOYMENT_ID --output json)
+            echo "Active deployment info: $DEPLOYMENT_INFO"
+            
+            # Check progress - fix for array structure
+            PROGRESS=$(echo $DEPLOYMENT_INFO | jq -r '.[0].progress.success_steps')
+            TOTAL_STEPS=$(echo $DEPLOYMENT_INFO | jq -r '.[0].progress.total_steps')
+            PHASE=$(echo $DEPLOYMENT_INFO | jq -r '.[0].phase')
+            
+            echo "Deployment progress: $PROGRESS/$TOTAL_STEPS, Phase: $PHASE"
+            
+            if [[ "$PHASE" == "ACTIVE" && "$PROGRESS" == "$TOTAL_STEPS" ]]; then
+              echo "Deployment completed successfully!"
+              break
+            elif [[ "$PHASE" == "ERROR" ]]; then
+              echo "Deployment has errors. Getting more details..."
+              doctl apps get-deployment ${{ env.APP_ID }} $ACTIVE_DEPLOYMENT_ID --verbose
+              exit 1
+            fi
+            
+            if [ $i -eq 15 ]; then
+              echo "Waited for 5 minutes, continuing anyway"
+            else
+              echo "Waiting for deployment... checking again in 20 seconds"
+              sleep 20
+            fi
           done
       
       - name: Run database migrations
         run: |
           echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console -a ${{ env.APP_ID }} -c "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "/app/bennwallet migrate"
       
       - name: Reset and seed dev database
         if: env.ENV == 'development'
         run: |
           echo "Resetting and seeding development database..."
-          doctl apps console -a ${{ env.APP_ID }} -c "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
+          # Reset the database first
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset"
+          
+          # Run migrations to set up tables
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "/app/bennwallet migrate"
+          
+          # Seed test data from seed_test_data.go
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "export APP_ENV=development && /app/bennwallet seed-dev-data"
+          
+          echo "Database reset and seeded successfully"
 
   backup-dev:
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
