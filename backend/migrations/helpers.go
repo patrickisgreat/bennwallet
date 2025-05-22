@@ -27,6 +27,7 @@ func GetPendingMigrations(db *sql.DB) ([]string, error) {
 		"ensure_admin_user",
 		"fix_ynab_api_urls",
 		"fix_ynab_categories_schema",
+		"add_ynab_categories_table",
 	}
 
 	// Check which migrations have already been applied
