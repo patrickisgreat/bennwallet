@@ -63,22 +63,16 @@ jobs:
         if: env.ACTION == 'migrate' || env.ACTION == 'reset-and-seed'
         run: |
           echo "Running database migrations on ${{ env.ENV }}..."
-          doctl apps create-deployment-proxy-exec ${{ env.APP_ID }} --component-name api << 'EOF'
-            ./bennwallet migrate
-          EOF
+          doctl apps console -a ${{ env.APP_ID }} -c "/app/bennwallet migrate"
       
       - name: Reset database (Development Only)
         if: env.ENV == 'development' && (env.ACTION == 'reset' || env.ACTION == 'reset-and-seed')
         run: |
           echo "Resetting development database..."
-          doctl apps create-deployment-proxy-exec ${{ env.APP_ID }} --component-name api << 'EOF'
-            ./bennwallet db-reset
-          EOF
+          doctl apps console -a ${{ env.APP_ID }} -c "/app/bennwallet db-reset"
       
       - name: Seed database with test data (Development Only)
         if: env.ENV == 'development' && (env.ACTION == 'seed' || env.ACTION == 'reset-and-seed')
         run: |
           echo "Seeding development database with test data..."
-          doctl apps create-deployment-proxy-exec ${{ env.APP_ID }} --component-name api << 'EOF'
-            ./bennwallet seed-dev-data
-          EOF 
+          doctl apps console -a ${{ env.APP_ID }} -c "export RESET_DB=true && export APP_ENV=development && /app/bennwallet seed-dev-data" 
