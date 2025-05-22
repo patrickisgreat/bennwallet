@@ -105,13 +105,13 @@ jobs:
       - name: Run database migrations
         run: |
           echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console -a ${{ env.APP_ID }} -c "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} api -c "/app/bennwallet migrate"
       
       - name: Reset and seed dev database
         if: env.ENV == 'development'
         run: |
           echo "Resetting and seeding development database..."
-          doctl apps console -a ${{ env.APP_ID }} -c "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} api -c "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
 
   backup-dev:
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
