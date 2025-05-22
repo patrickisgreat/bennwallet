@@ -26,6 +26,7 @@ on:
 env:
   DO_APP_ID_DEV: ${{ secrets.DO_APP_ID_DEV }}
   DO_APP_ID_PROD: ${{ secrets.DO_APP_ID_PROD }}
+  DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
 jobs:
   manage-database:
@@ -61,7 +62,7 @@ jobs:
       
       - name: Get component name
         run: |
-          COMPONENT_NAME=$(doctl apps get ${{ env.APP_ID }} --format Spec.Services[0].Name --no-header | tr -d '\n')
+          COMPONENT_NAME=$(doctl apps get ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --format Spec.Services[0].Name --no-header | tr -d '\n')
           echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
           echo "Using component name: $COMPONENT_NAME"
       
@@ -69,16 +70,16 @@ jobs:
         if: env.ACTION == 'migrate' || env.ACTION == 'reset-and-seed'
         run: |
           echo "Running database migrations on ${{ env.ENV }}..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --command "/app/bennwallet migrate"
       
       - name: Reset database (Development Only)
         if: env.ENV == 'development' && (env.ACTION == 'reset' || env.ACTION == 'reset-and-seed')
         run: |
           echo "Resetting development database..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet db-reset"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --command "/app/bennwallet db-reset"
       
       - name: Seed database with test data (Development Only)
         if: env.ENV == 'development' && (env.ACTION == 'seed' || env.ACTION == 'reset-and-seed')
         run: |
           echo "Seeding development database with test data..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet seed-dev-data" 
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet seed-dev-data" 
