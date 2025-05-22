@@ -1,0 +1,151 @@
+name: Setup Digital Ocean Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to setup (dev or prod)'
+        required: true
+        default: 'dev'
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          
+      - name: Install yq (YAML processor)
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod a+x /usr/local/bin/yq
+          
+      - name: Set environment variables
+        id: set-env
+        run: |
+          if [[ "${{ github.event.inputs.environment }}" == "prod" ]]; then
+            echo "APP_NAME=bennwallet-prod" >> $GITHUB_ENV
+            echo "ENV=production" >> $GITHUB_ENV
+            echo "BRANCH=main" >> $GITHUB_ENV
+          else
+            echo "APP_NAME=bennwallet-dev" >> $GITHUB_ENV
+            echo "ENV=development" >> $GITHUB_ENV
+            echo "BRANCH=dev" >> $GITHUB_ENV
+          fi
+          
+      - name: Create app spec file
+        run: |
+          cat > app.yaml << EOF
+          name: ${{ env.APP_NAME }}
+          region: sfo
+          databases:
+          - engine: PG
+            name: bennwallet-${{ github.event.inputs.environment }}-db
+            production: true
+            version: "14"
+            size: basic-xs
+          services:
+          - name: api
+            github:
+              repo: ${{ github.repository }}
+              branch: ${{ env.ENV == 'production' && 'main' || 'dev' }}
+            dockerfile_path: Dockerfile
+            build_command: npm ci && npm run build
+            run_command: /app/bennwallet
+            http_port: 8080
+            instance_count: 1
+            instance_size_slug: basic-xs
+            envs:
+            - key: NODE_ENV
+              value: ${{ env.ENV }}
+            - key: ENVIRONMENT
+              value: ${{ env.ENV }}
+            - key: PORT
+              value: "8080"
+            - key: YNAB_API_TOKEN
+              value: ${{ secrets.YNAB_API_TOKEN }}
+              type: SECRET
+            - key: YNAB_BUDGET_ID
+              value: ${{ secrets.YNAB_BUDGET_ID }}
+              type: SECRET
+            - key: YNAB_ACCOUNT_ID
+              value: ${{ secrets.YNAB_ACCOUNT_ID }}
+              type: SECRET
+            - key: FIREBASE_SERVICE_ACCOUNT_JSON
+              value: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+              type: SECRET
+            - key: DATABASE_URL
+              scope: RUN_AND_BUILD_TIME
+              value: \${bennwallet-${{ github.event.inputs.environment }}-db.DATABASE_URL}
+              type: GENERAL
+          static_sites:
+          - name: frontend
+            github:
+              repo: ${{ github.repository }}
+              branch: ${{ env.ENV == 'production' && 'main' || 'dev' }}
+            build_command: npm ci && npm run build
+            output_dir: /dist
+            routes:
+            - path: /
+          EOF
+          
+      - name: Create Digital Ocean App
+        run: |
+          doctl apps create --spec app.yaml --wait
+          
+      - name: Get app info and save IDs
+        run: |
+          APP_ID=$(doctl apps list --no-header --format ID,Spec.Name | grep "${{ env.APP_NAME }}" | awk '{print $1}')
+          echo "Created app with ID: $APP_ID"
+          echo "Add this ID to GitHub secrets as DO_APP_ID_${{ env.ENV == 'production' && 'PROD' || 'DEV' }}"
+          
+          DB_ID=$(doctl databases list --no-header --format ID,Name | grep "bennwallet-${{ github.event.inputs.environment }}-db" | awk '{print $1}')
+          echo "Database ID: $DB_ID"
+          echo "Add this ID to GitHub secrets as DO_DB_ID_${{ env.ENV == 'production' && 'PROD' || 'DEV' }}"
+          
+          # Get app URL
+          APP_URL=$(doctl apps get $APP_ID --format DefaultIngress --no-header)
+          echo "App URL: $APP_URL"
+          echo "Add this URL to GitHub secrets as ${{ env.ENV == 'production' && 'PROD' || 'DEV' }}_APP_URL"
+          echo "Also add https://$APP_URL to GitHub secrets as ${{ env.ENV == 'production' && 'PROD' || 'DEV' }}_API_URL"
+          
+      - name: Setup instructions
+        run: |
+          echo "======= DIGITAL OCEAN SETUP INSTRUCTIONS ======="
+          echo ""
+          echo "To set up your app on Digital Ocean App Platform, follow these steps:"
+          echo ""
+          echo "1. Go to Digital Ocean App Platform: https://cloud.digitalocean.com/apps"
+          echo "2. Click 'Create App'"
+          echo "3. Connect your GitHub repository"
+          echo "4. Choose the ${{ env.BRANCH }} branch"
+          echo "5. Select Dockerfile as your build method"
+          echo "6. Set up the following environment variables:"
+          echo "   - NODE_ENV: ${{ env.ENV }}"
+          echo "   - ENVIRONMENT: ${{ env.ENV }}"
+          echo "   - YNAB_API_TOKEN: (from your secrets)"
+          echo "   - YNAB_BUDGET_ID: (from your secrets)"
+          echo "   - YNAB_ACCOUNT_ID: (from your secrets)"
+          echo "   - FIREBASE_SERVICE_ACCOUNT_JSON: (from your secrets)"
+          echo ""
+          echo "7. Add a database component:"
+          echo "   - Go to Components → Add Component → Database"
+          echo "   - Select PostgreSQL"
+          echo "   - Choose appropriate size"
+          echo ""
+          echo "8. After setup, add these GitHub secrets:"
+          echo "   - DIGITALOCEAN_ACCESS_TOKEN: Your DO API token"
+          echo "   - DO_APP_ID_${{ env.ENV == 'production' && 'PROD' || 'DEV' }}: Your app ID"
+          echo ""
+          echo "The app ID can be found in the URL when viewing your app:"
+          echo "https://cloud.digitalocean.com/apps/[APP-ID]"
+          echo ""
+          echo "==============================================" 

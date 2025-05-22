@@ -1,68 +1,49 @@
 #!/bin/bash
 set -e
 
-echo "Starting BennWallet application..."
+# Initialize function for logging
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+}
 
-# PostgreSQL database initialization
-if [[ -n "$DATABASE_URL" || -n "$DB_HOST" ]]; then
-  echo "Checking PostgreSQL connection..."
-  
-  # Initialize the database
-  /app/init-db.sh
-  
-  # Set up a health check to wait until PostgreSQL is ready
-  max_retries=10
-  counter=0
-  echo "Waiting for PostgreSQL to be ready..."
-  
-  while [ $counter -lt $max_retries ]; do
-    if [[ -n "$DATABASE_URL" ]]; then
-      if PGPASSWORD=$DB_PASSWORD psql "$DATABASE_URL" -c '\q' > /dev/null 2>&1; then
-        echo "Successfully connected to PostgreSQL using DATABASE_URL."
-        break
-      fi
-    else
-      if PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c '\q' > /dev/null 2>&1; then
-        echo "Successfully connected to PostgreSQL using connection parameters."
-        break
-      fi
-    fi
-    
-    counter=$((counter+1))
-    echo "Waiting for PostgreSQL connection... (attempt $counter of $max_retries)"
-    sleep 5
-  done
-  
-  if [ $counter -eq $max_retries ]; then
-    echo "Failed to connect to PostgreSQL after $max_retries attempts."
-    echo "The application will attempt to start anyway, but might fail."
-  fi
-  
-  echo "PostgreSQL setup complete."
-  
-  # Auto-run migrations only in production, unless disabled
-  if [[ "$NODE_ENV" == "production" || "$APP_ENV" == "production" ]] && [[ "$SKIP_AUTO_MIGRATIONS" != "true" ]]; then
-    echo "Production environment detected, checking for pending migrations..."
-    
-    # Run a dry-run first to see if any migrations are pending
-    PENDING_MIGRATIONS=$(/app/bennwallet migrate --dry-run | grep -c "would be applied" || true)
-    
-    if [[ "$PENDING_MIGRATIONS" -gt 0 ]]; then
-      echo "Found $PENDING_MIGRATIONS pending migrations. Applying them now..."
-      /app/bennwallet migrate
-      
-      if [ $? -ne 0 ]; then
-        echo "⚠️ Warning: Migration failed, but continuing application startup."
-        echo "Please check the logs and run migrations manually if needed."
-      else
-        echo "✅ Migrations completed successfully."
-      fi
-    else
-      echo "✅ Database schema is up to date. No migrations needed."
-    fi
-  fi
+log "Starting BennWallet application..."
+
+# Check if database connection is available
+log "Checking PostgreSQL connection..."
+
+# Initialize database
+log "Initializing database..."
+
+# Check if we're using DATABASE_URL or individual params
+if [ -n "$DATABASE_URL" ]; then
+    log "Using DATABASE_URL for connection"
+    export PG_CONN="$DATABASE_URL"
+else
+    log "Using individual connection parameters"
+    export PG_CONN="postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSL_MODE}"
 fi
 
-# Run the application
-echo "Starting BennWallet backend..."
+# Test database connection
+RETRIES=5
+for i in $(seq 1 $RETRIES); do
+    log "Testing database connection (attempt $i/$RETRIES)..."
+    if PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -U "$DB_USER" -p "$DB_PORT" -c "SELECT 1" postgres &>/dev/null; then
+        log "Database connection successful!"
+        break
+    fi
+    
+    if [ $i -eq $RETRIES ]; then
+        log "Cannot connect to PostgreSQL. Please check your connection settings."
+        # In DO, we don't exit, we just continue since the app will retry
+    else
+        log "Connection failed, retrying in 5 seconds..."
+        sleep 5
+    fi
+done
+
+# Run database migrations automatically on startup
+# This is triggered by the GitHub Action, so we don't need to do it here
+# We'll expose the commands for GitHub Actions to call
+
+# Execute the provided command (usually the app)
 exec "$@" 
