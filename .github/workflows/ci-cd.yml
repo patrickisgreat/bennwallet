@@ -89,13 +89,13 @@ jobs:
       - name: Get app info
         run: |
           echo "Getting app info:"
-          doctl apps get ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }}
+          doctl apps get ${{ env.APP_ID }}
 
       - name: Get component list and store component name
         run: |
           echo "Getting component list:"
           # Get the raw JSON output and extract the first service name using jq
-          COMPONENTS=$(doctl apps get ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --output json)
+          COMPONENTS=$(doctl apps get ${{ env.APP_ID }} --output json)
           echo "Components: $COMPONENTS"
           
           # Install jq for JSON parsing
@@ -112,16 +112,16 @@ jobs:
           sleep 60  # Give DO some time to start the deployment
           
           # Create new deployment to make sure we have a clean one
-          DEPLOYMENT_ID=$(doctl apps create-deployment ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --wait --format ID --no-header)
+          DEPLOYMENT_ID=$(doctl apps create-deployment ${{ env.APP_ID }} --wait --format ID --no-header)
           echo "Created deployment ID: $DEPLOYMENT_ID"
           
           # Now monitor the deployment
           for i in {1..15}; do
-            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }})
+            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }})
             echo "Current deployments: $DEPLOYMENTS"
             
             # Check for the latest deployment status
-            DEPLOYMENT_INFO=$(doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }})
+            DEPLOYMENT_INFO=$(doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID)
             echo "Latest deployment info: $DEPLOYMENT_INFO"
             
             # Extract progress using grep
@@ -133,7 +133,7 @@ jobs:
               break
             elif [[ "$LATEST_STATUS" == *"error"* ]]; then
               echo "Deployment has errors. Getting more details..."
-              doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --verbose
+              doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --verbose
               exit 1
             fi
             
@@ -148,13 +148,13 @@ jobs:
       - name: Run database migrations
         run: |
           echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --command "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
       
       - name: Reset and seed dev database
         if: env.ENV == 'development'
         run: |
           echo "Resetting and seeding development database..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
 
   backup-dev:
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
@@ -169,7 +169,7 @@ jobs:
       - name: Backup development database
         run: |
           echo "Creating development database backup..."
-          doctl databases backup ${{ env.DO_DB_ID_DEV }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }}
+          doctl databases backup ${{ env.DO_DB_ID_DEV }}
 
   backup-prod:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -184,4 +184,4 @@ jobs:
       - name: Backup production database
         run: |
           echo "Creating production database backup..."
-          doctl databases backup ${{ env.DO_DB_ID_PROD }} --access-token ${{ env.DIGITALOCEAN_ACCESS_TOKEN }} 
+          doctl databases backup ${{ env.DO_DB_ID_PROD }} 

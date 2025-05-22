@@ -1,0 +1,59 @@
+name: Database Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run migrations on (dev or prod)'
+        required: true
+        default: 'dev'
+  push:
+    branches: [dev, main]
+    paths:
+      - 'backend/database/**'
+      - 'backend/migrations/**'
+
+env:
+  DO_APP_ID_DEV: ${{ secrets.DO_APP_ID_DEV }}
+  DO_APP_ID_PROD: ${{ secrets.DO_APP_ID_PROD }}
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          
+      - name: Set environment variables
+        id: set-env
+        run: |
+          # Set app ID based on environment input or branch
+          if [[ "${{ github.event.inputs.environment }}" == "prod" || "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "APP_ID=${{ env.DO_APP_ID_PROD }}" >> $GITHUB_ENV
+            echo "ENV=production" >> $GITHUB_ENV
+          else
+            echo "APP_ID=${{ env.DO_APP_ID_DEV }}" >> $GITHUB_ENV
+            echo "ENV=development" >> $GITHUB_ENV
+          fi
+      
+      - name: Get component name
+        run: |
+          # Get the raw JSON output and extract the first service name using jq
+          COMPONENTS=$(doctl apps get ${{ env.APP_ID }} --output json)
+          
+          # Install jq for JSON parsing
+          sudo apt-get update && sudo apt-get install -y jq
+          
+          # Extract component name using jq
+          COMPONENT_NAME=$(echo $COMPONENTS | jq -r '.spec.services[0].name')
+          echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
+          echo "Using component name: $COMPONENT_NAME"
+      
+      - name: Run database migrations
+        run: |
+          echo "Running database migrations on ${{ env.ENV }}..."
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate" 
