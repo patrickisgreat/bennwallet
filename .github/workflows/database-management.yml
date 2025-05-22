@@ -8,9 +8,9 @@ on:
         required: true
         default: 'dev'
       action:
-        description: 'Action to perform (migrate, reset, backup)'
+        description: 'Action to perform (reset, backup)'
         required: true
-        default: 'migrate'
+        default: 'backup'
 
 env:
   GO_VERSION: '1.24'
@@ -43,47 +43,34 @@ jobs:
             echo "DB_ID=${{ env.DO_DB_ID_DEV }}" >> $GITHUB_ENV
             echo "ENV=development" >> $GITHUB_ENV
           fi
-          
-      - name: Get component list and store component name
-        run: |
-          echo "Getting component list:"
-          # Get the raw JSON output and extract the first service name using jq
-          COMPONENTS=$(doctl apps get ${{ env.APP_ID }} --output json)
-          
-          # Install jq for JSON parsing if needed
-          sudo apt-get update && sudo apt-get install -y jq
-          
-          # Extract component name using jq - fix for array structure
-          COMPONENT_NAME=$(echo $COMPONENTS | jq -r '.[0].spec.services[0].name')
-          echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
-          echo "Using component name: $COMPONENT_NAME"
       
-      - name: Run migrations
-        if: github.event.inputs.action == 'migrate'
+      - name: Run appropriate database action
         run: |
-          echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "/app/bennwallet migrate"
-      
-      - name: Reset database
-        if: github.event.inputs.action == 'reset' && github.event.inputs.environment == 'dev'
-        run: |
-          echo "Resetting development database..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
-          echo "Database reset and migrations completed successfully"
-      
-      - name: Backup database
-        if: github.event.inputs.action == 'backup'
-        run: |
-          echo "Creating database backup for ${{ env.ENV }} environment..."
-          doctl databases backup ${{ env.DB_ID }}
-          
-          # List existing backups
-          echo "Existing backups:"
-          doctl databases backups list ${{ env.DB_ID }}
-      
-      - name: Warn about production reset
-        if: github.event.inputs.action == 'reset' && github.event.inputs.environment == 'prod'
-        run: |
-          echo "⚠️ WARNING: Reset action is not allowed on production environment for safety reasons."
-          echo "If you really need to reset the production database, please do so manually with extreme caution."
-          exit 1 
+          if [[ "${{ github.event.inputs.action }}" == "reset" && "${{ github.event.inputs.environment }}" == "dev" ]]; then
+            echo "Triggering a reset for development database..."
+            echo "This will cause a new deployment with RESET_DB=true"
+            doctl apps update ${{ env.APP_ID }} --spec <(echo '{"envs":[{"key":"RESET_DB","value":"true","scope":"RUN_TIME"}]}')
+            doctl apps create-deployment ${{ env.APP_ID }} --force-rebuild --wait
+            
+            # Reset the flag after deployment to prevent continuous resets
+            doctl apps update ${{ env.APP_ID }} --spec <(echo '{"envs":[{"key":"RESET_DB","value":"false","scope":"RUN_TIME"}]}')
+            echo "Database reset triggered. Migrations will run automatically."
+            
+          elif [[ "${{ github.event.inputs.action }}" == "backup" ]]; then
+            echo "Creating database backup for ${{ env.ENV }} environment..."
+            doctl databases backup ${{ env.DB_ID }}
+            
+            # List existing backups
+            echo "Existing backups:"
+            doctl databases backups list ${{ env.DB_ID }}
+            
+          elif [[ "${{ github.event.inputs.action }}" == "reset" && "${{ github.event.inputs.environment }}" == "prod" ]]; then
+            echo "⚠️ WARNING: Reset action is not allowed on production environment for safety reasons."
+            echo "If you really need to reset the production database, please do so manually with extreme caution."
+            exit 1
+            
+          else
+            echo "Unknown action: ${{ github.event.inputs.action }}"
+            echo "Available actions: reset (dev only), backup"
+            exit 1
+          fi 

@@ -92,104 +92,129 @@ func SeedTestData(db *sql.DB) error {
 	_, err := db.Exec(`
 		INSERT INTO users (id, username, name, role) 
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (id) DO NOTHING`,
+		ON CONFLICT (id) DO UPDATE SET 
+		    role = 'superadmin'`,
 		adminUser.id, adminUser.username, adminUser.name, adminUser.role)
 	if err != nil {
 		return fmt.Errorf("failed to insert admin user %s: %w", adminUser.username, err)
 	}
 	log.Printf("Created or updated admin test user with ID: %s", adminUser.id)
 
-	// 2. Add some sample categories
-	sampleCategories := []struct {
-		name        string
-		description string
-		user_id     string
-		color       string
+	// 2. Add category groups first
+	categoryGroups := []struct {
+		id      string
+		name    string
+		user_id string
 	}{
-		{name: "Food", description: "Groceries and dining out", user_id: "1", color: "#4CAF50"},
-		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "1", color: "#2196F3"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "1", color: "#FFC107"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "1", color: "#9C27B0"},
-		{name: "Utilities", description: "Bills and services", user_id: "1", color: "#F44336"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "1", color: "#3F51B5"},
-		{name: "Personal Care", description: "Haircuts, gym", user_id: "1", color: "#009688"},
-		{name: "Education", description: "Tuition, books", user_id: "1", color: "#FF5722"},
-		{name: "Pets", description: "Pet food, vet", user_id: "1", color: "#795548"},
-		{name: "Gifts", description: "Presents, donations", user_id: "1", color: "#E91E63"},
-
-		{name: "Food", description: "Groceries and dining out", user_id: "2", color: "#4CAF50"},
-		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "2", color: "#2196F3"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "2", color: "#FFC107"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "2", color: "#9C27B0"},
-		{name: "Utilities", description: "Bills and services", user_id: "2", color: "#F44336"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "2", color: "#3F51B5"},
-		{name: "Shopping", description: "Clothes, electronics", user_id: "2", color: "#607D8B"},
-		{name: "Travel", description: "Vacations, trips", user_id: "2", color: "#8BC34A"},
-
-		// Regular user 1 categories
-		{name: "Food", description: "Groceries and dining out", user_id: "regular1", color: "#4CAF50"},
-		{name: "Rent", description: "Monthly rent", user_id: "regular1", color: "#2196F3"},
-		{name: "Transportation", description: "Car, bus, train", user_id: "regular1", color: "#FFC107"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "regular1", color: "#9C27B0"},
-
-		// Regular user 2 categories
-		{name: "Food", description: "Groceries and dining out", user_id: "regular2", color: "#4CAF50"},
-		{name: "Utilities", description: "Bills and services", user_id: "regular2", color: "#F44336"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "regular2", color: "#FFC107"},
-		{name: "Shopping", description: "Clothes, electronics", user_id: "regular2", color: "#607D8B"},
-
-		// Regular user 3 categories
-		{name: "Food", description: "Groceries and dining out", user_id: "regular3", color: "#4CAF50"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "regular3", color: "#3F51B5"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "regular3", color: "#9C27B0"},
-		{name: "Travel", description: "Vacations, trips", user_id: "regular3", color: "#8BC34A"},
-
-		{name: "Rent", description: "Monthly rent", user_id: "admin-user-1", color: "#2196F3"},
-		{name: "Groceries", description: "Food and household items", user_id: "admin-user-1", color: "#4CAF50"},
-		{name: "Utilities", description: "Electricity, water, internet", user_id: "admin-user-1", color: "#F44336"},
-		{name: "Transportation", description: "Bus, train, Uber", user_id: "admin-user-1", color: "#FFC107"},
-		{name: "Entertainment", description: "Movies, games", user_id: "admin-user-1", color: "#9C27B0"},
-		{name: "Health", description: "Medical, dental", user_id: "admin-user-1", color: "#3F51B5"},
-		{name: "Test", description: "Test Category", user_id: "admin-user-1", color: "#FF0000"},
-
-		// Patrick Bennett categories
-		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#2196F3"},
-		{name: "Food", description: "Groceries and dining out", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#4CAF50"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#FFC107"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#9C27B0"},
-		{name: "Utilities", description: "Bills and services", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#F44336"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#3F51B5"},
-		{name: "Shopping", description: "Clothes, electronics", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#607D8B"},
-		{name: "Travel", description: "Vacations, trips", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#8BC34A"},
+		{id: "group-1", name: "Essentials", user_id: "1"},
+		{id: "group-2", name: "Lifestyle", user_id: "1"},
+		{id: "group-3", name: "Essentials", user_id: "2"},
+		{id: "group-4", name: "Lifestyle", user_id: "2"},
+		{id: "group-5", name: "Essentials", user_id: "regular1"},
+		{id: "group-6", name: "Essentials", user_id: "regular2"},
+		{id: "group-7", name: "Essentials", user_id: "regular3"},
+		{id: "group-8", name: "Essentials", user_id: "admin-user-1"},
+		{id: "group-9", name: "Essentials", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
+		{id: "group-10", name: "Lifestyle", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
 	}
 
-	categoryIds := make(map[string]int) // Map to store category IDs by name and user
+	for _, group := range categoryGroups {
+		_, err := db.Exec(`
+			INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (id) DO NOTHING
+		`, group.id, group.name, group.id, group.user_id, false)
+
+		if err != nil {
+			return fmt.Errorf("failed to insert category group %s: %w", group.name, err)
+		}
+	}
+
+	// 3. Add sample categories with proper group associations
+	sampleCategories := []struct {
+		name           string
+		description    string
+		user_id        string
+		color          string
+		category_group string
+	}{
+		{name: "Food", description: "Groceries and dining out", user_id: "1", color: "#4CAF50", category_group: "group-1"},
+		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "1", color: "#2196F3", category_group: "group-1"},
+		{name: "Transportation", description: "Car, public transit, gas", user_id: "1", color: "#FFC107", category_group: "group-1"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "1", color: "#9C27B0", category_group: "group-2"},
+		{name: "Utilities", description: "Bills and services", user_id: "1", color: "#F44336", category_group: "group-1"},
+		{name: "Healthcare", description: "Medical expenses", user_id: "1", color: "#3F51B5", category_group: "group-1"},
+		{name: "Personal Care", description: "Haircuts, gym", user_id: "1", color: "#009688", category_group: "group-2"},
+		{name: "Education", description: "Tuition, books", user_id: "1", color: "#FF5722", category_group: "group-2"},
+		{name: "Pets", description: "Pet food, vet", user_id: "1", color: "#795548", category_group: "group-2"},
+		{name: "Gifts", description: "Presents, donations", user_id: "1", color: "#E91E63", category_group: "group-2"},
+
+		{name: "Food", description: "Groceries and dining out", user_id: "2", color: "#4CAF50", category_group: "group-3"},
+		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "2", color: "#2196F3", category_group: "group-3"},
+		{name: "Transportation", description: "Car, public transit, gas", user_id: "2", color: "#FFC107", category_group: "group-3"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "2", color: "#9C27B0", category_group: "group-4"},
+		{name: "Utilities", description: "Bills and services", user_id: "2", color: "#F44336", category_group: "group-3"},
+		{name: "Healthcare", description: "Medical expenses", user_id: "2", color: "#3F51B5", category_group: "group-3"},
+		{name: "Shopping", description: "Clothes, electronics", user_id: "2", color: "#607D8B", category_group: "group-4"},
+		{name: "Travel", description: "Vacations, trips", user_id: "2", color: "#8BC34A", category_group: "group-4"},
+
+		// Regular user 1 categories
+		{name: "Food", description: "Groceries and dining out", user_id: "regular1", color: "#4CAF50", category_group: "group-5"},
+		{name: "Rent", description: "Monthly rent", user_id: "regular1", color: "#2196F3", category_group: "group-5"},
+		{name: "Transportation", description: "Car, bus, train", user_id: "regular1", color: "#FFC107", category_group: "group-5"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "regular1", color: "#9C27B0", category_group: "group-5"},
+
+		// Regular user 2 categories
+		{name: "Food", description: "Groceries and dining out", user_id: "regular2", color: "#4CAF50", category_group: "group-6"},
+		{name: "Utilities", description: "Bills and services", user_id: "regular2", color: "#F44336", category_group: "group-6"},
+		{name: "Transportation", description: "Car, public transit, gas", user_id: "regular2", color: "#FFC107", category_group: "group-6"},
+		{name: "Shopping", description: "Clothes, electronics", user_id: "regular2", color: "#607D8B", category_group: "group-6"},
+
+		// Regular user 3 categories
+		{name: "Food", description: "Groceries and dining out", user_id: "regular3", color: "#4CAF50", category_group: "group-7"},
+		{name: "Healthcare", description: "Medical expenses", user_id: "regular3", color: "#3F51B5", category_group: "group-7"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "regular3", color: "#9C27B0", category_group: "group-7"},
+		{name: "Travel", description: "Vacations, trips", user_id: "regular3", color: "#8BC34A", category_group: "group-7"},
+
+		// Admin user categories
+		{name: "Rent", description: "Monthly rent", user_id: "admin-user-1", color: "#2196F3", category_group: "group-8"},
+		{name: "Groceries", description: "Food and household items", user_id: "admin-user-1", color: "#4CAF50", category_group: "group-8"},
+		{name: "Utilities", description: "Electricity, water, internet", user_id: "admin-user-1", color: "#F44336", category_group: "group-8"},
+		{name: "Transportation", description: "Bus, train, Uber", user_id: "admin-user-1", color: "#FFC107", category_group: "group-8"},
+		{name: "Entertainment", description: "Movies, games", user_id: "admin-user-1", color: "#9C27B0", category_group: "group-8"},
+		{name: "Health", description: "Medical, dental", user_id: "admin-user-1", color: "#3F51B5", category_group: "group-8"},
+		{name: "Test", description: "Test Category", user_id: "admin-user-1", color: "#FF0000", category_group: "group-8"},
+
+		// Patrick Bennett categories
+		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#2196F3", category_group: "group-9"},
+		{name: "Food", description: "Groceries and dining out", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#4CAF50", category_group: "group-9"},
+		{name: "Transportation", description: "Car, public transit, gas", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#FFC107", category_group: "group-9"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#9C27B0", category_group: "group-10"},
+		{name: "Utilities", description: "Bills and services", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#F44336", category_group: "group-9"},
+		{name: "Healthcare", description: "Medical expenses", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#3F51B5", category_group: "group-9"},
+		{name: "Shopping", description: "Clothes, electronics", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#607D8B", category_group: "group-10"},
+		{name: "Travel", description: "Vacations, trips", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#8BC34A", category_group: "group-10"},
+	}
+
+	categoryIds := make(map[string]string) // Map to store category IDs by name and user
 
 	for _, cat := range sampleCategories {
-		// Insert category if it doesn't exist
+		// Create a unique ID for the category
+		categoryID := fmt.Sprintf("cat-%s-%s", cat.user_id, cat.name)
+
+		// Insert category into ynab_categories if it doesn't exist
 		_, err := db.Exec(`
-			INSERT INTO categories (name, description, user_id, color) 
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (name, user_id) DO NOTHING
-		`, cat.name, cat.description, cat.user_id, cat.color)
+			INSERT INTO ynab_categories (id, name, user_id, category_group_id, hidden, budget_amount) 
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (id) DO NOTHING
+		`, categoryID, cat.name, cat.user_id, cat.category_group, false, 0.0)
 
 		if err != nil {
-			return fmt.Errorf("failed to insert category %s: %w", cat.name, err)
-		}
-
-		// Get the category ID for later use
-		var categoryId int
-		err = db.QueryRow(`
-			SELECT id FROM categories 
-			WHERE name = $1 AND user_id = $2
-		`, cat.name, cat.user_id).Scan(&categoryId)
-
-		if err != nil {
-			return fmt.Errorf("failed to get id for category %s: %w", cat.name, err)
+			return fmt.Errorf("failed to insert ynab_category %s: %w", cat.name, err)
 		}
 
 		// Store category ID in the map using composite key of name + user_id
-		categoryIds[cat.name+"-"+cat.user_id] = categoryId
+		categoryIds[cat.name+"-"+cat.user_id] = categoryID
 	}
 
 	// First get user IDs to use for pay_to and entered_by fields
@@ -348,7 +373,7 @@ func SeedTestData(db *sql.DB) error {
 			CREATE TABLE IF NOT EXISTS transaction_categories (
 				id SERIAL PRIMARY KEY,
 				transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-				category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+				category_id TEXT NOT NULL,
 				amount NUMERIC(15,2) NOT NULL,
 				created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 				UNIQUE(transaction_id, category_id)
@@ -358,6 +383,20 @@ func SeedTestData(db *sql.DB) error {
 			return fmt.Errorf("failed to create transaction_categories table: %w", err)
 		}
 		log.Println("Created transaction_categories table")
+	}
+
+	// Add an explicit index to improve joining performance
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_transaction_categories_category_id ON transaction_categories(category_id)
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to create index on transaction_categories: %v", err)
+	}
+
+	// Clear out existing transaction_categories
+	_, err = db.Exec(`TRUNCATE TABLE transaction_categories`)
+	if err != nil {
+		log.Printf("Warning: Failed to truncate transaction_categories: %v", err)
 	}
 
 	// 2. Check if the transactions table is empty
@@ -386,14 +425,29 @@ func SeedTestData(db *sql.DB) error {
 				return fmt.Errorf("error inserting transaction %s: %w", tx.id, err)
 			}
 
+			log.Printf("Inserted transaction %s for user %s with category %s", tx.id, tx.userId, tx.categoryName)
+
 			// Get the category ID
 			categoryId, exists := categoryIds[tx.categoryName+"-"+tx.userId]
 			if !exists {
-				log.Printf("Warning: Category %s not found for user %s, skipping association", tx.categoryName, tx.userId)
-				continue
+				log.Printf("WARNING: Category %s not found for user %s, skipping association", tx.categoryName, tx.userId)
+				// Try creating the category on the fly
+				categoryId = fmt.Sprintf("cat-%s-%s", tx.userId, tx.categoryName)
+				_, err = db.Exec(`
+					INSERT INTO ynab_categories (id, name, user_id, hidden) 
+					VALUES ($1, $2, $3, $4)
+					ON CONFLICT (id) DO NOTHING
+				`, categoryId, tx.categoryName, tx.userId, false)
+
+				if err != nil {
+					log.Printf("Error creating fallback category: %v", err)
+					continue
+				}
+				log.Printf("Created fallback category %s for transaction %s", categoryId, tx.id)
 			}
 
 			// Associate the transaction with the category
+			log.Printf("Associating transaction %s with category %s (ID: %s)", tx.id, tx.categoryName, categoryId)
 			_, err = db.Exec(`
 				INSERT INTO transaction_categories 
 				(transaction_id, category_id, amount) 
@@ -405,7 +459,20 @@ func SeedTestData(db *sql.DB) error {
 				return fmt.Errorf("failed to associate transaction %s with category %s: %w", tx.id, tx.categoryName, err)
 			}
 
-			log.Printf("Associated transaction %s with category %s (ID: %d)", tx.id, tx.categoryName, categoryId)
+			// Verify the association was created
+			var count int
+			err = db.QueryRow(`
+				SELECT COUNT(*) FROM transaction_categories 
+				WHERE transaction_id = $1 AND category_id = $2
+			`, tx.id, categoryId).Scan(&count)
+
+			if err != nil {
+				log.Printf("Error verifying transaction-category association: %v", err)
+			} else if count == 0 {
+				log.Printf("WARNING: Failed to create transaction-category association for %s and %s", tx.id, categoryId)
+			} else {
+				log.Printf("VERIFIED: Associated transaction %s with category %s (ID: %s)", tx.id, tx.categoryName, categoryId)
+			}
 		}
 	}
 
@@ -537,24 +604,15 @@ func SeedTestData(db *sql.DB) error {
 		note:             "This is a test transaction for admin user testing",
 	}
 
-	// Create a test category for admin
+	// Create a test category for admin if it doesn't already exist in ynab_categories
+	adminCategoryID := fmt.Sprintf("cat-%s-Test", adminUser.id)
 	_, err = db.Exec(`
-		INSERT INTO categories (name, description, user_id, color) 
-		VALUES ('Test', 'Test Category', $1, '#FF0000')
-		ON CONFLICT (name, user_id) DO NOTHING
-	`, adminUser.id)
+		INSERT INTO ynab_categories (id, name, user_id, category_group_id, hidden, budget_amount) 
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO NOTHING
+	`, adminCategoryID, "Test", adminUser.id, "group-8", false, 0.0)
 	if err != nil {
-		return fmt.Errorf("failed to insert test category: %w", err)
-	}
-
-	// Get the category ID
-	var testCategoryId int
-	err = db.QueryRow(`
-		SELECT id FROM categories 
-		WHERE name = $1 AND user_id = $2
-	`, "Test", adminUser.id).Scan(&testCategoryId)
-	if err != nil {
-		return fmt.Errorf("failed to get id for test category: %w", err)
+		return fmt.Errorf("failed to insert test category for admin: %w", err)
 	}
 
 	// Insert admin test transaction
@@ -573,18 +631,47 @@ func SeedTestData(db *sql.DB) error {
 	}
 
 	// Associate the transaction with the category
+	log.Printf("Associating admin transaction %s with category %s (ID: %s)",
+		adminTransaction.id, adminTransaction.categoryName, adminCategoryID)
+
 	_, err = db.Exec(`
 		INSERT INTO transaction_categories 
 		(transaction_id, category_id, amount) 
 		VALUES ($1, $2, $3)
 		ON CONFLICT (transaction_id, category_id) DO NOTHING
-	`, adminTransaction.id, testCategoryId, adminTransaction.amount)
+	`, adminTransaction.id, adminCategoryID, adminTransaction.amount)
 
 	if err != nil {
 		return fmt.Errorf("failed to associate admin transaction with category: %w", err)
 	}
 
-	log.Printf("Created test transaction for admin user: %s", adminUser.id)
+	// Verify the association was created
+	var count int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM transaction_categories 
+		WHERE transaction_id = $1 AND category_id = $2
+	`, adminTransaction.id, adminCategoryID).Scan(&count)
+
+	if err != nil {
+		log.Printf("Error verifying admin transaction-category association: %v", err)
+	} else if count == 0 {
+		log.Printf("WARNING: Failed to create admin transaction-category association for %s and %s",
+			adminTransaction.id, adminCategoryID)
+	} else {
+		log.Printf("VERIFIED: Associated admin transaction %s with category %s (ID: %s)",
+			adminTransaction.id, adminTransaction.categoryName, adminCategoryID)
+	}
+
+	// Make sure Patrick Bennett is always a superadmin
+	_, err = db.Exec(`
+		UPDATE users SET role = 'superadmin' 
+		WHERE id = 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2'
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed to ensure Patrick Bennett is superadmin: %v", err)
+	} else {
+		log.Printf("Ensured Patrick Bennett (UgwzWuP8iHNF8nhqDHMwFFcg8Sc2) is set as superadmin")
+	}
 
 	log.Println("Test data seeded successfully")
 	return nil

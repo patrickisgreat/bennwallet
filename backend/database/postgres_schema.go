@@ -143,15 +143,6 @@ func CreatePostgresSchema(db *sql.DB) error {
 			note TEXT
 		);
 
-		CREATE TABLE IF NOT EXISTS categories (
-			id SERIAL PRIMARY KEY,
-			name TEXT NOT NULL,
-			description TEXT,
-			user_id TEXT NOT NULL REFERENCES users(id),
-			color TEXT,
-			UNIQUE(name, user_id)
-		);
-
 		CREATE TABLE IF NOT EXISTS permissions (
 			id SERIAL PRIMARY KEY,
 			granted_user_id TEXT NOT NULL REFERENCES users(id),
@@ -213,12 +204,10 @@ func CreatePostgresSchema(db *sql.DB) error {
 			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
-
 	if err != nil {
-		return fmt.Errorf("failed to create base schema: %w", err)
+		return fmt.Errorf("failed to create base tables: %w", err)
 	}
 
-	log.Println("PostgreSQL schema created successfully")
 	return nil
 }
 

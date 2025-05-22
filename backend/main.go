@@ -127,8 +127,20 @@ func main() {
 		log.Println("YNAB table schema check completed")
 	}
 
+	// Automatically run migrations in development environment
+	if isDevelopment {
+		log.Println("Development environment detected, running migrations automatically...")
+		if err := migrations.RunMigrations(database.DB, false); err != nil {
+			log.Printf("Error running migrations: %v", err)
+		} else {
+			log.Println("Migrations completed successfully")
+		}
+	} else {
+		log.Println("Production environment detected, skipping automatic migrations")
+	}
+
 	// Run migrations (including test data seeding if in dev/PR environment)
-	log.Println("Running migrations...")
+	log.Println("Checking database schema...")
 	err = migrations.RunMigrations(database.DB, isResetDB)
 	if err != nil {
 		log.Printf("Warning: Failed to run migrations: %v", err)
@@ -235,7 +247,7 @@ func registerRoutes(r *mux.Router) {
 
 	// Protected Category routes
 	protectedRouter.HandleFunc("/categories", handlers.GetCategories).Methods("GET")
-	protectedRouter.HandleFunc("/categories", handlers.AddCategory).Methods("POST")
+	protectedRouter.HandleFunc("/categories", handlers.CreateCategory).Methods("POST")
 	protectedRouter.HandleFunc("/categories/{id}", handlers.UpdateCategory).Methods("PUT")
 	protectedRouter.HandleFunc("/categories/{id}", handlers.DeleteCategory).Methods("DELETE")
 
@@ -257,6 +269,7 @@ func registerRoutes(r *mux.Router) {
 
 	// Diagnostic routes
 	protectedRouter.HandleFunc("/diagnostic/db-check", handlers.CheckDatabaseHandler).Methods("GET")
+	protectedRouter.HandleFunc("/diagnostic/transaction-categories", handlers.CheckTransactionCategories).Methods("GET")
 
 	// Permission management routes
 	protectedRouter.HandleFunc("/permissions", handlers.GetUserPermissions).Methods("GET")
