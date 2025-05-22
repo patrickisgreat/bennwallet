@@ -62,13 +62,13 @@ jobs:
         if: github.event.inputs.action == 'migrate'
         run: |
           echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "/app/bennwallet migrate"
       
       - name: Reset database
         if: github.event.inputs.action == 'reset' && github.event.inputs.environment == 'dev'
         run: |
           echo "Resetting development database..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
           echo "Database reset and migrations completed successfully"
       
       - name: Backup database

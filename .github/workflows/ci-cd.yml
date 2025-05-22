@@ -163,20 +163,20 @@ jobs:
       - name: Run database migrations
         run: |
           echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "/app/bennwallet migrate"
       
       - name: Reset and seed dev database
         if: env.ENV == 'development'
         run: |
           echo "Resetting and seeding development database..."
           # Reset the database first
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset"
           
           # Run migrations to set up tables
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "/app/bennwallet migrate"
           
           # Seed test data from seed_test_data.go
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export APP_ENV=development && /app/bennwallet seed-dev-data"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} "export APP_ENV=development && /app/bennwallet seed-dev-data"
           
           echo "Database reset and seeded successfully"
 
