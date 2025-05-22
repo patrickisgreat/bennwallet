@@ -1,0 +1,84 @@
+name: Database Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to manage (dev or prod)'
+        required: true
+        default: 'dev'
+      action:
+        description: 'Database action to perform (migrate, reset, seed)'
+        required: true
+        default: 'migrate'
+        type: choice
+        options:
+          - migrate
+          - reset
+          - seed
+          - reset-and-seed
+  push:
+    branches: [dev]
+    paths:
+      - 'backend/database/**'
+      - 'backend/migrations/**'
+
+env:
+  DO_APP_ID_DEV: ${{ secrets.DO_APP_ID_DEV }}
+  DO_APP_ID_PROD: ${{ secrets.DO_APP_ID_PROD }}
+
+jobs:
+  manage-database:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          
+      - name: Set environment variables
+        id: set-env
+        run: |
+          # Set app ID based on environment input or branch
+          if [[ "${{ github.event.inputs.environment }}" == "prod" || "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "APP_ID=${{ env.DO_APP_ID_PROD }}" >> $GITHUB_ENV
+            echo "ENV=production" >> $GITHUB_ENV
+          else
+            echo "APP_ID=${{ env.DO_APP_ID_DEV }}" >> $GITHUB_ENV
+            echo "ENV=development" >> $GITHUB_ENV
+          fi
+          
+          # Set action based on input or default to migrate
+          if [[ "${{ github.event.inputs.action }}" == "" ]]; then
+            if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+              echo "ACTION=reset-and-seed" >> $GITHUB_ENV
+            else
+              echo "ACTION=migrate" >> $GITHUB_ENV
+            fi
+          else
+            echo "ACTION=${{ github.event.inputs.action }}" >> $GITHUB_ENV
+          fi
+      
+      - name: Run database migrations
+        if: env.ACTION == 'migrate' || env.ACTION == 'reset-and-seed'
+        run: |
+          echo "Running database migrations on ${{ env.ENV }}..."
+          doctl apps create-deployment-proxy-exec ${{ env.APP_ID }} --component-name api << 'EOF'
+            ./bennwallet migrate
+          EOF
+      
+      - name: Reset database (Development Only)
+        if: env.ENV == 'development' && (env.ACTION == 'reset' || env.ACTION == 'reset-and-seed')
+        run: |
+          echo "Resetting development database..."
+          doctl apps create-deployment-proxy-exec ${{ env.APP_ID }} --component-name api << 'EOF'
+            ./bennwallet db-reset
+          EOF
+      
+      - name: Seed database with test data (Development Only)
+        if: env.ENV == 'development' && (env.ACTION == 'seed' || env.ACTION == 'reset-and-seed')
+        run: |
+          echo "Seeding development database with test data..."
+          doctl apps create-deployment-proxy-exec ${{ env.APP_ID }} --component-name api << 'EOF'
+            ./bennwallet seed-dev-data
+          EOF 

@@ -5,358 +5,42 @@ on:
     branches: [main]
 
 env:
-  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-  FLY_PROD_APP_NAME: 'bennwallet-prod'
-  FLY_PROD_DB_NAME: 'bennwallet-prod-db'
-  GO_VERSION: '1.24'
-  NODE_VERSION: '20'
-
-permissions:
-  contents: read
-  deployments: write
+  DO_APP_ID: ${{ secrets.DO_APP_ID_PROD }}
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: backend/go.sum
-      
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      
-      - name: Install dependencies
-        run: |
-          npm ci
-
-      - name: Get version
-        id: version
-        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Create production .env
-        run: |
-          echo "VITE_API_URL=https://${{ env.FLY_PROD_APP_NAME }}.fly.dev" > .env
-
-      - name: Build frontend
-        env:
-          NODE_ENV: production
-        run: npm run build
-
-      - name: Upload frontend build
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-build
-          path: dist/
-          retention-days: 1
-
-  deploy-db:
+  run-migrations:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@master
-      
-      - name: Check if Postgres app exists
-        id: check-db
-        continue-on-error: true
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          
+      - name: Wait for deployment to complete
         run: |
-          if flyctl apps list | grep -q "${{ env.FLY_PROD_DB_NAME }}"; then
-            echo "DB_EXISTS=true" >> $GITHUB_ENV
-            echo "Postgres app ${{ env.FLY_PROD_DB_NAME }} exists"
-          else
-            echo "DB_EXISTS=false" >> $GITHUB_ENV
-            echo "Postgres app ${{ env.FLY_PROD_DB_NAME }} does not exist"
-          fi
-      
-      - name: Create Postgres app if it doesn't exist
-        if: env.DB_EXISTS == 'false'
-        run: |
-          # Create temporary directory for Postgres app files
-          mkdir -p postgres-app
-          cd postgres-app
+          echo "Waiting for Digital Ocean automatic deployment to complete..."
+          # Wait for 30 seconds to give DO time to start the deployment
+          sleep 30
           
-          # Create the Dockerfile for Postgres
-          cat > Dockerfile << EOF
-          FROM postgres:14-alpine
-          
-          # Health check
-          HEALTHCHECK --interval=5s --timeout=5s --start-period=5s --retries=3 \
-            CMD pg_isready -U postgres || exit 1
-          
-          EXPOSE 5432
-          EOF
-          
-          # Create fly.toml for the Postgres app
-          cat > fly.toml << EOF
-          app = "${{ env.FLY_PROD_DB_NAME }}"
-          primary_region = "lax"
-          
-          [env]
-            POSTGRES_USER = "postgres"
-            POSTGRES_PASSWORD = "${{ secrets.DB_PASSWORD || 'postgres' }}"
-            POSTGRES_DB = "bennwallet"
-          
-          [[services]]
-            internal_port = 5432
-            protocol = "tcp"
-            
-            [services.concurrency]
-              hard_limit = 25
-              soft_limit = 20
-              type = "connections"
-              
-            [[services.ports]]
-              port = 5432
-              
-            [[services.tcp_checks]]
-              grace_period = "1s"
-              interval = "15s"
-              restart_limit = 6
-              timeout = "2s"
-          
-          [[vm]]
-            memory = "1gb"
-            cpu_kind = "shared"
-            cpus = 1
-          
-          [[mounts]]
-            source = "postgres_data"
-            destination = "/var/lib/postgresql/data"
-          EOF
-          
-          # Create the app
-          flyctl apps create "${{ env.FLY_PROD_DB_NAME }}" --org personal
-          
-          # Create volume for Postgres data
-          flyctl volumes create postgres_data --app "${{ env.FLY_PROD_DB_NAME }}" --size 10 -r lax -y
-          
-          # Deploy the Postgres app
-          flyctl deploy --app "${{ env.FLY_PROD_DB_NAME }}" -y
-          
-          # Allocate IPs for the database
-          flyctl ips allocate-v4 --app "${{ env.FLY_PROD_DB_NAME }}" -y
-          
-          echo "Waiting for Postgres to be ready..."
+          # Check deployment status every 10 seconds
           for i in {1..12}; do
-            echo "Checking Postgres status (attempt $i/12)..."
-            if flyctl status --app "${{ env.FLY_PROD_DB_NAME }}" | grep -q "running"; then
-              echo "Postgres is running!"
+            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.DO_APP_ID }} --format ID,Status,Progress --no-header)
+            echo "Current deployments: $DEPLOYMENTS"
+            
+            if [[ $DEPLOYMENTS == *"ACTIVE"* ]]; then
+              echo "Deployment is active"
               break
-            fi
-            if [ $i -eq 12 ]; then
-              echo "Postgres not ready after 2 minutes, but continuing anyway"
+            elif [[ $i -eq 12 ]]; then
+              echo "Waited 2 minutes, continuing anyway"
             else
-              echo "Postgres not ready yet, waiting 10 seconds..."
+              echo "Waiting for deployment to complete, checking again in 10 seconds..."
               sleep 10
             fi
           done
-
-  deploy-app:
-    needs: [build, deploy-db]
-    runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://${{ env.FLY_PROD_APP_NAME }}.fly.dev
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download frontend build
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-build
-          path: dist/
-
-      - name: Set up Flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Check if prod app exists
-        id: check-app
-        continue-on-error: true
-        run: |
-          if flyctl apps list | grep -q "${{ env.FLY_PROD_APP_NAME }}"; then
-            echo "APP_EXISTS=true" >> $GITHUB_ENV
-          else
-            echo "APP_EXISTS=false" >> $GITHUB_ENV
-          fi
-
-      - name: Debug - List Fly.io apps
-        run: |
-          echo "Listing all Fly.io apps:"
-          flyctl apps list
-          echo "-----------------------"
-
-      - name: Create prod app
-        run: |
-          echo "Creating app ${{ env.FLY_PROD_APP_NAME }}..."
-          # Force create even if it exists (will just return an error we can ignore)
-          flyctl apps create "${{ env.FLY_PROD_APP_NAME }}" --org personal || echo "App may already exist, continuing..."
-          
-          # Verify it exists now
-          if ! flyctl apps list | grep -q "${{ env.FLY_PROD_APP_NAME }}"; then
-            echo "Failed to create app ${{ env.FLY_PROD_APP_NAME }}"
-            exit 1
-          fi
-          echo "App ${{ env.FLY_PROD_APP_NAME }} is ready."
-
-      - name: Verify database connectivity
-        run: |
-          echo "Verifying database connectivity..."
-          echo "Waiting for database to be fully ready..."
-          sleep 10
-          
-          # Check if the database app is running
-          for i in {1..12}; do
-            echo "Checking database status (attempt $i/12)..."
-            if flyctl status --app "${{ env.FLY_PROD_DB_NAME }}" | grep -q "running"; then
-              echo "Database is running!"
-              break
-            fi
-            if [ $i -eq 12 ]; then
-              echo "Database not ready after 2 minutes, continuing anyway"
-            else
-              echo "Database not ready yet, waiting 10 seconds..."
-              sleep 10
-            fi
-          done
-          
-          # Try to directly test database connectivity by running a query
-          echo "Testing direct connection to the database..."
-          flyctl ssh console -a ${{ env.FLY_PROD_DB_NAME }} -C "psql -U postgres -c 'SELECT 1'" || echo "Database connection test failed, but continuing..."
-          
-          # Get the Flycast address for more reliable connection
-          echo "Getting Flycast address for database..."
-          DB_FLYCAST=$(flyctl status --app ${{ env.FLY_PROD_DB_NAME }} | grep -o "fdaa:[0-9a-f:]*" | head -1 || echo "")
-          if [ -n "$DB_FLYCAST" ]; then
-            echo "Flycast address found: $DB_FLYCAST"
-            echo "DB_FLYCAST=$DB_FLYCAST" >> $GITHUB_ENV
-          else
-            echo "Could not find Flycast address, will use .internal DNS instead"
-          fi
-
-      - name: Set DATABASE_URL and other secrets
-        run: |
-          echo "Setting up database connection and other secrets..."
-          DB_PASSWORD="${{ secrets.DB_PASSWORD || 'postgres' }}"
-          
-          # Use the flycast domain for database connection
-          DB_HOST="${{ env.FLY_PROD_DB_NAME }}.flycast"
-          DB_PORT="5432"
-          
-          echo "Database connection will use: $DB_HOST:$DB_PORT"
-          
-          # Set the DATABASE_URL secret and other critical secrets
-          flyctl secrets set \
-            DATABASE_URL="postgres://postgres:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/bennwallet" \
-            YNAB_API_TOKEN="${{ secrets.YNAB_API_TOKEN }}" \
-            YNAB_BUDGET_ID="${{ secrets.YNAB_BUDGET_ID }}" \
-            YNAB_ACCOUNT_ID="${{ secrets.YNAB_ACCOUNT_ID }}" \
-            -a ${{ env.FLY_PROD_APP_NAME }}
-
-      - name: Set Firebase credentials in Fly.io
-        run: |
-          echo "Setting Firebase credentials in Fly.io secrets..."
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > /tmp/firebase-credentials.json
-          if command -v jq &> /dev/null; then
-            cat /tmp/firebase-credentials.json | jq . > /tmp/formatted-credentials.json
-            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/formatted-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
-            rm /tmp/formatted-credentials.json
-          else
-            flyctl secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat /tmp/firebase-credentials.json)" -a ${{ env.FLY_PROD_APP_NAME }}
-          fi
-          rm /tmp/firebase-credentials.json
-
-      - name: Check and create required volumes
-        id: check-volume
-        run: |
-          if ! flyctl volumes list --app "${{ env.FLY_PROD_APP_NAME }}" | grep -q "bennwallet_prod_data"; then
-            echo "Creating volume for production..."
-            flyctl volumes create bennwallet_prod_data --size 1 --app "${{ env.FLY_PROD_APP_NAME }}" --region lax -y
-          else
-            echo "Production volume already exists."
-          fi
-
-      - name: Create fly.toml
-        run: |
-          cat > fly.toml << EOF
-          app = "${{ env.FLY_PROD_APP_NAME }}"
-          primary_region = "lax"
-
-          [build]
-            dockerfile = "Dockerfile"
-
-          [build.args]
-            # Secrets should be set using fly secrets set, not in this file
-            YNAB_ACCOUNT_ID = ""
-            YNAB_API_TOKEN = ""
-            YNAB_BUDGET_ID = ""
-
-          [env]
-            PORT = "8080"
-            NODE_ENV = "production"
-            ENVIRONMENT = "production"
-            # Secrets should be set using fly secrets set, not in this file
-            YNAB_ACCOUNT_ID = ""
-            YNAB_API_TOKEN = ""
-            YNAB_BUDGET_ID = ""
-
-          [http_service]
-            internal_port = 8080
-            force_https = true
-            auto_stop_machines = true
-            auto_start_machines = true
-            min_machines_running = 1
-            processes = ["app"]
-
-          [[vm]]
-            cpu_kind = "shared"
-            cpus = 1
-            memory_mb = 1024
-            
-          [[mounts]]
-            source = "bennwallet_prod_data"
-            destination = "/data"
-            
-            [mounts.options]
-              size = "1"
-          EOF
-
-      - name: Deploy to Fly.io Production
-        run: flyctl deploy --remote-only --app ${{ env.FLY_PROD_APP_NAME }} -y
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          NODE_ENV: production
-
-      - name: Check app status
-        run: |
-          echo "Checking app status..."
-          for i in {1..12}; do
-            echo "Checking app status (attempt $i/12)..."
-            if flyctl status --app "${{ env.FLY_PROD_APP_NAME }}" | grep -q "running"; then
-              echo "App is running!"
-              break
-            fi
-            if [ $i -eq 12 ]; then
-              echo "::warning::App not ready after 2 minutes. Check logs for issues."
-            else
-              echo "App not ready yet, waiting 10 seconds..."
-              sleep 10
-            fi
-          done
-
+      
       - name: Run database migrations
         run: |
           echo "Running database migrations on production..."
-          flyctl ssh console -a ${{ env.FLY_PROD_APP_NAME }} -C "/app/bennwallet migrate"
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          doctl apps create-deployment-proxy-exec ${{ env.DO_APP_ID }} --component-name api << 'EOF'
+            ./bennwallet migrate
+          EOF
