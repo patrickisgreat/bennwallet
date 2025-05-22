@@ -85,33 +85,66 @@ jobs:
             echo "ENV=development" >> $GITHUB_ENV
           fi
       
+      - name: Get app info
+        run: |
+          echo "Getting app info:"
+          doctl apps get ${{ env.APP_ID }} --format Name,DefaultIngress,ActiveDeployment.ID
+
+      - name: Get component list and store component name
+        run: |
+          echo "Getting component list:"
+          doctl apps get ${{ env.APP_ID }} --format Spec.Services.Name --no-header
+          
+          # Get and store the component name
+          COMPONENT_NAME=$(doctl apps get ${{ env.APP_ID }} --format Spec.Services[0].Name --no-header | tr -d '\n')
+          echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
+          echo "Using component name: $COMPONENT_NAME"
+
       - name: Wait for DO automatic deployment
         run: |
           echo "Waiting for Digital Ocean automatic deployment (triggered by GitHub push)..."
           sleep 60  # Give DO some time to start the deployment
           
-          for i in {1..10}; do
+          # Create new deployment to make sure we have a clean one
+          DEPLOYMENT_ID=$(doctl apps create-deployment ${{ env.APP_ID }} --wait --format ID --no-header)
+          echo "Created deployment ID: $DEPLOYMENT_ID"
+          
+          # Now monitor the deployment
+          for i in {1..15}; do
             DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }} --format ID,Status,Progress --no-header)
             echo "Current deployments: $DEPLOYMENTS"
             
-            if [[ $DEPLOYMENTS == *"ACTIVE"* ]]; then
-              echo "Deployment is active"
+            # Check for the latest deployment status
+            LATEST_STATUS=$(doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --format Progress --no-header)
+            echo "Latest deployment status: $LATEST_STATUS"
+            
+            if [[ "$LATEST_STATUS" == "7/7" ]]; then
+              echo "Deployment completed successfully!"
               break
+            elif [[ "$LATEST_STATUS" == *"errors"* ]]; then
+              echo "Deployment has errors. Getting more details..."
+              doctl apps get-deployment ${{ env.APP_ID }} $DEPLOYMENT_ID --verbose
+              exit 1
             fi
-            echo "Waiting for deployment... checking again in 15 seconds"
-            sleep 15
+            
+            if [ $i -eq 15 ]; then
+              echo "Waited for 5 minutes, continuing anyway"
+            else
+              echo "Waiting for deployment... checking again in 20 seconds"
+              sleep 20
+            fi
           done
       
       - name: Run database migrations
         run: |
           echo "Running migrations for ${{ env.ENV }} environment..."
-          doctl apps console ${{ env.APP_ID }} api -c "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
       
       - name: Reset and seed dev database
         if: env.ENV == 'development'
         run: |
           echo "Resetting and seeding development database..."
-          doctl apps console ${{ env.APP_ID }} api -c "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet db-reset && /app/bennwallet migrate"
 
   backup-dev:
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'

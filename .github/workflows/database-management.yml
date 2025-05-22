@@ -59,20 +59,26 @@ jobs:
             echo "ACTION=${{ github.event.inputs.action }}" >> $GITHUB_ENV
           fi
       
+      - name: Get component name
+        run: |
+          COMPONENT_NAME=$(doctl apps get ${{ env.APP_ID }} --format Spec.Services[0].Name --no-header | tr -d '\n')
+          echo "COMPONENT_NAME=$COMPONENT_NAME" >> $GITHUB_ENV
+          echo "Using component name: $COMPONENT_NAME"
+      
       - name: Run database migrations
         if: env.ACTION == 'migrate' || env.ACTION == 'reset-and-seed'
         run: |
           echo "Running database migrations on ${{ env.ENV }}..."
-          doctl apps console ${{ env.APP_ID }} api -c "/app/bennwallet migrate"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate"
       
       - name: Reset database (Development Only)
         if: env.ENV == 'development' && (env.ACTION == 'reset' || env.ACTION == 'reset-and-seed')
         run: |
           echo "Resetting development database..."
-          doctl apps console ${{ env.APP_ID }} api -c "/app/bennwallet db-reset"
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet db-reset"
       
       - name: Seed database with test data (Development Only)
         if: env.ENV == 'development' && (env.ACTION == 'seed' || env.ACTION == 'reset-and-seed')
         run: |
           echo "Seeding development database with test data..."
-          doctl apps console ${{ env.APP_ID }} api -c "export RESET_DB=true && export APP_ENV=development && /app/bennwallet seed-dev-data" 
+          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "export RESET_DB=true && export APP_ENV=development && /app/bennwallet seed-dev-data" 
