@@ -136,10 +136,10 @@ jobs:
             DEPLOYMENT_INFO=$(doctl apps get-deployment ${{ env.APP_ID }} $ACTIVE_DEPLOYMENT_ID --output json)
             echo "Active deployment info: $DEPLOYMENT_INFO"
             
-            # Check progress
-            PROGRESS=$(echo $DEPLOYMENT_INFO | jq -r '.progress.success_steps')
-            TOTAL_STEPS=$(echo $DEPLOYMENT_INFO | jq -r '.progress.total_steps')
-            PHASE=$(echo $DEPLOYMENT_INFO | jq -r '.phase')
+            # Check progress - fix for array structure
+            PROGRESS=$(echo $DEPLOYMENT_INFO | jq -r '.[0].progress.success_steps')
+            TOTAL_STEPS=$(echo $DEPLOYMENT_INFO | jq -r '.[0].progress.total_steps')
+            PHASE=$(echo $DEPLOYMENT_INFO | jq -r '.[0].phase')
             
             echo "Deployment progress: $PROGRESS/$TOTAL_STEPS, Phase: $PHASE"
             
