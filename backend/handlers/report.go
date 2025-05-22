@@ -375,7 +375,7 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		SELECT c.name as category, SUM(t.amount) as total
 		FROM transactions t
 		JOIN transaction_categories tc ON t.id = tc.transaction_id
-		JOIN categories c ON tc.category_id = c.id
+		JOIN ynab_categories c ON tc.category_id = c.id
 		WHERE 1=1
 	`
 	var args []interface{}
