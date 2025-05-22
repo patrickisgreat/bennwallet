@@ -1,0 +1,135 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+  DO_APP_ID_DEV: ${{ secrets.DO_APP_ID_DEV }}
+  DO_APP_ID_PROD: ${{ secrets.DO_APP_ID_PROD }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bennwallet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run backend tests
+        run: cd backend && go test -v ./...
+        env:
+          TEST_DB_HOST: localhost
+          TEST_DB_PORT: 5432
+          TEST_DB_USER: postgres
+          TEST_DB_PASSWORD: postgres
+          TEST_DB_NAME: bennwallet_test
+      
+      - name: Run frontend tests
+        run: npm test
+  
+  deploy:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      
+      - name: Set environment variables
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "APP_ID=${{ env.DO_APP_ID_PROD }}" >> $GITHUB_ENV
+            echo "ENV=production" >> $GITHUB_ENV
+          else
+            echo "APP_ID=${{ env.DO_APP_ID_DEV }}" >> $GITHUB_ENV
+            echo "ENV=development" >> $GITHUB_ENV
+            echo "RESET_DB=true" >> $GITHUB_ENV
+          fi
+      
+      - name: Wait for DO automatic deployment
+        run: |
+          echo "Waiting for Digital Ocean automatic deployment (triggered by GitHub push)..."
+          sleep 60  # Give DO some time to start the deployment
+          
+          for i in {1..10}; do
+            DEPLOYMENTS=$(doctl apps list-deployments ${{ env.APP_ID }} --format ID,Status,Progress --no-header)
+            echo "Current deployments: $DEPLOYMENTS"
+            
+            if [[ $DEPLOYMENTS == *"ACTIVE"* ]]; then
+              echo "Deployment is active"
+              break
+            fi
+            echo "Waiting for deployment... checking again in 15 seconds"
+            sleep 15
+          done
+      
+      - name: Run database migrations
+        run: |
+          echo "Running migrations for ${{ env.ENV }} environment..."
+          doctl apps create-deployment-proxy-exec ${{ env.APP_ID }} --component-name api << 'EOF'
+            ./bennwallet migrate
+          EOF
+      
+      - name: Reset and seed dev database
+        if: env.ENV == 'development'
+        run: |
+          echo "Resetting and seeding development database..."
+          doctl apps create-deployment-proxy-exec ${{ env.APP_ID }} --component-name api << 'EOF'
+            # Set environment variables needed for seeding
+            export RESET_DB=true
+            export APP_ENV=development
+            # Run reset and migration
+            ./bennwallet db-reset
+            ./bennwallet migrate
+          EOF
+
+  backup:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      
+      - name: Backup production database
+        run: |
+          echo "Creating production database backup..."
+          doctl databases backup ${{ secrets.DO_DB_ID_PROD }} 
