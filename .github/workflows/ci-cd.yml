@@ -11,6 +11,8 @@ env:
   NODE_VERSION: '20'
   DO_APP_ID_DEV: ${{ secrets.DO_APP_ID_DEV }}
   DO_APP_ID_PROD: ${{ secrets.DO_APP_ID_PROD }}
+  DO_DB_ID_DEV: ${{ secrets.DO_DB_ID_DEV }}
+  DO_DB_ID_PROD: ${{ secrets.DO_DB_ID_PROD }}
 
 jobs:
   test:
@@ -75,11 +77,12 @@ jobs:
         run: |
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "APP_ID=${{ env.DO_APP_ID_PROD }}" >> $GITHUB_ENV
+            echo "DB_ID=${{ env.DO_DB_ID_PROD }}" >> $GITHUB_ENV
             echo "ENV=production" >> $GITHUB_ENV
           else
             echo "APP_ID=${{ env.DO_APP_ID_DEV }}" >> $GITHUB_ENV
+            echo "DB_ID=${{ env.DO_DB_ID_DEV }}" >> $GITHUB_ENV
             echo "ENV=development" >> $GITHUB_ENV
-            echo "RESET_DB=true" >> $GITHUB_ENV
           fi
       
       - name: Wait for DO automatic deployment
@@ -119,7 +122,22 @@ jobs:
             ./bennwallet migrate
           EOF
 
-  backup:
+  backup-dev:
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      
+      - name: Backup development database
+        run: |
+          echo "Creating development database backup..."
+          doctl databases backup ${{ env.DO_DB_ID_DEV }}
+
+  backup-prod:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: deploy
     runs-on: ubuntu-latest
@@ -132,4 +150,4 @@ jobs:
       - name: Backup production database
         run: |
           echo "Creating production database backup..."
-          doctl databases backup ${{ secrets.DO_DB_ID_PROD }} 
+          doctl databases backup ${{ env.DO_DB_ID_PROD }} 
