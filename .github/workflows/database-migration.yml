@@ -55,5 +55,7 @@ jobs:
       
       - name: Run database migrations
         run: |
-          echo "Running database migrations on ${{ env.ENV }}..."
-          doctl apps console ${{ env.APP_ID }} ${{ env.COMPONENT_NAME }} --command "/app/bennwallet migrate" 
+          echo "Running migrations for ${{ env.ENV }} environment..."
+          # Create a deployment with a post-deployment command
+          doctl apps update ${{ env.APP_ID }} --spec <(echo '{"envs":[{"key":"RUN_MIGRATIONS","value":"true","scope":"RUN_TIME"}]}')
+          doctl apps create-deployment ${{ env.APP_ID }} --force-rebuild --wait 
