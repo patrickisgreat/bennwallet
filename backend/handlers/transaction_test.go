@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -77,40 +78,10 @@ func setupTransactionTestDB() {
 		}
 	}
 
-	// Check if ynab_categories table exists
-	var ynabCategoriesExists bool
-	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ynab_categories')").Scan(&ynabCategoriesExists)
+	// Use the helper function to seed YNAB test data with proper groups and categories
+	err = SeedYNABTestData(db)
 	if err != nil {
-		panic(err)
-	}
-
-	// Create ynab_categories table if it doesn't exist
-	if !ynabCategoriesExists {
-		_, err = db.Exec(`
-			CREATE TABLE IF NOT EXISTS ynab_categories (
-				id TEXT PRIMARY KEY,
-				name TEXT NOT NULL,
-				category_group_id TEXT,
-				hidden BOOLEAN DEFAULT false,
-				budget_amount DECIMAL(15,2),
-				user_id TEXT NOT NULL,
-				created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-				updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-				last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-			)
-		`)
-		if err != nil {
-			panic(err)
-		}
-
-		// Insert a test category
-		_, err = db.Exec(`
-			INSERT INTO ynab_categories (id, name, user_id)
-			VALUES ($1, $2, $3)
-		`, "test-category-id", "TestCategory", "test-user-id")
-		if err != nil {
-			panic(err)
-		}
+		panic(fmt.Errorf("failed to seed YNAB test data: %w", err))
 	}
 }
 

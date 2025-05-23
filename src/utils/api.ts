@@ -49,7 +49,7 @@ interface BackendTransaction {
   optional?: boolean;
   note?: string;
   categories?: Array<{
-    id: number;
+    id: string; // Backend expects string, not number
     name: string;
     description: string;
     color?: string;
@@ -65,7 +65,7 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
   const backendTx: BackendTransaction = {
     id: tx.id,
     amount: tx.amount,
-    description: tx.note || '',  // Use the note field for the backend description field
+    description: `${tx.payTo ? tx.payTo + ' - ' : ''}${tx.category}`, // Create description from payTo and category
     date: tx.entered,
     transactionDate: tx.transactionDate,
     type: tx.category,
@@ -74,7 +74,7 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
     paidDate: tx.paidDate,
     enteredBy: tx.enteredBy,
     optional: tx.optional,
-    note: tx.note || '',  // Also send the note field directly
+    note: tx.note || '', // Keep note as the additional notes field
   };
 
   console.log('Debug - Backend note after conversion:', backendTx.note);
@@ -83,11 +83,11 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
   // Add categories if available
   if (tx.categories && tx.categories.length > 0) {
     backendTx.categories = tx.categories.map(cat => ({
-      id: cat.id,
+      id: String(cat.id),
       name: cat.name,
       description: cat.description || '',
       color: cat.color,
-      userId: String(cat.userId), // Ensure userId is string as backend expects
+      userId: String(cat.userId),
     }));
   }
 
@@ -103,27 +103,26 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
   const frontendTx: Transaction = {
     id: tx.id,
     entered: tx.date,
-    transactionDate: tx.transactionDate || tx.date, // Fall back to entered date if transaction date not available
-    payTo: tx.payTo || '', // Use empty string if payTo is missing
+    transactionDate: tx.transactionDate || tx.date,
+    payTo: tx.payTo || '',
     amount: tx.amount,
-    note: tx.note || tx.description || '', // Use note field if available, otherwise fall back to description
+    note: tx.note || '',
     category: tx.type,
     paid: tx.paid || false,
     paidDate: tx.paidDate,
-    enteredBy: tx.enteredBy || '', // Use empty string if enteredBy is missing
+    enteredBy: tx.enteredBy || '',
     optional: tx.optional || false,
   };
 
   console.log('Debug - Frontend note after conversion:', frontendTx.note);
 
-  // Add categories if available from backend
   if (tx.categories && tx.categories.length > 0) {
     frontendTx.categories = tx.categories.map(cat => ({
       id: cat.id,
       name: cat.name,
       description: cat.description,
       color: cat.color || '',
-      userId: typeof cat.userId === 'string' ? parseInt(cat.userId, 10) : cat.userId,
+      userId: String(cat.userId),
     }));
   }
 
@@ -591,11 +590,11 @@ export async function checkDatabaseHealth(): Promise<{
 
 // Add the Category interface and fetchCategories function
 export interface Category {
-  id: number;
+  id: string;
   name: string;
   description: string;
   color?: string;
-  userId: number | string;
+  userId: string;
 }
 
 export async function fetchCategories(): Promise<Category[]> {

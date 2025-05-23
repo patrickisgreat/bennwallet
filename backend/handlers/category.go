@@ -25,12 +25,19 @@ func GetCategories(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Getting categories for user ID: %s", userId)
 
-	// Changed from categories to ynab_categories table
+	// First check if we should return hierarchical structure
+	hierarchical := r.URL.Query().Get("hierarchical")
+	if hierarchical == "true" {
+		getCategoriesHierarchical(w, r, userId)
+		return
+	}
+
+	// Original flat list for backward compatibility
 	rows, err := database.DB.Query(`
-		SELECT id, name, name as description, '#3498DB' as color 
-		FROM ynab_categories 
-		WHERE user_id = $1 AND hidden = false
-		ORDER BY name
+		SELECT c.id, c.name, c.name as description, '#3498DB' as color 
+		FROM ynab_categories c
+		WHERE c.user_id = $1 AND c.hidden = false
+		ORDER BY c.name
 	`, userId)
 	if err != nil {
 		log.Printf("Error querying ynab_categories: %v", err)
@@ -57,6 +64,81 @@ func GetCategories(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(categories)
+}
+
+// getCategoriesHierarchical returns categories grouped by their category groups
+func getCategoriesHierarchical(w http.ResponseWriter, r *http.Request, userId string) {
+	log.Printf("Getting hierarchical categories for user ID: %s", userId)
+
+	// Get category groups first
+	groupRows, err := database.DB.Query(`
+		SELECT id, name 
+		FROM ynab_category_groups 
+		WHERE user_id = $1 
+		ORDER BY name
+	`, userId)
+	if err != nil {
+		log.Printf("Error querying ynab_category_groups: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer groupRows.Close()
+
+	type CategoryGroup struct {
+		ID         string                `json:"id"`
+		Name       string                `json:"name"`
+		Categories []models.YNABCategory `json:"categories"`
+	}
+
+	var groups []CategoryGroup
+	for groupRows.Next() {
+		var group CategoryGroup
+		err := groupRows.Scan(&group.ID, &group.Name)
+		if err != nil {
+			log.Printf("Error scanning group: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		groups = append(groups, group)
+	}
+
+	// Get categories for each group
+	for i, group := range groups {
+		catRows, err := database.DB.Query(`
+			SELECT id, name
+			FROM ynab_categories
+			WHERE user_id = $1 AND (group_id = $2 OR category_group_id = $2) AND hidden = false
+			ORDER BY name
+		`, userId, group.ID)
+		if err != nil {
+			log.Printf("Error querying categories for group %s: %v", group.ID, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		var categories []models.YNABCategory
+		for catRows.Next() {
+			var cat models.YNABCategory
+			err := catRows.Scan(&cat.ID, &cat.Name)
+			if err != nil {
+				catRows.Close()
+				log.Printf("Error scanning category: %v", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			cat.CategoryGroupID = group.ID
+			cat.CategoryGroupName = group.Name
+			categories = append(categories, cat)
+		}
+		catRows.Close()
+
+		groups[i].Categories = categories
+	}
+
+	log.Printf("Returning %d category groups with categories for user %s", len(groups), userId)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(groups)
 }
 
 func CreateCategory(w http.ResponseWriter, r *http.Request) {

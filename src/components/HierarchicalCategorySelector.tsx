@@ -77,41 +77,19 @@ export default function HierarchicalCategorySelector({
     setError(null);
     
     try {
-      // Try to fetch direct database categories first
-      const databaseCategories = await fetchCategories();
-      
-      // Transform database categories into category groups
-      if (databaseCategories && databaseCategories.length > 0) {
-        // Group categories by color for visual organization
-        const colorGroups: { [key: string]: YNABCategory[] } = {};
-        
-        databaseCategories.forEach(cat => {
-          // Use the color as a group key, or "Other" if no color
-          const colorKey = cat.color || "#CCCCCC";
-          const colorName = getColorName(colorKey);
-          
-          if (!colorGroups[colorKey]) {
-            colorGroups[colorKey] = [];
-          }
-          
-          colorGroups[colorKey].push({
-            id: String(cat.id),
-            name: cat.name,
-            category_group_id: colorKey,
-            category_group_name: colorName
-          });
+      // First try to get hierarchical categories from the regular database
+      try {
+        const response = await api.get('/categories', {
+          params: { userId: currentUser.id, hierarchical: 'true' }
         });
         
-        // Convert the color groups to category groups
-        const groups: CategoryGroup[] = Object.entries(colorGroups).map(([colorKey, categories]) => ({
-          id: colorKey,
-          name: getColorName(colorKey),
-          categories
-        }));
-        
-        setCategoryGroups(groups);
-        setLoading(false);
-        return;
+        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+          setCategoryGroups(response.data);
+          setLoading(false);
+          return;
+        }
+      } catch (error) {
+        console.error('Error loading hierarchical categories:', error);
       }
       
       // Fallback: Try to fetch YNAB categories
@@ -120,18 +98,58 @@ export default function HierarchicalCategorySelector({
           params: { userId: currentUser.id }
         });
         
-        if (response.data && Array.isArray(response.data)) {
+        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
           setCategoryGroups(response.data);
+          setLoading(false);
+          return;
         } else {
           console.warn('YNAB categories API did not return expected data:', response.data);
-          setCategoryGroups([]);
         }
       } catch (ynabError) {
         console.error('Error loading YNAB categories:', ynabError);
-        // If we already got database categories, don't show an error
-        if (databaseCategories.length === 0) {
+      }
+
+      // Final fallback: Try to fetch flat database categories and group them by color
+      try {
+        const databaseCategories = await fetchCategories();
+        
+        if (databaseCategories && databaseCategories.length > 0) {
+          // Group categories by color for visual organization
+          const colorGroups: { [key: string]: YNABCategory[] } = {};
+          
+          databaseCategories.forEach(cat => {
+            // Use the color as a group key, or "Other" if no color
+            const colorKey = cat.color || "#CCCCCC";
+            const colorName = getColorName(colorKey);
+            
+            if (!colorGroups[colorKey]) {
+              colorGroups[colorKey] = [];
+            }
+            
+            colorGroups[colorKey].push({
+              id: String(cat.id),
+              name: cat.name,
+              category_group_id: colorKey,
+              category_group_name: colorName
+            });
+          });
+          
+          // Convert the color groups to category groups
+          const groups: CategoryGroup[] = Object.entries(colorGroups).map(([colorKey, categories]) => ({
+            id: colorKey,
+            name: getColorName(colorKey),
+            categories
+          }));
+          
+          setCategoryGroups(groups);
+        } else {
           setError('No categories found. Please add categories in settings.');
+          setCategoryGroups([]);
         }
+      } catch (error) {
+        console.error('Error loading flat categories:', error);
+        setError('Failed to load categories');
+        setCategoryGroups([]);
       }
     } catch (error) {
       console.error('Error loading categories:', error);

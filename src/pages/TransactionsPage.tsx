@@ -196,8 +196,7 @@ function TransactionsPage() {
     } catch (err) {
       console.error('Error loading transactions:', err);
       setApiError('Failed to load transactions. The server returned an error (500). Please contact your administrator.');
-      setTransactions([]);
-      setFilteredTransactions([]);
+      // Don't clear transactions on error
     } finally {
       setLoading(false);
     }

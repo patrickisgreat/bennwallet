@@ -203,10 +203,16 @@ func SeedTestData(db *sql.DB) error {
 		categoryID := fmt.Sprintf("cat-%s-%s", cat.user_id, cat.name)
 
 		// Insert category into ynab_categories if it doesn't exist
+		// Make sure to set both group_id and category_group_id to the same value
 		_, err := db.Exec(`
-			INSERT INTO ynab_categories (id, name, user_id, category_group_id, hidden, budget_amount) 
-			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (id) DO NOTHING
+			INSERT INTO ynab_categories (id, name, user_id, group_id, category_group_id, hidden, budget_amount) 
+			VALUES ($1, $2, $3, $4, $4, $5, $6)
+			ON CONFLICT (id) DO UPDATE SET
+			name = $2,
+			group_id = $4,
+			category_group_id = $4,
+			hidden = $5,
+			budget_amount = $6
 		`, categoryID, cat.name, cat.user_id, cat.category_group, false, 0.0)
 
 		if err != nil {
@@ -430,14 +436,38 @@ func SeedTestData(db *sql.DB) error {
 			// Get the category ID
 			categoryId, exists := categoryIds[tx.categoryName+"-"+tx.userId]
 			if !exists {
-				log.Printf("WARNING: Category %s not found for user %s, skipping association", tx.categoryName, tx.userId)
+				log.Printf("WARNING: Category %s not found for user %s, creating fallback", tx.categoryName, tx.userId)
 				// Try creating the category on the fly
 				categoryId = fmt.Sprintf("cat-%s-%s", tx.userId, tx.categoryName)
+
+				// Find a default group for this user or create a generic one
+				var groupId string
+				err = db.QueryRow(`
+					SELECT id FROM ynab_category_groups 
+					WHERE user_id = $1 
+					LIMIT 1
+				`, tx.userId).Scan(&groupId)
+
+				if err != nil {
+					// No group found, create a default group for this user
+					groupId = fmt.Sprintf("group-default-%s", tx.userId)
+					_, err = db.Exec(`
+						INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
+						VALUES ($1, $2, $1, $3, $4)
+						ON CONFLICT (id) DO NOTHING
+					`, groupId, "Other", tx.userId, false)
+
+					if err != nil {
+						log.Printf("Error creating default category group: %v", err)
+						continue
+					}
+				}
+
 				_, err = db.Exec(`
-					INSERT INTO ynab_categories (id, name, user_id, hidden) 
-					VALUES ($1, $2, $3, $4)
+					INSERT INTO ynab_categories (id, name, user_id, group_id, category_group_id, hidden) 
+					VALUES ($1, $2, $3, $4, $4, $5)
 					ON CONFLICT (id) DO NOTHING
-				`, categoryId, tx.categoryName, tx.userId, false)
+				`, categoryId, tx.categoryName, tx.userId, groupId, false)
 
 				if err != nil {
 					log.Printf("Error creating fallback category: %v", err)
@@ -607,9 +637,14 @@ func SeedTestData(db *sql.DB) error {
 	// Create a test category for admin if it doesn't already exist in ynab_categories
 	adminCategoryID := fmt.Sprintf("cat-%s-Test", adminUser.id)
 	_, err = db.Exec(`
-		INSERT INTO ynab_categories (id, name, user_id, category_group_id, hidden, budget_amount) 
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO NOTHING
+		INSERT INTO ynab_categories (id, name, user_id, group_id, category_group_id, hidden, budget_amount) 
+		VALUES ($1, $2, $3, $4, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET
+		name = $2,
+		group_id = $4,
+		category_group_id = $4,
+		hidden = $5,
+		budget_amount = $6
 	`, adminCategoryID, "Test", adminUser.id, "group-8", false, 0.0)
 	if err != nil {
 		return fmt.Errorf("failed to insert test category for admin: %w", err)

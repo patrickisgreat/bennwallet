@@ -98,6 +98,50 @@ func FixYNABCategoriesColumn(db *sql.DB) error {
 		}
 	}
 
+	// Check if ynab_category_groups table exists and has the correct structure
+	var categoryGroupsTableExists bool
+	err = db.QueryRow(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables 
+			WHERE table_schema = 'public' 
+			AND table_name = 'ynab_category_groups'
+		)
+	`).Scan(&categoryGroupsTableExists)
+	if err != nil {
+		return err
+	}
+
+	if categoryGroupsTableExists {
+		// Check if category_group_id column exists in ynab_category_groups
+		var hasCategoryGroupIdInGroups bool
+		err = db.QueryRow(`
+			SELECT EXISTS (
+				SELECT FROM information_schema.columns 
+				WHERE table_schema = 'public' 
+				AND table_name = 'ynab_category_groups' 
+				AND column_name = 'category_group_id'
+			)
+		`).Scan(&hasCategoryGroupIdInGroups)
+		if err != nil {
+			return err
+		}
+
+		if !hasCategoryGroupIdInGroups {
+			// Add the column if it doesn't exist
+			log.Println("Adding missing category_group_id column to ynab_category_groups")
+			_, err := db.Exec(`ALTER TABLE ynab_category_groups ADD COLUMN category_group_id TEXT;`)
+			if err != nil {
+				return err
+			}
+
+			// Set the category_group_id to match the id
+			_, err = db.Exec(`UPDATE ynab_category_groups SET category_group_id = id WHERE category_group_id IS NULL;`)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	log.Println("YNAB categories column migration completed successfully")
 	return nil
 }

@@ -108,11 +108,20 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	var query string
 	if hasUsersTable {
 		query = `
-			SELECT t.id, t.amount, t.description, t.date, t.transaction_date, t.type, 
-			COALESCE(payto_user.name, t.pay_to) as pay_to, 
-			t.paid, t.paid_date, 
-			COALESCE(entered_user.name, t.entered_by) as entered_by, 
-			t.optional, t.user_id, t.note
+			SELECT 
+				t.id, 
+				t.amount, 
+				t.description, 
+				t.date, 
+				t.transaction_date, 
+				t.type, 
+				COALESCE(payto_user.name, t.pay_to) as pay_to, 
+				t.paid, 
+				t.paid_date, 
+				COALESCE(entered_user.name, t.entered_by) as entered_by, 
+				t.optional, 
+				t.note,
+				t.user_id
 			FROM transactions t
 			LEFT JOIN users payto_user ON t.pay_to = payto_user.id
 			LEFT JOIN users entered_user ON t.entered_by = entered_user.id
@@ -120,8 +129,20 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		`
 	} else {
 		query = `
-			SELECT id, amount, description, date, transaction_date, type, 
-			pay_to, paid, paid_date, entered_by, optional, user_id, note
+			SELECT 
+				id, 
+				amount, 
+				description, 
+				date, 
+				transaction_date, 
+				type, 
+				pay_to, 
+				paid, 
+				paid_date, 
+				entered_by, 
+				optional, 
+				note,
+				user_id
 			FROM transactions 
 			WHERE 1=1
 		`
