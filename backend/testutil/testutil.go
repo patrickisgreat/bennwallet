@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"testing"
 	"time"
 
 	_ "github.com/lib/pq"
+
+	"bennwallet/backend/database"
 )
 
 // Define the same context keys your auth middleware uses
@@ -17,6 +20,7 @@ type contextKey string
 
 const UserIDKey contextKey = "user_id"
 const UserRoleKey contextKey = "user_role"
+const TestUserID string = "test-user-id"
 
 // PostgresConfig holds configuration for a PostgreSQL database connection
 type PostgresConfig struct {
@@ -246,17 +250,17 @@ func CleanupTestDB(db *sql.DB) error {
 	tables := []string{
 		"transaction_categories",
 		"transactions",
+		"permissions",
 		"ynab_categories",
 		"ynab_category_groups",
-		"permissions",
 		"user_ynab_settings",
-		"users",
+		"ynab_config",
 	}
 
 	for _, table := range tables {
-		_, err := db.Exec(fmt.Sprintf("DELETE FROM %s", table))
+		_, err := db.Exec(fmt.Sprintf("TRUNCATE TABLE %s CASCADE", table))
 		if err != nil {
-			return fmt.Errorf("failed to clean table %s: %w", table, err)
+			return fmt.Errorf("failed to truncate %s: %w", table, err)
 		}
 	}
 
@@ -307,4 +311,90 @@ func WaitForDB(db *sql.DB, maxAttempts int) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("database not ready after %d attempts", maxAttempts)
+}
+
+// SetupTestDB creates a test database and seeds it with test data
+func SetupTestDB(t testing.TB) (*sql.DB, func()) {
+	// Clear Firebase env vars to ensure dev mode auth bypass
+	os.Unsetenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	os.Unsetenv("FIREBASE_SERVICE_ACCOUNT_BASE64")
+	os.Unsetenv("FIREBASE_SERVICE_ACCOUNT")
+
+	// Force reset the entire database first for clean state
+	if err := ForceResetTestDatabase(); err != nil {
+		t.Fatalf("Failed to force reset database: %v", err)
+	}
+
+	config := GetTestDBConfig()
+	db, err := sql.Open("postgres", config.ConnectionString())
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+
+	// Configure connection pooling
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	// Test the connection
+	if err := db.Ping(); err != nil {
+		t.Fatalf("Failed to ping database: %v", err)
+	}
+
+	// Set environment to ensure test data is seeded
+	os.Setenv("APP_ENV", "development")
+	os.Setenv("RESET_DB", "true")
+
+	// Create schema first
+	if err := database.CreatePostgresSchema(db); err != nil {
+		t.Fatalf("Failed to create schema: %v", err)
+	}
+
+	// Run migrations to create all necessary tables
+	if err := migrations.RunMigrations(db, true); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
+	}
+
+	// Ensure test user exists
+	_, err = db.Exec(`
+		INSERT INTO users (id, username, name, role, status, is_admin) 
+		VALUES 
+		('test-user-id', 'testuser', 'Test User', 'admin', 'approved', true),
+		('1', 'sarah', 'Sarah', 'admin', 'approved', true),
+		('2', 'patrick', 'Patrick', 'admin', 'approved', true),
+		('admin1', 'admin1', 'Admin One', 'admin', 'approved', true)
+		ON CONFLICT (id) DO NOTHING
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert test users: %v", err)
+	}
+
+	// Return the db and a cleanup function
+	return db, func() {
+		// Drop the test database on cleanup
+		db.Close()
+
+		// Reconnect to postgres to drop the test database
+		config := GetTestDBConfig()
+		config.DBName = "postgres"
+		db, err := sql.Open("postgres", config.ConnectionString())
+		if err != nil {
+			t.Logf("Warning: Failed to connect to postgres for cleanup: %v", err)
+			return
+		}
+		defer db.Close()
+
+		_, err = db.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", GetTestDBConfig().DBName))
+		if err != nil {
+			t.Logf("Warning: Failed to drop test database during cleanup: %v", err)
+		}
+	}
+}
+
+// Helper function to get environment variable with default
+func getEnvOrDefault(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
 }
