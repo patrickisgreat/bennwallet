@@ -11,6 +11,8 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+
+	"bennwallet/backend/database"
 )
 
 // Define the same context keys your auth middleware uses
@@ -343,11 +345,13 @@ func SetupTestDB(t testing.TB) (*sql.DB, func()) {
 	os.Setenv("APP_ENV", "development")
 	os.Setenv("RESET_DB", "true")
 
-	// Use the migration system to create the complete schema
-	// This creates ALL tables (users, transactions, categories, permissions, etc.)
-	// AND seeds them with test data automatically
-	err = migrations.RunMigrations(db, true) // true = reset database
-	if err != nil {
+	// Create schema first
+	if err := database.CreatePostgresSchema(db); err != nil {
+		t.Fatalf("Failed to create schema: %v", err)
+	}
+
+	// Run migrations to create all necessary tables
+	if err := migrations.RunMigrations(db, true); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
