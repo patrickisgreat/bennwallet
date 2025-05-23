@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,182 +20,11 @@ import (
 // Define a constant for the test user ID
 const testUserID = "test-user-id"
 
-func setupReportTestDB() {
-	// Create a test database connection
-	config := database.PostgresConfig{
-		Host:     getEnvWithDefault("TEST_DB_HOST", "localhost"),
-		Port:     getEnvWithDefault("TEST_DB_PORT", "5432"),
-		User:     getEnvWithDefault("TEST_DB_USER", "postgres"),
-		Password: getEnvWithDefault("TEST_DB_PASSWORD", "postgres"),
-		DBName:   getEnvWithDefault("TEST_DB_NAME", "bennwallet_test"),
-		SSLMode:  "disable",
-	}
-
-	db, err := sql.Open("postgres", config.ConnectionString())
-	if err != nil {
-		panic(err)
-	}
+func setupReportTestDB(t *testing.T) {
+	// Use the centralized test setup
+	db, cleanup := database.SetupTestDB(t)
 	database.DB = db
-
-	// Clear existing tables for this test
-	_, err = db.Exec(`
-		DROP TABLE IF EXISTS transactions CASCADE;
-		DROP TABLE IF EXISTS permissions CASCADE;
-		DROP TABLE IF EXISTS users CASCADE;
-	`)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create users table first for foreign key support
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id TEXT PRIMARY KEY,
-			username TEXT,
-			name TEXT,
-			status TEXT,
-			is_admin BOOLEAN DEFAULT false,
-			role TEXT DEFAULT 'user'
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
-
-	// Insert test user
-	_, err = db.Exec(`
-		INSERT INTO users (id, username, name, is_admin, role)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (id) DO UPDATE SET 
-		  username = EXCLUDED.username,
-		  name = EXCLUDED.name,
-		  is_admin = EXCLUDED.is_admin,
-		  role = EXCLUDED.role
-	`, testUserID, "testuser", "Test User", true, "admin")
-	if err != nil {
-		panic(err)
-	}
-
-	// Create permissions table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS permissions (
-			id SERIAL PRIMARY KEY,
-			granted_user_id TEXT NOT NULL,
-			owner_user_id TEXT NOT NULL,
-			resource_type TEXT NOT NULL,
-			permission_type TEXT NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			expires_at TIMESTAMP,
-			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create transactions table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS transactions (
-			id TEXT PRIMARY KEY,
-			amount NUMERIC(15,2) NOT NULL,
-			description TEXT NOT NULL,
-			date TIMESTAMP NOT NULL,
-			transaction_date TIMESTAMP,
-			type TEXT NOT NULL,
-			pay_to TEXT,
-			paid BOOLEAN NOT NULL DEFAULT false,
-			paid_date TEXT,
-			entered_by TEXT NOT NULL,
-			optional BOOLEAN NOT NULL DEFAULT false,
-			user_id TEXT,
-			note TEXT
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create ynab_category_groups table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS ynab_category_groups (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			category_group_id TEXT NOT NULL,
-			user_id TEXT NOT NULL,
-			hidden BOOLEAN NOT NULL DEFAULT false,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(category_group_id, user_id)
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create ynab_categories table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS ynab_categories (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			user_id TEXT NOT NULL,
-			group_id TEXT NOT NULL,
-			category_group_id TEXT NOT NULL,
-			hidden BOOLEAN NOT NULL DEFAULT false,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(category_group_id, user_id),
-			FOREIGN KEY (group_id) REFERENCES ynab_category_groups(id)
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
-
-	// Insert test category groups
-	_, err = db.Exec(`
-		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
-		VALUES 
-		('group-1', 'Food', 'group-1', $1, false),
-		('group-2', 'Housing', 'group-2', $1, false),
-		('group-3', 'Fun', 'group-3', $1, false)
-		ON CONFLICT (id) DO NOTHING
-	`, testUserID)
-	if err != nil {
-		panic(err)
-	}
-
-	// Insert test categories
-	_, err = db.Exec(`
-		INSERT INTO ynab_categories (id, name, user_id, group_id, category_group_id, hidden)
-		VALUES 
-		('cat-test-user-id-Food', 'Food', $1, 'group-1', 'group-1', false),
-		('cat-test-user-id-Housing', 'Housing', $1, 'group-2', 'group-2', false),
-		('cat-test-user-id-Fun', 'Fun', $1, 'group-3', 'group-3', false)
-		ON CONFLICT (id) DO UPDATE SET
-		name = EXCLUDED.name,
-		group_id = EXCLUDED.group_id,
-		category_group_id = EXCLUDED.category_group_id,
-		hidden = EXCLUDED.hidden
-	`, testUserID)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create transaction_categories join table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS transaction_categories (
-			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL REFERENCES transactions(id),
-			category_id TEXT NOT NULL REFERENCES ynab_categories(id),
-			amount NUMERIC(15,2) NOT NULL,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(transaction_id, category_id)
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
+	t.Cleanup(cleanup)
 
 	// Insert sample data for testing
 	insertTestTransactions()
@@ -219,6 +47,42 @@ func insertTestTransactions() {
 	midDate, _ := time.Parse(dateFormat, "2023-02-15")
 	endDate, _ := time.Parse(dateFormat, "2023-03-31")
 
+	// Insert test category groups
+	_, err := database.DB.Exec(`
+		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
+		VALUES 
+		('group-1', 'Food', 'group-1', 'test-user-id', false),
+		('group-2', 'Housing', 'group-2', 'test-user-id', false),
+		('group-3', 'Fun', 'group-3', 'test-user-id', false),
+		('group-4', 'Misc', 'group-4', 'test-user-id', false)
+		ON CONFLICT (id) DO UPDATE SET
+		name = EXCLUDED.name,
+		category_group_id = EXCLUDED.category_group_id,
+		user_id = EXCLUDED.user_id,
+		hidden = EXCLUDED.hidden
+	`)
+	if err != nil {
+		panic(err)
+	}
+
+	// Insert test categories
+	_, err = database.DB.Exec(`
+		INSERT INTO ynab_categories (id, name, user_id, category_group_id, hidden)
+		VALUES 
+		('cat-test-user-id-Food', 'Food', 'test-user-id', 'group-1', false),
+		('cat-test-user-id-Housing', 'Housing', 'test-user-id', 'group-2', false),
+		('cat-test-user-id-Fun', 'Fun', 'test-user-id', 'group-3', false),
+		('cat-test-user-id-Misc', 'Misc', 'test-user-id', 'group-4', false)
+		ON CONFLICT (id) DO UPDATE SET
+		name = EXCLUDED.name,
+		user_id = EXCLUDED.user_id,
+		category_group_id = EXCLUDED.category_group_id,
+		hidden = EXCLUDED.hidden
+	`)
+	if err != nil {
+		panic(err)
+	}
+
 	// Insert test transactions
 	testTransactions := []struct {
 		id          string
@@ -239,8 +103,17 @@ func insertTestTransactions() {
 		{"tx4", 75.00, "Groceries 2", midDate, "Food", "Sarah", true, "Patrick", false, testUserID, "cat-test-user-id-Food"},
 		{"tx5", 150.00, "Utilities", midDate, "Housing", "Patrick", true, "Patrick", false, testUserID, "cat-test-user-id-Housing"},
 		{"tx6", 60.00, "Entertainment", endDate, "Fun", "Sarah", true, "Sarah", false, testUserID, "cat-test-user-id-Fun"},
-		{"tx7", 30.00, "Optional Expense", midDate, "Misc", "Patrick", true, "Sarah", true, testUserID, "cat-test-user-id-Food"},
+		{"tx7", 30.00, "Optional Expense", midDate, "Misc", "Patrick", true, "Sarah", true, testUserID, "cat-test-user-id-Misc"},
 		{"tx8", 80.00, "Unpaid Bill", midDate, "Bills", "Sarah", false, "Patrick", false, testUserID, "cat-test-user-id-Housing"},
+	}
+
+	// Clear existing transactions first
+	_, err = database.DB.Exec(`
+		DELETE FROM transaction_categories;
+		DELETE FROM transactions;
+	`)
+	if err != nil {
+		panic(err)
 	}
 
 	for _, tx := range testTransactions {
@@ -267,7 +140,7 @@ func insertTestTransactions() {
 }
 
 func TestGetYNABSplits(t *testing.T) {
-	setupReportTestDB()
+	setupReportTestDB(t)
 	defer func() {
 		CleanupTestDB()
 		database.DB.Close()
