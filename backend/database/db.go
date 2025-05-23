@@ -28,6 +28,19 @@ type PostgresConfig struct {
 
 // GetPostgresConfigFromEnv reads PostgreSQL configuration from environment variables
 func GetPostgresConfigFromEnv() PostgresConfig {
+	// Check if we're in a test environment
+	if os.Getenv("GO_ENV") == "test" {
+		return PostgresConfig{
+			Host:     "localhost",
+			Port:     "5432",
+			User:     "postgres",
+			Password: "postgres",
+			DBName:   "bennwallet_test",
+			SSLMode:  "disable",
+		}
+	}
+
+	// Otherwise use environment variables with defaults
 	return PostgresConfig{
 		Host:     getEnvOrDefault("DB_HOST", "localhost"),
 		Port:     getEnvOrDefault("DB_PORT", "5432"),
@@ -155,7 +168,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
-	// Create base tables
+	// Create base tables in correct order to handle dependencies
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
@@ -164,6 +177,41 @@ func CreatePostgresSchema(db *sql.DB) error {
 			role TEXT NOT NULL,
 			status TEXT DEFAULT 'approved',
 			is_admin BOOLEAN DEFAULT FALSE
+		);
+
+		CREATE TABLE IF NOT EXISTS permissions (
+			id SERIAL PRIMARY KEY,
+			granted_user_id TEXT NOT NULL REFERENCES users(id),
+			owner_user_id TEXT NOT NULL REFERENCES users(id),
+			resource_type TEXT NOT NULL,
+			permission_type TEXT NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			expires_at TIMESTAMP WITH TIME ZONE,
+			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
+		);
+
+		CREATE TABLE IF NOT EXISTS ynab_category_groups (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			category_group_id TEXT NOT NULL,
+			hidden BOOLEAN DEFAULT false,
+			user_id TEXT NOT NULL REFERENCES users(id),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE TABLE IF NOT EXISTS ynab_categories (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			category_group_id TEXT NOT NULL,
+			hidden BOOLEAN DEFAULT false,
+			budget_amount DECIMAL(15,2),
+			user_id TEXT NOT NULL REFERENCES users(id),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (category_group_id) REFERENCES ynab_category_groups(id)
 		);
 
 		CREATE TABLE IF NOT EXISTS transactions (
@@ -180,17 +228,6 @@ func CreatePostgresSchema(db *sql.DB) error {
 			entered_by TEXT NOT NULL,
 			user_id TEXT NOT NULL REFERENCES users(id),
 			note TEXT
-		);
-
-		CREATE TABLE IF NOT EXISTS permissions (
-			id SERIAL PRIMARY KEY,
-			granted_user_id TEXT NOT NULL REFERENCES users(id),
-			owner_user_id TEXT NOT NULL REFERENCES users(id),
-			resource_type TEXT NOT NULL,
-			permission_type TEXT NOT NULL,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			expires_at TIMESTAMP WITH TIME ZONE,
-			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
 		);
 
 		CREATE TABLE IF NOT EXISTS transaction_categories (
@@ -227,29 +264,6 @@ func CreatePostgresSchema(db *sql.DB) error {
 			auto_import BOOLEAN DEFAULT false,
 			sync_enabled BOOLEAN DEFAULT false,
 			last_synced TIMESTAMP WITH TIME ZONE
-		);
-
-		CREATE TABLE IF NOT EXISTS ynab_category_groups (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			category_group_id TEXT NOT NULL,
-			hidden BOOLEAN DEFAULT false,
-			user_id TEXT NOT NULL REFERENCES users(id),
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		);
-
-		CREATE TABLE IF NOT EXISTS ynab_categories (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			category_group_id TEXT REFERENCES ynab_category_groups(id),
-			hidden BOOLEAN DEFAULT false,
-			budget_amount DECIMAL(15,2),
-			user_id TEXT NOT NULL REFERENCES users(id),
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
 	if err != nil {
@@ -326,7 +340,7 @@ func SetupTestDB(t testing.TB) (*sql.DB, func()) {
 		END $$;
 	`)
 	if err != nil {
-		t.Logf("Warning: Failed to drop existing tables: %v", err)
+		t.Fatalf("Failed to drop existing tables: %v", err)
 	}
 
 	// Create schema
@@ -342,10 +356,49 @@ func SetupTestDB(t testing.TB) (*sql.DB, func()) {
 		('1', 'sarah', 'Sarah', 'admin', 'approved', true),
 		('2', 'patrick', 'Patrick', 'admin', 'approved', true),
 		('admin1', 'admin1', 'Admin One', 'admin', 'approved', true)
-		ON CONFLICT (id) DO NOTHING
+		ON CONFLICT (id) DO UPDATE SET 
+		username = EXCLUDED.username,
+		name = EXCLUDED.name,
+		role = EXCLUDED.role,
+		status = EXCLUDED.status,
+		is_admin = EXCLUDED.is_admin
 	`)
 	if err != nil {
-		t.Logf("Warning: Failed to insert test users: %v", err)
+		t.Fatalf("Failed to insert test users: %v", err)
+	}
+
+	// Insert test category groups
+	_, err = db.Exec(`
+		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
+		VALUES 
+		('group-1', 'Food', 'group-1', 'test-user-id', false),
+		('group-2', 'Housing', 'group-2', 'test-user-id', false),
+		('group-3', 'Fun', 'group-3', 'test-user-id', false)
+		ON CONFLICT (id) DO UPDATE SET
+		name = EXCLUDED.name,
+		category_group_id = EXCLUDED.category_group_id,
+		user_id = EXCLUDED.user_id,
+		hidden = EXCLUDED.hidden
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert test category groups: %v", err)
+	}
+
+	// Insert test categories
+	_, err = db.Exec(`
+		INSERT INTO ynab_categories (id, name, user_id, category_group_id, hidden)
+		VALUES 
+		('cat-test-user-id-Food', 'Food', 'test-user-id', 'group-1', false),
+		('cat-test-user-id-Housing', 'Housing', 'test-user-id', 'group-2', false),
+		('cat-test-user-id-Fun', 'Fun', 'test-user-id', 'group-3', false)
+		ON CONFLICT (id) DO UPDATE SET
+		name = EXCLUDED.name,
+		user_id = EXCLUDED.user_id,
+		category_group_id = EXCLUDED.category_group_id,
+		hidden = EXCLUDED.hidden
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert test categories: %v", err)
 	}
 
 	// Return the db and a cleanup function
