@@ -369,42 +369,17 @@ func processLegacyCategories(w http.ResponseWriter, r *http.Request, request mod
 func processCategoryRelationships(w http.ResponseWriter, r *http.Request, request models.ReportFilter,
 	userID string, hasOptionalColumn, hasTransactionDateColumn, hasUserIdColumn bool, results *[]models.CategoryTotal) {
 
-	// Build the base query joining transactions with categories
+	// Build the base query
 	var query string
 	query = `
-		SELECT c.name as category, SUM(t.amount) as total
-		FROM transactions t
-		JOIN transaction_categories tc ON t.id = tc.transaction_id
+		SELECT c.name as category, SUM(tc.amount) as total
+		FROM transaction_categories tc
 		JOIN ynab_categories c ON tc.category_id = c.id
-		WHERE 1=1
+		JOIN transactions t ON tc.transaction_id = t.id
+		WHERE c.user_id = $1
 	`
 	var args []interface{}
-
-	// Add user permissions filtering
-	if hasUserIdColumn {
-		// Get accessible user IDs through permissions system
-		accessibleUsers, err := middleware.GetUserAccessibleResources(userID, models.ResourceTransactions, models.PermissionRead)
-		if err != nil {
-			log.Printf("Error getting accessible resources: %v", err)
-			// Fallback to only showing the user's own transactions
-			query += " AND t.user_id = $1"
-			args = append(args, userID)
-		} else {
-			// Build a query to include all accessible user transactions
-			if len(accessibleUsers) > 0 {
-				placeholders := make([]string, len(accessibleUsers))
-				for i := range accessibleUsers {
-					placeholders[i] = fmt.Sprintf("$%d", len(args)+1)
-					args = append(args, accessibleUsers[i])
-				}
-				query += fmt.Sprintf(" AND (t.user_id IN (%s) OR t.user_id IS NULL)", strings.Join(placeholders, ","))
-			} else {
-				// Fallback to only showing the user's own transactions
-				query += " AND t.user_id = $1"
-				args = append(args, userID)
-			}
-		}
-	}
+	args = append(args, userID)
 
 	// Add date filters
 	if request.StartDate != "" {
@@ -432,113 +407,54 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		args = append(args, request.Category)
 	}
 
-	// Add PayTo filter with proper SQL query structuring
+	// Add PayTo filter
 	if request.PayTo != "" {
-		log.Printf("Filtering by PayTo in categoriesRelationship: '%s'", request.PayTo)
-
-		// Try multiple different matching approaches
-		query += fmt.Sprintf(` AND (
-			t.pay_to ILIKE $%d OR 
-			t.pay_to ILIKE $%d OR
-			t.pay_to = $%d
-		)`, len(args)+1, len(args)+2, len(args)+3)
-
-		args = append(args, request.PayTo, "%"+request.PayTo+"%", request.PayTo)
-
-		log.Printf("PayTo filter SQL: %s with args: %v", query, args)
+		query += fmt.Sprintf(" AND t.pay_to = $%d", len(args)+1)
+		args = append(args, request.PayTo)
 	}
 
-	// Add EnteredBy filter with proper SQL query structuring
+	// Add EnteredBy filter
 	if request.EnteredBy != "" {
-		log.Printf("Filtering by EnteredBy in categoriesRelationship: '%s'", request.EnteredBy)
-
-		// First query users table to find both ID and name matching the filter
-		rows, err := database.DB.Query(`
-			SELECT id, name FROM users WHERE id = $1 OR name ILIKE $2 OR name ILIKE $3
-		`, request.EnteredBy, request.EnteredBy, "%"+request.EnteredBy+"%")
-
-		matchedUserIds := []interface{}{request.EnteredBy}
-		matchedUserNames := []string{request.EnteredBy}
-
-		if err != nil {
-			log.Printf("Error querying users table: %v", err)
-		} else {
-			defer rows.Close()
-			for rows.Next() {
-				var id, name string
-				if err := rows.Scan(&id, &name); err == nil {
-					matchedUserIds = append(matchedUserIds, id)
-					matchedUserNames = append(matchedUserNames, name)
-				}
-			}
-		}
-
-		log.Printf("Matched user IDs for filtering in categories relationship: %v", matchedUserIds)
-		log.Printf("Matched user names for filtering in categories relationship: %v", matchedUserNames)
-
-		// Try multiple different matching approaches including both IDs and names
-		placeholders := make([]string, len(matchedUserIds)*2)
-		for i := range matchedUserIds {
-			placeholders[i*2] = fmt.Sprintf("t.entered_by = $%d", len(args)+i+1)
-			placeholders[i*2+1] = fmt.Sprintf("t.entered_by ILIKE $%d", len(args)+len(matchedUserIds)+i+1)
-		}
-
-		query += fmt.Sprintf(" AND (%s)", strings.Join(placeholders, " OR "))
-
-		// Add all matching IDs and names (with wildcards) to args
-		for _, id := range matchedUserIds {
-			args = append(args, id)
-		}
-		for _, name := range matchedUserNames {
-			args = append(args, "%"+name+"%")
-		}
-
-		log.Printf("EnteredBy filter SQL: %s with args: %v", query, args)
+		query += fmt.Sprintf(" AND t.entered_by = $%d", len(args)+1)
+		args = append(args, request.EnteredBy)
 	}
 
-	// Add paid filter
+	// Add Paid filter
 	if request.Paid != nil {
 		query += fmt.Sprintf(" AND t.paid = $%d", len(args)+1)
 		args = append(args, *request.Paid)
-	} else {
-		// Default to false (don't filter on paid status)
-		query += " AND t.paid = false"
 	}
 
-	// Add optional filter if the column exists
-	if hasOptionalColumn && (request.Optional == nil || *request.Optional == false) {
-		query += " AND (t.optional = false OR t.optional IS NULL)"
+	// Add Optional filter if column exists
+	if hasOptionalColumn && request.Optional != nil {
+		query += fmt.Sprintf(" AND t.optional = $%d", len(args)+1)
+		args = append(args, *request.Optional)
 	}
 
-	// Add grouping and ordering
+	// Group by category and order by total descending
 	query += " GROUP BY c.name ORDER BY total DESC"
-	log.Printf("Executing category relationship query: %s with args: %v", query, args)
 
-	// Run the query
+	// Execute the query
 	rows, err := database.DB.Query(query, args...)
 	if err != nil {
-		log.Printf("Error executing category relationship query: %v", err)
+		log.Printf("Error querying category relationships: %v", err)
 		return
 	}
 	defer rows.Close()
 
+	// Process results
 	for rows.Next() {
-		var ct models.CategoryTotal
-		err := rows.Scan(&ct.Category, &ct.Total)
-		if err != nil {
-			log.Printf("Error scanning category relationship result: %v", err)
-			return
+		var category string
+		var total float64
+		if err := rows.Scan(&category, &total); err != nil {
+			log.Printf("Error scanning category relationship row: %v", err)
+			continue
 		}
-		*results = append(*results, ct)
+		*results = append(*results, models.CategoryTotal{
+			Category: category,
+			Total:    total,
+		})
 	}
-
-	// Check for any errors from iterating over rows
-	if err = rows.Err(); err != nil {
-		log.Printf("Error after scanning all category relationship rows: %v", err)
-		return
-	}
-
-	log.Printf("Found %d category relationship results", len(*results))
 }
 
 // Merge and consolidate results by summing totals for the same category
