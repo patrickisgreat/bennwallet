@@ -259,8 +259,9 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		var transactionDate sql.NullString
 		var dateStr string
 		var userId sql.NullString
+		var note sql.NullString
 
-		err = rows.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &t.Note, &userId)
+		err = rows.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &note, &userId)
 		if err != nil {
 			log.Printf("Error scanning transaction row: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -290,8 +291,13 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		} else {
 			t.TransactionDate = t.Date // Fall back to entered date if transaction date not available
 		}
+
 		if userId.Valid {
 			t.UserID = userId.String
+		}
+
+		if note.Valid {
+			t.Note = note.String
 		}
 
 		// Check if transaction_categories table exists
