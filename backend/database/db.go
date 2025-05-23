@@ -170,8 +170,8 @@ func CreatePostgresSchema(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			amount NUMERIC(15,2) NOT NULL,
 			description TEXT NOT NULL,
-			date TEXT NOT NULL,
-			transaction_date TEXT,
+			date TIMESTAMP NOT NULL,
+			transaction_date TIMESTAMP,
 			type TEXT NOT NULL,
 			pay_to TEXT,
 			paid BOOLEAN NOT NULL DEFAULT FALSE,
@@ -191,6 +191,15 @@ func CreatePostgresSchema(db *sql.DB) error {
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			expires_at TIMESTAMP WITH TIME ZONE,
 			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
+		);
+
+		CREATE TABLE IF NOT EXISTS transaction_categories (
+			id SERIAL PRIMARY KEY,
+			transaction_id TEXT NOT NULL,
+			category_id TEXT NOT NULL,
+			amount NUMERIC(15,2) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(transaction_id, category_id)
 		);
 
 		CREATE TABLE IF NOT EXISTS ynab_config (
@@ -217,7 +226,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			account_id TEXT,
 			auto_import BOOLEAN DEFAULT false,
 			sync_enabled BOOLEAN DEFAULT false,
-			last_synced TIMESTAMP
+			last_synced TIMESTAMP WITH TIME ZONE
 		);
 
 		CREATE TABLE IF NOT EXISTS ynab_category_groups (
@@ -366,127 +375,4 @@ func SetupTestDB(t testing.TB) (*sql.DB, func()) {
 // GetDBType returns the type of database being used
 func GetDBType() string {
 	return "postgres"
-}
-
-// CreatePostgresSchema creates the database schema
-func CreatePostgresSchema(db *sql.DB) error {
-	// Create users table first for foreign key support
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id TEXT PRIMARY KEY,
-			username TEXT,
-			name TEXT,
-			status TEXT DEFAULT 'approved',
-			is_admin BOOLEAN DEFAULT FALSE,
-			role TEXT DEFAULT 'user'
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create users table: %w", err)
-	}
-
-	// Create permissions table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS permissions (
-			id SERIAL PRIMARY KEY,
-			granted_user_id TEXT NOT NULL,
-			owner_user_id TEXT NOT NULL,
-			resource_type TEXT NOT NULL,
-			permission_type TEXT NOT NULL,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			expires_at TIMESTAMP WITH TIME ZONE,
-			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create permissions table: %w", err)
-	}
-
-	// Create transactions table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS transactions (
-			id TEXT PRIMARY KEY,
-			amount NUMERIC(15,2) NOT NULL,
-			description TEXT NOT NULL,
-			date TIMESTAMP NOT NULL,
-			transaction_date TIMESTAMP,
-			type TEXT NOT NULL,
-			pay_to TEXT,
-			paid BOOLEAN NOT NULL DEFAULT false,
-			paid_date TEXT,
-			entered_by TEXT NOT NULL,
-			optional BOOLEAN NOT NULL DEFAULT false,
-			user_id TEXT,
-			note TEXT
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create transactions table: %w", err)
-	}
-
-	// Create transaction_categories table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS transaction_categories (
-			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL,
-			category_id TEXT NOT NULL,
-			amount NUMERIC(15,2) NOT NULL,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(transaction_id, category_id)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create transaction_categories table: %w", err)
-	}
-
-	// Create ynab_category_groups table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS ynab_category_groups (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			category_group_id TEXT,
-			user_id TEXT NOT NULL,
-			hidden BOOLEAN DEFAULT false,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create ynab_category_groups table: %w", err)
-	}
-
-	// Create ynab_categories table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS ynab_categories (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			group_id TEXT,
-			category_group_id TEXT,
-			user_id TEXT NOT NULL,
-			hidden BOOLEAN DEFAULT false,
-			budget_amount DECIMAL(15,2),
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create ynab_categories table: %w", err)
-	}
-
-	// Create user_ynab_settings table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS user_ynab_settings (
-			user_id TEXT PRIMARY KEY,
-			token TEXT,
-			budget_id TEXT,
-			account_id TEXT,
-			sync_enabled BOOLEAN DEFAULT true,
-			last_synced TIMESTAMP WITH TIME ZONE
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create user_ynab_settings table: %w", err)
-	}
-
-	return nil
 }
