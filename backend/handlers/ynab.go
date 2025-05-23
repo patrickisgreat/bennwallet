@@ -15,34 +15,27 @@ import (
 
 // GetYNABCategories returns YNAB categories for a user in a hierarchical structure
 func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
-	userId := r.URL.Query().Get("userId")
+	// Get user ID from authentication context
+	userId := middleware.GetUserIDFromContext(r)
 	if userId == "" {
-		http.Error(w, "userId is required", http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	// First, verify if YNAB tables exist and create them if they don't
-	log.Printf("Verifying YNAB tables exist for user %s", userId)
-
-	// Set a context with timeout to prevent hanging
+	// Check if YNAB tables exist
+	var tableCount int
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Check if ynab_category_groups table exists using PostgreSQL information_schema
-	var tableCount int
 	err := database.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM information_schema.tables 
-		WHERE table_name = 'ynab_category_groups' 
-		AND table_schema = 'public'
+		WHERE table_schema = 'public' 
+		AND table_name IN ('ynab_category_groups', 'ynab_categories', 'user_ynab_settings')
 	`).Scan(&tableCount)
 
-	// If we hit a timeout or other error, just proceed anyway - worst case tables don't exist
-	// and we'll get an empty result
 	if err != nil {
-		log.Printf("Error checking if YNAB tables exist: %v", err)
-		// Return empty array to avoid UI issues
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]struct{}{})
+		log.Printf("Error checking YNAB tables: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -177,7 +170,7 @@ func GetYNABCategories(w http.ResponseWriter, r *http.Request) {
 		catRows, err := database.DB.QueryContext(ctx, `
 			SELECT id, name
 			FROM ynab_categories
-			WHERE user_id = $1 AND group_id = $2
+			WHERE user_id = $1 AND (group_id = $2 OR category_group_id = $2)
 			ORDER BY name
 		`, userId, group.ID)
 		if err != nil {

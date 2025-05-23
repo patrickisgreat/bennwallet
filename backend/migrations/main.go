@@ -52,6 +52,8 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		}},
 		// Add YNAB categories table with group_id column
 		{"add_ynab_categories_table", AddYNABCategoriesTable},
+		// Fix YNAB categories column inconsistency
+		{"fix_ynab_categories_column", FixYNABCategoriesColumn},
 		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
 	}
