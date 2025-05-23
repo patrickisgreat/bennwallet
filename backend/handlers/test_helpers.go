@@ -55,31 +55,27 @@ func SetupTestDB() {
 	}
 	database.DB = db
 
-	// Create users table first for foreign key support
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id TEXT PRIMARY KEY,
-			username TEXT,
-			name TEXT,
-			status TEXT,
-			is_admin BOOLEAN DEFAULT FALSE,
-			role TEXT DEFAULT 'user'
-		)
-	`)
-	if err != nil {
+	// Use shared schema creation
+	if err := database.CreatePostgresSchema(db); err != nil {
 		panic(err)
 	}
 
 	// Insert test user
 	_, err = db.Exec(`
-		INSERT INTO users (id, username, name, is_admin, role)
-		VALUES ($1, $2, $3, $4, $5)
-	`, TestUserID, "testuser", "Test User", true, "admin")
+		INSERT INTO users (id, username, name, status, is_admin, role)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET
+			username = EXCLUDED.username,
+			name = EXCLUDED.name,
+			status = EXCLUDED.status,
+			is_admin = EXCLUDED.is_admin,
+			role = EXCLUDED.role
+	`, TestUserID, "testuser", "Test User", "approved", true, "admin")
 	if err != nil {
 		panic(err)
 	}
 
-	// Create permissions table
+	// Create permissions table (already created by schema, but safe to keep for idempotency)
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS permissions (
 			id SERIAL PRIMARY KEY,
@@ -177,8 +173,7 @@ func SetupPostgresTestDB() (*sql.DB, error) {
 		return nil, err
 	}
 
-	// First, check if a previous test might have left the database in a bad state
-	// Clear existing tables for a clean test - in reverse dependency order
+	// Drop all tables for a clean test
 	_, err = db.Exec(`
 		DROP TABLE IF EXISTS transaction_categories CASCADE;
 		DROP TABLE IF EXISTS transactions CASCADE;
@@ -191,27 +186,22 @@ func SetupPostgresTestDB() (*sql.DB, error) {
 		return nil, err
 	}
 
-	// Create users table first for foreign key support
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id TEXT PRIMARY KEY,
-			username TEXT,
-			name TEXT,
-			status TEXT,
-			is_admin BOOLEAN DEFAULT FALSE,
-			role TEXT DEFAULT 'user'
-		)
-	`)
-	if err != nil {
+	// Use shared schema creation
+	if err := database.CreatePostgresSchema(db); err != nil {
 		return nil, err
 	}
 
 	// Insert test user
 	_, err = db.Exec(`
-		INSERT INTO users (id, username, name, is_admin, role)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (id) DO NOTHING
-	`, TestUserID, "testuser", "Test User", true, "admin")
+		INSERT INTO users (id, username, name, status, is_admin, role)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET
+			username = EXCLUDED.username,
+			name = EXCLUDED.name,
+			status = EXCLUDED.status,
+			is_admin = EXCLUDED.is_admin,
+			role = EXCLUDED.role
+	`, TestUserID, "testuser", "Test User", "approved", true, "admin")
 	if err != nil {
 		return nil, err
 	}
