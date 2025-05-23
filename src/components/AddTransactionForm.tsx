@@ -136,11 +136,11 @@ function AddTransactionForm({
   // Create a category object from the selected category name
   const createCategoryObject = (categoryName: string): Category => {
     return {
-      id: 0, // Server will assign the actual ID
+      id: '', // Will be determined by the backend based on category name
       name: categoryName,
       description: '', // Optional description
       color: '', // Optional color
-      userId: Number(currentUser?.id) || 0, // Convert string ID to number
+      userId: currentUser?.id || '', // Use string ID as expected by backend
     };
   };
 
