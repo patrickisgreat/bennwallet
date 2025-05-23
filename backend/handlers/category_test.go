@@ -120,9 +120,23 @@ func TestGetCategories(t *testing.T) {
 
 	// First add a test category
 	_, err = db.Exec(`
-		INSERT INTO ynab_categories (id, name, user_id, hidden)
-		VALUES ($1, $2, $3, $4)
-	`, "test-category-id", "Test Category", "test-user-id", false)
+		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
+		VALUES ($1, $2, $1, $3, $4)
+		ON CONFLICT (id) DO NOTHING
+	`, "test-group-1", "Test Group", "test-user-id", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+		INSERT INTO ynab_categories (id, name, user_id, group_id, category_group_id, hidden)
+		VALUES ($1, $2, $3, $4, $4, $5)
+		ON CONFLICT (id) DO UPDATE SET
+		name = $2,
+		group_id = $4,
+		category_group_id = $4,
+		hidden = $5
+	`, "cat-test-user-id-Test Category", "Test Category", "test-user-id", "test-group-1", false)
 	if err != nil {
 		t.Fatal(err)
 	}

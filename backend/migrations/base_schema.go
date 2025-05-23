@@ -94,6 +94,16 @@ func CreateBaseSchema(db *sql.DB) error {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
+
+		CREATE TABLE IF NOT EXISTS transaction_categories (
+			id SERIAL PRIMARY KEY,
+			transaction_id TEXT NOT NULL REFERENCES transactions(id),
+			category_id TEXT NOT NULL REFERENCES ynab_categories(id),
+			amount NUMERIC(15,2) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(transaction_id, category_id)
+		);
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create base schema: %w", err)

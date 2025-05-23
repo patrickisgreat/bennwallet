@@ -116,14 +116,82 @@ func setupReportTestDB() {
 		panic(err)
 	}
 
+	// Create ynab_category_groups table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS ynab_category_groups (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			category_group_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			hidden BOOLEAN NOT NULL DEFAULT false,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(category_group_id, user_id)
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+
+	// Create ynab_categories table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS ynab_categories (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			group_id TEXT NOT NULL,
+			category_group_id TEXT NOT NULL,
+			hidden BOOLEAN NOT NULL DEFAULT false,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(category_group_id, user_id),
+			FOREIGN KEY (group_id) REFERENCES ynab_category_groups(id)
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+
+	// Insert test category groups
+	_, err = db.Exec(`
+		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
+		VALUES 
+		('group-1', 'Food', 'group-1', $1, false),
+		('group-2', 'Housing', 'group-2', $1, false),
+		('group-3', 'Fun', 'group-3', $1, false)
+		ON CONFLICT (id) DO NOTHING
+	`, testUserID)
+	if err != nil {
+		panic(err)
+	}
+
+	// Insert test categories
+	_, err = db.Exec(`
+		INSERT INTO ynab_categories (id, name, user_id, group_id, category_group_id, hidden)
+		VALUES 
+		('cat-test-user-id-Food', 'Food', $1, 'group-1', 'group-1', false),
+		('cat-test-user-id-Housing', 'Housing', $1, 'group-2', 'group-2', false),
+		('cat-test-user-id-Fun', 'Fun', $1, 'group-3', 'group-3', false)
+		ON CONFLICT (id) DO UPDATE SET
+		name = EXCLUDED.name,
+		group_id = EXCLUDED.group_id,
+		category_group_id = EXCLUDED.category_group_id,
+		hidden = EXCLUDED.hidden
+	`, testUserID)
+	if err != nil {
+		panic(err)
+	}
+
 	// Create transaction_categories join table
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS transaction_categories (
 			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL,
-			category_id INTEGER NOT NULL,
+			transaction_id TEXT NOT NULL REFERENCES transactions(id),
+			category_id TEXT NOT NULL REFERENCES ynab_categories(id),
 			amount NUMERIC(15,2) NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(transaction_id, category_id)
 		)
 	`)
 	if err != nil {
@@ -163,15 +231,16 @@ func insertTestTransactions() {
 		enteredBy   string
 		optional    bool
 		userId      string
+		categoryId  string
 	}{
-		{"tx1", 100.00, "Groceries 1", startDate, "Food", "Sarah", true, "Patrick", false, testUserID},
-		{"tx2", 50.00, "Restaurant", midDate, "Food", "Patrick", true, "Sarah", false, testUserID},
-		{"tx3", 200.00, "Rent", endDate, "Housing", "Sarah", true, "Sarah", false, testUserID},
-		{"tx4", 75.00, "Groceries 2", midDate, "Food", "Sarah", true, "Patrick", false, testUserID},
-		{"tx5", 150.00, "Utilities", midDate, "Housing", "Patrick", true, "Patrick", false, testUserID},
-		{"tx6", 60.00, "Entertainment", endDate, "Fun", "Sarah", true, "Sarah", false, testUserID},
-		{"tx7", 30.00, "Optional Expense", midDate, "Misc", "Patrick", true, "Sarah", true, testUserID},
-		{"tx8", 80.00, "Unpaid Bill", midDate, "Bills", "Sarah", false, "Patrick", false, testUserID},
+		{"tx1", 100.00, "Groceries 1", startDate, "Food", "Sarah", true, "Patrick", false, testUserID, "cat-test-user-id-Food"},
+		{"tx2", 50.00, "Restaurant", midDate, "Food", "Patrick", true, "Sarah", false, testUserID, "cat-test-user-id-Food"},
+		{"tx3", 200.00, "Rent", endDate, "Housing", "Sarah", true, "Sarah", false, testUserID, "cat-test-user-id-Housing"},
+		{"tx4", 75.00, "Groceries 2", midDate, "Food", "Sarah", true, "Patrick", false, testUserID, "cat-test-user-id-Food"},
+		{"tx5", 150.00, "Utilities", midDate, "Housing", "Patrick", true, "Patrick", false, testUserID, "cat-test-user-id-Housing"},
+		{"tx6", 60.00, "Entertainment", endDate, "Fun", "Sarah", true, "Sarah", false, testUserID, "cat-test-user-id-Fun"},
+		{"tx7", 30.00, "Optional Expense", midDate, "Misc", "Patrick", true, "Sarah", true, testUserID, "cat-test-user-id-Food"},
+		{"tx8", 80.00, "Unpaid Bill", midDate, "Bills", "Sarah", false, "Patrick", false, testUserID, "cat-test-user-id-Housing"},
 	}
 
 	for _, tx := range testTransactions {
@@ -180,6 +249,16 @@ func insertTestTransactions() {
 			(id, amount, description, date, type, pay_to, paid, entered_by, optional, user_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		`, tx.id, tx.amount, tx.description, tx.date, tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.optional, tx.userId)
+
+		if err != nil {
+			panic(err)
+		}
+
+		// Insert transaction category
+		_, err = database.DB.Exec(`
+			INSERT INTO transaction_categories (transaction_id, category_id, amount)
+			VALUES ($1, $2, $3)
+		`, tx.id, tx.categoryId, tx.amount)
 
 		if err != nil {
 			panic(err)
@@ -259,7 +338,7 @@ func TestGetYNABSplits(t *testing.T) {
 			},
 			expectedCount: 1,
 			expectedTotal: 80.00,
-			expectedFirst: "Bills",
+			expectedFirst: "Housing",
 		},
 	}
 

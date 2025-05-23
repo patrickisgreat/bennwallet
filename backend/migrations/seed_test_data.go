@@ -46,6 +46,7 @@ func SeedTestData(db *sql.DB) error {
 		{id: "regular1", username: "regularuser1", name: "Regular User 1", role: "user"},
 		{id: "regular2", username: "regularuser2", name: "Regular User 2", role: "user"},
 		{id: "regular3", username: "regularuser3", name: "Regular User 3", role: "user"},
+		{id: "test-user-id", username: "testuser", name: "Test User", role: "user"},
 	}
 
 	for _, user := range defaultUsers {
@@ -116,6 +117,8 @@ func SeedTestData(db *sql.DB) error {
 		{id: "group-8", name: "Essentials", user_id: "admin-user-1"},
 		{id: "group-9", name: "Essentials", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
 		{id: "group-10", name: "Lifestyle", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
+		{id: "group-11", name: "Essentials", user_id: "test-user-id"},
+		{id: "group-12", name: "Lifestyle", user_id: "test-user-id"},
 	}
 
 	for _, group := range categoryGroups {
@@ -194,6 +197,16 @@ func SeedTestData(db *sql.DB) error {
 		{name: "Healthcare", description: "Medical expenses", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#3F51B5", category_group: "group-9"},
 		{name: "Shopping", description: "Clothes, electronics", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#607D8B", category_group: "group-10"},
 		{name: "Travel", description: "Vacations, trips", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#8BC34A", category_group: "group-10"},
+
+		// Test user categories
+		{name: "Food", description: "Groceries and dining out", user_id: "test-user-id", color: "#4CAF50", category_group: "group-11"},
+		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "test-user-id", color: "#2196F3", category_group: "group-11"},
+		{name: "Transportation", description: "Car, public transit, gas", user_id: "test-user-id", color: "#FFC107", category_group: "group-11"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "test-user-id", color: "#9C27B0", category_group: "group-12"},
+		{name: "Utilities", description: "Bills and services", user_id: "test-user-id", color: "#F44336", category_group: "group-11"},
+		{name: "Healthcare", description: "Medical expenses", user_id: "test-user-id", color: "#3F51B5", category_group: "group-11"},
+		{name: "Shopping", description: "Clothes, electronics", user_id: "test-user-id", color: "#607D8B", category_group: "group-12"},
+		{name: "Travel", description: "Vacations, trips", user_id: "test-user-id", color: "#8BC34A", category_group: "group-12"},
 	}
 
 	categoryIds := make(map[string]string) // Map to store category IDs by name and user

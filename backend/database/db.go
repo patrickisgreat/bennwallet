@@ -195,8 +195,8 @@ func CreatePostgresSchema(db *sql.DB) error {
 
 		CREATE TABLE IF NOT EXISTS transaction_categories (
 			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL,
-			category_id TEXT NOT NULL,
+			transaction_id TEXT NOT NULL REFERENCES transactions(id),
+			category_id TEXT NOT NULL REFERENCES ynab_categories(id),
 			amount NUMERIC(15,2) NOT NULL,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(transaction_id, category_id)
