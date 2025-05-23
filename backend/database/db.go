@@ -170,8 +170,8 @@ func CreatePostgresSchema(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			amount NUMERIC(15,2) NOT NULL,
 			description TEXT NOT NULL,
-			date TEXT NOT NULL,
-			transaction_date TEXT,
+			date TIMESTAMP NOT NULL,
+			transaction_date TIMESTAMP,
 			type TEXT NOT NULL,
 			pay_to TEXT,
 			paid BOOLEAN NOT NULL DEFAULT FALSE,
@@ -191,6 +191,15 @@ func CreatePostgresSchema(db *sql.DB) error {
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			expires_at TIMESTAMP WITH TIME ZONE,
 			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
+		);
+
+		CREATE TABLE IF NOT EXISTS transaction_categories (
+			id SERIAL PRIMARY KEY,
+			transaction_id TEXT NOT NULL,
+			category_id TEXT NOT NULL,
+			amount NUMERIC(15,2) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(transaction_id, category_id)
 		);
 
 		CREATE TABLE IF NOT EXISTS ynab_config (
@@ -217,7 +226,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			account_id TEXT,
 			auto_import BOOLEAN DEFAULT false,
 			sync_enabled BOOLEAN DEFAULT false,
-			last_synced TIMESTAMP
+			last_synced TIMESTAMP WITH TIME ZONE
 		);
 
 		CREATE TABLE IF NOT EXISTS ynab_category_groups (
