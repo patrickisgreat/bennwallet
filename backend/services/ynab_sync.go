@@ -182,10 +182,11 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 	defer stmtCategoryGroup.Close()
 
 	stmtCategory, err := tx.Prepare(`
-		INSERT INTO ynab_categories (id, group_id, name, user_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $5)
+		INSERT INTO ynab_categories (id, group_id, category_group_id, name, user_id, created_at, updated_at)
+		VALUES ($1, $2, $2, $3, $4, $5, $5)
 		ON CONFLICT (id) DO UPDATE SET
 		group_id = $2,
+		category_group_id = $2,
 		name = $3,
 		updated_at = $5
 	`)
@@ -193,10 +194,11 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 		if strings.Contains(err.Error(), "last_updated") {
 			// Try with created_at/updated_at instead
 			stmtCategory, err = tx.Prepare(`
-				INSERT INTO ynab_categories (id, group_id, name, user_id, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $5)
+				INSERT INTO ynab_categories (id, group_id, category_group_id, name, user_id, created_at, updated_at)
+				VALUES ($1, $2, $2, $3, $4, $5, $5)
 				ON CONFLICT (id) DO UPDATE SET
 				group_id = $2,
+				category_group_id = $2,
 				name = $3,
 				updated_at = $5
 			`)
@@ -232,7 +234,7 @@ func processCategoriesTransaction(userID string, categoryResponse models.YNABCat
 				continue
 			}
 
-			_, err = stmtCategory.Exec(cat.ID, group.ID, cat.Name, userID, syncTime, syncTime)
+			_, err = stmtCategory.Exec(cat.ID, group.ID, group.ID, cat.Name, userID, syncTime, syncTime)
 			if err != nil {
 				log.Printf("DEBUG: Error inserting category %s: %v", cat.ID, err)
 				return fmt.Errorf("error inserting category: %w", err)

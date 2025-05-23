@@ -177,9 +177,13 @@ func SetupPostgresTestDB() (*sql.DB, error) {
 		return nil, err
 	}
 
-	// Clear existing tables for a clean test
+	// First, check if a previous test might have left the database in a bad state
+	// Clear existing tables for a clean test - in reverse dependency order
 	_, err = db.Exec(`
+		DROP TABLE IF EXISTS transaction_categories CASCADE;
 		DROP TABLE IF EXISTS transactions CASCADE;
+		DROP TABLE IF EXISTS ynab_categories CASCADE;
+		DROP TABLE IF EXISTS ynab_category_groups CASCADE;
 		DROP TABLE IF EXISTS permissions CASCADE;
 		DROP TABLE IF EXISTS users CASCADE;
 	`)

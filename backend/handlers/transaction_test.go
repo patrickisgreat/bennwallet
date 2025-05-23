@@ -22,51 +22,70 @@ func setupTransactionTestDB() {
 	}
 	database.DB = db
 
-	// Create transactions table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS transactions (
-			id TEXT PRIMARY KEY,
-			amount NUMERIC(15,2) NOT NULL,
-			description TEXT NOT NULL,
-			date TIMESTAMP NOT NULL,
-			transaction_date TIMESTAMP,
-			type TEXT NOT NULL,
-			pay_to TEXT,
-			paid BOOLEAN NOT NULL DEFAULT false,
-			paid_date TEXT,
-			entered_by TEXT NOT NULL,
-			optional BOOLEAN NOT NULL DEFAULT false,
-			user_id TEXT,
-			note TEXT
-		)
-	`)
+	// Check if tables already exist to avoid duplicate type errors
+	var txTableExists bool
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transactions')").Scan(&txTableExists)
 	if err != nil {
 		panic(err)
 	}
 
-	// Create transaction_categories table if it doesn't exist
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS transaction_categories (
-			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL,
-			category_id TEXT NOT NULL,
-			amount NUMERIC(15,2),
-			UNIQUE(transaction_id, category_id)
-		)
-	`)
+	// Only create tables if they don't exist
+	if !txTableExists {
+		// Create transactions table
+		_, err = db.Exec(`
+			CREATE TABLE IF NOT EXISTS transactions (
+				id TEXT PRIMARY KEY,
+				amount NUMERIC(15,2) NOT NULL,
+				description TEXT NOT NULL,
+				date TIMESTAMP NOT NULL,
+				transaction_date TIMESTAMP,
+				type TEXT NOT NULL,
+				pay_to TEXT,
+				paid BOOLEAN NOT NULL DEFAULT false,
+				paid_date TEXT,
+				entered_by TEXT NOT NULL,
+				optional BOOLEAN NOT NULL DEFAULT false,
+				user_id TEXT,
+				note TEXT
+			)
+		`)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	// Check if transaction_categories table exists
+	var tcTableExists bool
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transaction_categories')").Scan(&tcTableExists)
 	if err != nil {
 		panic(err)
+	}
+
+	if !tcTableExists {
+		// Create transaction_categories table if it doesn't exist
+		_, err = db.Exec(`
+			CREATE TABLE IF NOT EXISTS transaction_categories (
+				id SERIAL PRIMARY KEY,
+				transaction_id TEXT NOT NULL,
+				category_id TEXT NOT NULL,
+				amount NUMERIC(15,2),
+				UNIQUE(transaction_id, category_id)
+			)
+		`)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	// Check if ynab_categories table exists
-	var exists bool
-	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ynab_categories')").Scan(&exists)
+	var ynabCategoriesExists bool
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ynab_categories')").Scan(&ynabCategoriesExists)
 	if err != nil {
 		panic(err)
 	}
 
 	// Create ynab_categories table if it doesn't exist
-	if !exists {
+	if !ynabCategoriesExists {
 		_, err = db.Exec(`
 			CREATE TABLE IF NOT EXISTS ynab_categories (
 				id TEXT PRIMARY KEY,

@@ -147,10 +147,11 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 			}
 
 			_, err = tx.Exec(
-				`INSERT INTO ynab_categories (id, group_id, name, user_id, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $5)
+				`INSERT INTO ynab_categories (id, group_id, category_group_id, name, user_id, created_at, updated_at)
+				VALUES ($1, $2, $2, $3, $4, $5, $5)
 				ON CONFLICT (id) DO UPDATE SET
 				group_id = $2,
+				category_group_id = $2,
 				name = $3,
 				updated_at = $5`,
 				category.ID, group.ID, category.Name, userID, now,
@@ -159,10 +160,11 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 				if err.Error() == "pq: column \"last_updated\" of relation \"ynab_categories\" does not exist" {
 					// Try again without the last_updated column
 					_, err = tx.Exec(
-						`INSERT INTO ynab_categories (id, group_id, name, user_id, created_at, updated_at)
-						VALUES ($1, $2, $3, $4, $5, $5)
+						`INSERT INTO ynab_categories (id, group_id, category_group_id, name, user_id, created_at, updated_at)
+						VALUES ($1, $2, $2, $3, $4, $5, $5)
 						ON CONFLICT (id) DO UPDATE SET
 						group_id = $2,
+						category_group_id = $2,
 						name = $3,
 						updated_at = $5`,
 						category.ID, group.ID, category.Name, userID, now,
