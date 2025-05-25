@@ -156,9 +156,36 @@ func InitDB() error {
 
 // CreatePostgresSchema creates all the tables needed for PostgreSQL
 func CreatePostgresSchema(db *sql.DB) error {
+	// If RESET_DB is true, drop all existing tables first
+	if os.Getenv("RESET_DB") == "true" {
+		log.Println("Database reset requested - resetting database before migrations...")
+		_, err := db.Exec(`
+			DO $$ 
+			DECLARE
+				r RECORD;
+			BEGIN
+				-- Disable foreign key checks during table deletion
+				EXECUTE 'SET CONSTRAINTS ALL DEFERRED';
+				
+				-- Drop all tables in the public schema
+				FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+					EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
+				END LOOP;
+				
+				-- Re-enable foreign key checks
+				EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
+			END $$;
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to drop existing tables: %w", err)
+		}
+		log.Println("All tables dropped successfully")
+	}
+
 	// Create migrations table first to track schema versions
 	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS migrations (
+		DROP TABLE IF EXISTS migrations CASCADE;
+		CREATE TABLE migrations (
 			id SERIAL PRIMARY KEY,
 			name TEXT UNIQUE NOT NULL,
 			applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -168,9 +195,19 @@ func CreatePostgresSchema(db *sql.DB) error {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
+	log.Println("Creating base tables...")
 	// Create base tables in correct order to handle dependencies
 	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
+		DROP TABLE IF EXISTS transaction_categories CASCADE;
+		DROP TABLE IF EXISTS transactions CASCADE;
+		DROP TABLE IF EXISTS ynab_categories CASCADE;
+		DROP TABLE IF EXISTS ynab_category_groups CASCADE;
+		DROP TABLE IF EXISTS permissions CASCADE;
+		DROP TABLE IF EXISTS ynab_config CASCADE;
+		DROP TABLE IF EXISTS user_ynab_settings CASCADE;
+		DROP TABLE IF EXISTS users CASCADE;
+
+		CREATE TABLE users (
 			id TEXT PRIMARY KEY,
 			username TEXT NOT NULL UNIQUE,
 			name TEXT NOT NULL,
@@ -179,7 +216,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			is_admin BOOLEAN DEFAULT FALSE
 		);
 
-		CREATE TABLE IF NOT EXISTS permissions (
+		CREATE TABLE permissions (
 			id SERIAL PRIMARY KEY,
 			granted_user_id TEXT NOT NULL REFERENCES users(id),
 			owner_user_id TEXT NOT NULL REFERENCES users(id),
@@ -190,7 +227,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
 		);
 
-		CREATE TABLE IF NOT EXISTS ynab_category_groups (
+		CREATE TABLE ynab_category_groups (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			category_group_id TEXT NOT NULL,
@@ -201,7 +238,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
 
-		CREATE TABLE IF NOT EXISTS ynab_categories (
+		CREATE TABLE ynab_categories (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			category_group_id TEXT NOT NULL,
@@ -214,7 +251,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			FOREIGN KEY (category_group_id) REFERENCES ynab_category_groups(id)
 		);
 
-		CREATE TABLE IF NOT EXISTS transactions (
+		CREATE TABLE transactions (
 			id TEXT PRIMARY KEY,
 			amount NUMERIC(15,2) NOT NULL,
 			description TEXT NOT NULL,
@@ -230,7 +267,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			note TEXT
 		);
 
-		CREATE TABLE IF NOT EXISTS transaction_categories (
+		CREATE TABLE transaction_categories (
 			id SERIAL PRIMARY KEY,
 			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
 			category_id TEXT NOT NULL REFERENCES ynab_categories(id) ON DELETE CASCADE,
@@ -240,7 +277,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			UNIQUE(transaction_id, category_id)
 		);
 
-		CREATE TABLE IF NOT EXISTS ynab_config (
+		CREATE TABLE ynab_config (
 			id SERIAL PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id),
 			encrypted_api_token TEXT,
@@ -257,7 +294,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			UNIQUE(user_id)
 		);
 
-		CREATE TABLE IF NOT EXISTS user_ynab_settings (
+		CREATE TABLE user_ynab_settings (
 			user_id TEXT PRIMARY KEY REFERENCES users(id),
 			token TEXT,
 			budget_id TEXT,
@@ -270,6 +307,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("failed to create base tables: %w", err)
 	}
+	log.Println("Base schema created successfully")
 
 	return nil
 }

@@ -97,8 +97,8 @@ func CreateBaseSchema(db *sql.DB) error {
 
 		CREATE TABLE IF NOT EXISTS transaction_categories (
 			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL REFERENCES transactions(id),
-			category_id TEXT NOT NULL REFERENCES ynab_categories(id),
+			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+			category_id TEXT NOT NULL REFERENCES ynab_categories(id) ON DELETE CASCADE,
 			amount NUMERIC(15,2) NOT NULL,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

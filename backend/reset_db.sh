@@ -3,6 +3,8 @@
 
 set -e
 
+echo "FUCKKKKK"
+
 # Get the directory of this script
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
@@ -53,13 +55,138 @@ END \$\$;
 EOF
         echo "PostgreSQL database reset complete."
         
-        # Start server with RESET_DB flag to populate the database
-        echo "Starting server with RESET_DB and --no-exit flag..."
-        RESET_DB=true APP_ENV=development go run main.go --no-exit
+        # Create the base schema first
+        echo "Creating base schema..."
+        PGPASSWORD=$DB_PASSWORD psql "$CONNECTION_STRING" -f database/db.go <<EOF
+-- Create base tables in correct order to handle dependencies
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT DEFAULT 'approved',
+    is_admin BOOLEAN DEFAULT FALSE
+);
 
-        # Apply foreign key fix migration
-        echo "Applying fix_foreign_keys.sql migration..."
-        PGPASSWORD=$DB_PASSWORD psql "$CONNECTION_STRING" -f migrations/fix_foreign_keys.sql
+CREATE TABLE IF NOT EXISTS permissions (
+    id SERIAL PRIMARY KEY,
+    granted_user_id TEXT NOT NULL REFERENCES users(id),
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    resource_type TEXT NOT NULL,
+    permission_type TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
+);
+
+CREATE TABLE IF NOT EXISTS ynab_category_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category_group_id TEXT NOT NULL,
+    hidden BOOLEAN DEFAULT false,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ynab_categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category_group_id TEXT NOT NULL,
+    hidden BOOLEAN DEFAULT false,
+    budget_amount DECIMAL(15,2),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (category_group_id) REFERENCES ynab_category_groups(id)
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id TEXT PRIMARY KEY,
+    amount NUMERIC(15,2) NOT NULL,
+    description TEXT NOT NULL,
+    date TIMESTAMP NOT NULL,
+    transaction_date TIMESTAMP,
+    type TEXT NOT NULL,
+    pay_to TEXT,
+    paid BOOLEAN NOT NULL DEFAULT FALSE,
+    paid_date TEXT,
+    optional BOOLEAN NOT NULL DEFAULT FALSE,
+    entered_by TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    note TEXT
+);
+
+CREATE TABLE IF NOT EXISTS transaction_categories (
+    id SERIAL PRIMARY KEY,
+    transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    category_id TEXT NOT NULL REFERENCES ynab_categories(id) ON DELETE CASCADE,
+    amount NUMERIC(15,2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(transaction_id, category_id)
+);
+EOF
+
+        # Start server with RESET_DB flag to populate the database
+        echo "Starting server with RESET_DB flag..."
+        RESET_DB=true APP_ENV=development go run main.go &
+        SERVER_PID=$!
+
+        # Wait for server to start and initialize data
+        echo "Waiting for server to initialize data..."
+        sleep 15
+
+        # Check if server is still running
+        if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo "ERROR: Server failed to start"
+            exit 1
+        fi
+
+        # Stop the server
+        echo "Stopping server..."
+        kill $SERVER_PID
+        wait $SERVER_PID
+
+        # Verify the foreign key constraints
+        echo "Verifying foreign key constraints..."
+        PGPASSWORD=$DB_PASSWORD psql "$CONNECTION_STRING" <<EOF
+-- Check table structure
+\d transaction_categories
+
+-- Check foreign key constraints
+SELECT
+    tc.table_schema, 
+    tc.constraint_name, 
+    tc.table_name, 
+    kcu.column_name, 
+    ccu.table_name AS foreign_table_name,
+    ccu.column_name AS foreign_column_name,
+    rc.delete_rule
+FROM 
+    information_schema.table_constraints AS tc 
+    JOIN information_schema.key_column_usage AS kcu
+      ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+    JOIN information_schema.referential_constraints AS rc
+      ON tc.constraint_name = rc.constraint_name
+    JOIN information_schema.constraint_column_usage AS ccu
+      ON ccu.constraint_name = tc.constraint_name
+WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name='transaction_categories';
+
+-- Check if there are any transactions with categories
+SELECT t.id, t.description, tc.category_id 
+FROM transactions t 
+JOIN transaction_categories tc ON t.id = tc.transaction_id 
+LIMIT 5;
+
+-- Check the actual delete rule for the constraint
+SELECT conname, pg_get_constraintdef(oid) 
+FROM pg_constraint 
+WHERE conrelid = 'transaction_categories'::regclass;
+EOF
 
         exit 0
     else
