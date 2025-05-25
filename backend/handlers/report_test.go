@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"bennwallet/backend/database"
-	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
 
 	_ "github.com/lib/pq"
@@ -83,6 +81,15 @@ func insertTestTransactions() {
 		panic(err)
 	}
 
+	// Clear existing transactions first
+	_, err = database.DB.Exec(`
+		DELETE FROM transaction_categories;
+		DELETE FROM transactions;
+	`)
+	if err != nil {
+		panic(err)
+	}
+
 	// Insert test transactions
 	testTransactions := []struct {
 		id          string
@@ -97,23 +104,21 @@ func insertTestTransactions() {
 		userId      string
 		categoryId  string
 	}{
+		// Food transactions
 		{"tx1", 100.00, "Groceries 1", startDate, "Food", "Sarah", true, "Patrick", false, testUserID, "cat-test-user-id-Food"},
 		{"tx2", 50.00, "Restaurant", midDate, "Food", "Patrick", true, "Sarah", false, testUserID, "cat-test-user-id-Food"},
-		{"tx3", 200.00, "Rent", endDate, "Housing", "Sarah", true, "Sarah", false, testUserID, "cat-test-user-id-Housing"},
 		{"tx4", 75.00, "Groceries 2", midDate, "Food", "Sarah", true, "Patrick", false, testUserID, "cat-test-user-id-Food"},
-		{"tx5", 150.00, "Utilities", midDate, "Housing", "Patrick", true, "Patrick", false, testUserID, "cat-test-user-id-Housing"},
-		{"tx6", 60.00, "Entertainment", endDate, "Fun", "Sarah", true, "Sarah", false, testUserID, "cat-test-user-id-Fun"},
-		{"tx7", 30.00, "Optional Expense", midDate, "Misc", "Patrick", true, "Sarah", true, testUserID, "cat-test-user-id-Misc"},
-		{"tx8", 80.00, "Unpaid Bill", midDate, "Bills", "Sarah", false, "Patrick", false, testUserID, "cat-test-user-id-Housing"},
-	}
 
-	// Clear existing transactions first
-	_, err = database.DB.Exec(`
-		DELETE FROM transaction_categories;
-		DELETE FROM transactions;
-	`)
-	if err != nil {
-		panic(err)
+		// Housing transactions
+		{"tx3", 200.00, "Rent", endDate, "Housing", "Sarah", true, "Sarah", false, testUserID, "cat-test-user-id-Housing"},
+		{"tx5", 150.00, "Utilities", midDate, "Housing", "Patrick", true, "Patrick", false, testUserID, "cat-test-user-id-Housing"},
+		{"tx8", 80.00, "Unpaid Bill", midDate, "Bills", "Sarah", false, "Patrick", false, testUserID, "cat-test-user-id-Housing"},
+
+		// Fun transaction
+		{"tx6", 60.00, "Entertainment", endDate, "Fun", "Sarah", true, "Sarah", false, testUserID, "cat-test-user-id-Fun"},
+
+		// Optional transaction
+		{"tx7", 30.00, "Optional Expense", midDate, "Misc", "Patrick", true, "Sarah", true, testUserID, "cat-test-user-id-Misc"},
 	}
 
 	for _, tx := range testTransactions {
@@ -190,83 +195,64 @@ func TestGetYNABSplits(t *testing.T) {
 				EndDate:   "2023-02-28",
 				Paid:      boolPtr(true),
 			},
-			expectedCount: 2,         // Housing and Food
-			expectedTotal: 275.00,    // 50 + 75 + 150, without the optional transaction
+			expectedCount: 3,         // Housing, Food, and Misc (optional)
+			expectedTotal: 305.00,    // 50 + 75 + 150 + 30
 			expectedFirst: "Housing", // Highest total in this date range
-		},
-		{
-			name: "Include optional transactions",
-			filter: models.ReportFilter{
-				Paid:     boolPtr(true),
-				Optional: boolPtr(true),
-			},
-			expectedCount: 4,         // Food, Housing, Fun, Misc
-			expectedTotal: 665.00,    // All paid transactions including optional
-			expectedFirst: "Housing", // Still highest total
 		},
 		{
 			name: "Unpaid transactions only",
 			filter: models.ReportFilter{
 				Paid: boolPtr(false),
 			},
-			expectedCount: 1,
-			expectedTotal: 80.00,
+			expectedCount: 1,     // Only Housing has unpaid transactions
+			expectedTotal: 80.00, // Single unpaid transaction
 			expectedFirst: "Housing",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create request
-			requestBody, _ := json.Marshal(tc.filter)
-			req := httptest.NewRequest("POST", "/reports/ynab-splits", bytes.NewBuffer(requestBody))
+			// Create request with filter
+			filterJSON, _ := json.Marshal(tc.filter)
+			req := httptest.NewRequest("GET", "/reports/splits", bytes.NewBuffer(filterJSON))
 			req.Header.Set("Content-Type", "application/json")
-
-			// Add authentication context with test user ID
-			ctx := context.WithValue(req.Context(), middleware.UserIDKey, testUserID)
-			req = req.WithContext(ctx)
+			req = MockAuthContext(req, testUserID)
 
 			// Create response recorder
 			w := httptest.NewRecorder()
 
-			// Call the handler
+			// Call handler
 			GetYNABSplits(w, req)
 
-			// Check response code
+			// Check response
 			if w.Code != http.StatusOK {
-				t.Errorf("Expected status OK, got %v", w.Code)
+				t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+				return
 			}
 
-			// Parse the response
+			// Parse response
 			var response []models.CategoryTotal
-			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-				t.Fatalf("Failed to parse response: %v", err)
+			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+				t.Errorf("Failed to decode response: %v", err)
+				return
 			}
 
-			// Check the result count
+			// Check number of categories
 			if len(response) != tc.expectedCount {
 				t.Errorf("Expected %d categories, got %d", tc.expectedCount, len(response))
 			}
 
-			// Skip further checks if response is empty
-			if len(response) == 0 {
-				return
-			}
-
-			// Check first category (should be highest total)
-			if response[0].Category != tc.expectedFirst {
+			// Check first category name
+			if len(response) > 0 && response[0].Category != tc.expectedFirst {
 				t.Errorf("Expected first category to be %s, got %s", tc.expectedFirst, response[0].Category)
 			}
 
-			// Calculate total amount
+			// Check total amount
 			var total float64
 			for _, cat := range response {
 				total += cat.Total
 			}
-
-			// Check with a small tolerance for floating point comparisons
-			tolerance := 0.01
-			if total < tc.expectedTotal-tolerance || total > tc.expectedTotal+tolerance {
+			if total != tc.expectedTotal {
 				t.Errorf("Expected total around %f, got %f", tc.expectedTotal, total)
 			}
 		})

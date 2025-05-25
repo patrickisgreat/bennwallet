@@ -4,10 +4,21 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 )
 
 // CreateBaseSchema creates all the base tables needed for the application
 func CreateBaseSchema(db *sql.DB) error {
+	// Check if we're in a test environment
+	isTest := os.Getenv("GO_ENV") == "test"
+
+	// For tests, we want to drop and recreate tables
+	if isTest {
+		if err := DropAllTables(db); err != nil {
+			return fmt.Errorf("failed to drop tables for test: %w", err)
+		}
+	}
+
 	// Create base tables
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (

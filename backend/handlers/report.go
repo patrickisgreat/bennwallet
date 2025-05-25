@@ -189,10 +189,10 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		query += fmt.Sprintf(" AND (%s)", strings.Join(enteredByConditions, " OR "))
 	}
 
-	// Add paid filter (only if true)
-	if request.Paid != nil && *request.Paid {
+	// Add paid filter
+	if request.Paid != nil {
 		query += fmt.Sprintf(" AND t.paid = $%d", len(args)+1)
-		args = append(args, true)
+		args = append(args, *request.Paid)
 	}
 
 	// Add optional filter (only if explicitly false)

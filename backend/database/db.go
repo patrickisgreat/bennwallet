@@ -154,11 +154,13 @@ func InitDB() error {
 	return nil
 }
 
-// CreatePostgresSchema creates all the tables needed for PostgreSQL
+// CreatePostgresSchema creates the base PostgreSQL schema
 func CreatePostgresSchema(db *sql.DB) error {
-	// If RESET_DB is true, drop all existing tables first
-	if os.Getenv("RESET_DB") == "true" {
-		log.Println("Database reset requested - resetting database before migrations...")
+	// Check if we're in a test environment
+	isTest := os.Getenv("GO_ENV") == "test"
+
+	// For tests, we want to drop and recreate tables
+	if isTest {
 		_, err := db.Exec(`
 			DO $$ 
 			DECLARE
@@ -177,86 +179,27 @@ func CreatePostgresSchema(db *sql.DB) error {
 			END $$;
 		`)
 		if err != nil {
-			return fmt.Errorf("failed to drop existing tables: %w", err)
+			return fmt.Errorf("failed to drop tables for test: %w", err)
 		}
-		log.Println("All tables dropped successfully")
 	}
 
-	// Create migrations table first to track schema versions
+	// Create base tables
 	_, err := db.Exec(`
-		DROP TABLE IF EXISTS migrations CASCADE;
-		CREATE TABLE migrations (
-			id SERIAL PRIMARY KEY,
-			name TEXT UNIQUE NOT NULL,
-			applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		);
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create migrations table: %w", err)
-	}
-
-	log.Println("Creating base tables...")
-	// Create base tables in correct order to handle dependencies
-	_, err = db.Exec(`
-		DROP TABLE IF EXISTS transaction_categories CASCADE;
-		DROP TABLE IF EXISTS transactions CASCADE;
-		DROP TABLE IF EXISTS ynab_categories CASCADE;
-		DROP TABLE IF EXISTS ynab_category_groups CASCADE;
-		DROP TABLE IF EXISTS permissions CASCADE;
-		DROP TABLE IF EXISTS ynab_config CASCADE;
-		DROP TABLE IF EXISTS user_ynab_settings CASCADE;
-		DROP TABLE IF EXISTS users CASCADE;
-
-		CREATE TABLE users (
+		CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			username TEXT NOT NULL UNIQUE,
 			name TEXT NOT NULL,
 			role TEXT NOT NULL,
-			status TEXT DEFAULT 'approved',
-			is_admin BOOLEAN DEFAULT FALSE
+			status TEXT NOT NULL DEFAULT 'approved',
+			is_admin BOOLEAN NOT NULL DEFAULT false
 		);
 
-		CREATE TABLE permissions (
-			id SERIAL PRIMARY KEY,
-			granted_user_id TEXT NOT NULL REFERENCES users(id),
-			owner_user_id TEXT NOT NULL REFERENCES users(id),
-			resource_type TEXT NOT NULL,
-			permission_type TEXT NOT NULL,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			expires_at TIMESTAMP WITH TIME ZONE,
-			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
-		);
-
-		CREATE TABLE ynab_category_groups (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			category_group_id TEXT NOT NULL,
-			hidden BOOLEAN DEFAULT false,
-			user_id TEXT NOT NULL REFERENCES users(id),
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		);
-
-		CREATE TABLE ynab_categories (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			category_group_id TEXT NOT NULL,
-			hidden BOOLEAN DEFAULT false,
-			budget_amount DECIMAL(15,2),
-			user_id TEXT NOT NULL REFERENCES users(id),
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (category_group_id) REFERENCES ynab_category_groups(id)
-		);
-
-		CREATE TABLE transactions (
+		CREATE TABLE IF NOT EXISTS transactions (
 			id TEXT PRIMARY KEY,
 			amount NUMERIC(15,2) NOT NULL,
 			description TEXT NOT NULL,
-			date TIMESTAMP NOT NULL,
-			transaction_date TIMESTAMP,
+			date TEXT NOT NULL,
+			transaction_date TEXT,
 			type TEXT NOT NULL,
 			pay_to TEXT,
 			paid BOOLEAN NOT NULL DEFAULT FALSE,
@@ -267,17 +210,18 @@ func CreatePostgresSchema(db *sql.DB) error {
 			note TEXT
 		);
 
-		CREATE TABLE transaction_categories (
+		CREATE TABLE IF NOT EXISTS permissions (
 			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-			category_id TEXT NOT NULL REFERENCES ynab_categories(id) ON DELETE CASCADE,
-			amount NUMERIC(15,2) NOT NULL,
+			granted_user_id TEXT NOT NULL REFERENCES users(id),
+			owner_user_id TEXT NOT NULL REFERENCES users(id),
+			resource_type TEXT NOT NULL,
+			permission_type TEXT NOT NULL,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(transaction_id, category_id)
+			expires_at TIMESTAMP WITH TIME ZONE,
+			UNIQUE(granted_user_id, owner_user_id, resource_type, permission_type)
 		);
 
-		CREATE TABLE ynab_config (
+		CREATE TABLE IF NOT EXISTS ynab_config (
 			id SERIAL PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id),
 			encrypted_api_token TEXT,
@@ -294,14 +238,48 @@ func CreatePostgresSchema(db *sql.DB) error {
 			UNIQUE(user_id)
 		);
 
-		CREATE TABLE user_ynab_settings (
+		CREATE TABLE IF NOT EXISTS user_ynab_settings (
 			user_id TEXT PRIMARY KEY REFERENCES users(id),
 			token TEXT,
 			budget_id TEXT,
 			account_id TEXT,
 			auto_import BOOLEAN DEFAULT false,
 			sync_enabled BOOLEAN DEFAULT false,
-			last_synced TIMESTAMP WITH TIME ZONE
+			last_synced TIMESTAMP
+		);
+
+		CREATE TABLE IF NOT EXISTS ynab_category_groups (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			category_group_id TEXT NOT NULL,
+			hidden BOOLEAN DEFAULT false,
+			user_id TEXT NOT NULL REFERENCES users(id),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE TABLE IF NOT EXISTS ynab_categories (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			group_id TEXT REFERENCES ynab_category_groups(id),
+			category_group_id TEXT REFERENCES ynab_category_groups(id),
+			hidden BOOLEAN DEFAULT false,
+			budget_amount DECIMAL(15,2),
+			user_id TEXT NOT NULL REFERENCES users(id),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE TABLE IF NOT EXISTS transaction_categories (
+			id SERIAL PRIMARY KEY,
+			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+			category_id TEXT NOT NULL REFERENCES ynab_categories(id) ON DELETE CASCADE,
+			amount NUMERIC(15,2) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(transaction_id, category_id)
 		);
 	`)
 	if err != nil {
@@ -344,6 +322,10 @@ func SeedDefaultData(db *sql.DB) error {
 
 // SetupTestDB creates a new test database for PostgreSQL testing
 func SetupTestDB(t testing.TB) (*sql.DB, func()) {
+	// Set test environment
+	os.Setenv("GO_ENV", "test")
+	defer os.Unsetenv("GO_ENV")
+
 	// Create a test PostgreSQL database
 	testConfig := PostgresConfig{
 		Host:     getEnvOrDefault("TEST_DB_HOST", "localhost"),
