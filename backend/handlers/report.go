@@ -190,25 +190,22 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 	}
 
 	// Add paid filter
-	if request.Paid != nil && *request.Paid {
-		query += " AND t.paid = true"
-		log.Printf("Paid filter: true")
-	} else {
-		log.Printf("Paid filter: not applied (value: %v)", request.Paid)
+	if request.Paid != nil {
+		query += fmt.Sprintf(" AND t.paid = $%d", len(args)+1)
+		args = append(args, *request.Paid)
 	}
 
-	// Add optional filter if the column exists
+	// Add optional filter
 	if hasOptionalColumn {
-		log.Printf("Optional request value: %v", request.Optional)
 		if request.Optional != nil {
-			log.Printf("Optional pointer value: %v", *request.Optional)
-		}
-
-		if request.Optional != nil && !*request.Optional {
-			query += " AND t.optional = false"
-			log.Printf("Optional filter: excluding optional transactions (t.optional = false)")
+			// When Optional is true, show all transactions (no filter)
+			// When Optional is false, show only non-optional transactions
+			if !*request.Optional {
+				query += " AND t.optional = false"
+			}
 		} else {
-			log.Printf("Optional filter: including all transactions")
+			// Default behavior: exclude optional transactions unless explicitly included
+			query += " AND t.optional = false"
 		}
 	}
 

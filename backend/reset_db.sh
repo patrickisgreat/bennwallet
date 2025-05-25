@@ -56,7 +56,11 @@ EOF
         # Start server with RESET_DB flag to populate the database
         echo "Starting server with RESET_DB and --no-exit flag..."
         RESET_DB=true APP_ENV=development go run main.go --no-exit
-        
+
+        # Apply foreign key fix migration
+        echo "Applying fix_foreign_keys.sql migration..."
+        PGPASSWORD=$DB_PASSWORD psql "$CONNECTION_STRING" -f migrations/fix_foreign_keys.sql
+
         exit 0
     else
         echo "ERROR: Could not connect to PostgreSQL database."
