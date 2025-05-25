@@ -4,10 +4,21 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 )
 
 // CreateBaseSchema creates all the base tables needed for the application
 func CreateBaseSchema(db *sql.DB) error {
+	// Check if we're in a test environment
+	isTest := os.Getenv("GO_ENV") == "test"
+
+	// For tests, we want to drop and recreate tables
+	if isTest {
+		if err := DropAllTables(db); err != nil {
+			return fmt.Errorf("failed to drop tables for test: %w", err)
+		}
+	}
+
 	// Create base tables
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
@@ -97,8 +108,8 @@ func CreateBaseSchema(db *sql.DB) error {
 
 		CREATE TABLE IF NOT EXISTS transaction_categories (
 			id SERIAL PRIMARY KEY,
-			transaction_id TEXT NOT NULL REFERENCES transactions(id),
-			category_id TEXT NOT NULL REFERENCES ynab_categories(id),
+			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+			category_id TEXT NOT NULL REFERENCES ynab_categories(id) ON DELETE CASCADE,
 			amount NUMERIC(15,2) NOT NULL,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
