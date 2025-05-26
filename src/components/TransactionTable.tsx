@@ -110,9 +110,16 @@ function TransactionTable({
                   <th
                     scope="col"
                     className="px-1 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                    onClick={() => handleSortClick('entered')}
+                  >
+                    Entered Date
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-1 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                     onClick={() => handleSortClick('transactionDate')}
                   >
-                    Date
+                    Transaction Date
                   </th>
                   <th
                     scope="col"
@@ -183,8 +190,10 @@ function TransactionTable({
                         <div className="text-sm text-gray-900">
                           {formatDate(tx.transactionDate)}
                         </div>
-                        <div className="text-xs text-gray-500">
-                          Entered: {formatDate(tx.entered)}
+                      </td>
+                      <td className="px-1 py-2">
+                        <div className="text-sm text-gray-900">
+                          {tx.entered ? formatDate(tx.entered) : 'No date'}
                         </div>
                       </td>
                       <td className="px-1 py-2">

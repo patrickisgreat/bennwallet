@@ -28,7 +28,9 @@ function AddTransactionForm({
   const [category, setCategory] = useState('');
   const [optional, setOptional] = useState(false);
   const [transactionDate, setTransactionDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    editingTransaction?.transactionDate 
+      ? new Date(editingTransaction.transactionDate).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0]
   );
   const [submitting, setSubmitting] = useState(false);
   const [userOptions, setUserOptions] = useState<string[]>([]);
@@ -195,14 +197,12 @@ function AddTransactionForm({
           categories: [categoryObject], // Add categories array with the selected category
         });
       } else {
-        const now = new Date();
-        
         // Create category object for the new transaction
         const categoryObject = createCategoryObject(category);
         
         const newTransaction: Transaction = {
           id: uuidv4(),
-          entered: now.toISOString(),
+          entered: new Date().toISOString(), // Always use current timestamp for entered date
           transactionDate: new Date(transactionDate + 'T00:00:00').toISOString(),
           payTo,
           amount: parsedAmount,
@@ -278,15 +278,20 @@ function AddTransactionForm({
             />
           </div>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Date</label>
-          <input
-            type="date"
-            value={transactionDate}
-            onChange={e => setTransactionDate(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
-            required
-          />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="transactionDate" className="block text-sm font-medium text-gray-700">
+              Transaction Date
+            </label>
+            <input
+              type="date"
+              name="transactionDate"
+              id="transactionDate"
+              value={transactionDate}
+              onChange={(e) => setTransactionDate(e.target.value)}
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+            />
+          </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
