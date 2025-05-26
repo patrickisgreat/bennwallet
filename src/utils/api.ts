@@ -66,8 +66,8 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
     id: tx.id,
     amount: tx.amount,
     description: `${tx.payTo ? tx.payTo + ' - ' : ''}${tx.category}`, // Create description from payTo and category
-    date: tx.entered,
-    transactionDate: tx.transactionDate,
+    date: tx.entered, // entered maps to backend 'date'
+    transactionDate: tx.transactionDate, // transactionDate maps to backend 'transaction_date'
     type: tx.category,
     payTo: tx.payTo,
     paid: tx.paid,
@@ -75,21 +75,17 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
     enteredBy: tx.enteredBy,
     optional: tx.optional,
     note: tx.note || '', // Keep note as the additional notes field
-  };
-
-  console.log('Debug - Backend note after conversion:', backendTx.note);
-  console.log('Debug - Backend description after conversion:', backendTx.description);
-
-  // Add categories if available
-  if (tx.categories && tx.categories.length > 0) {
-    backendTx.categories = tx.categories.map(cat => ({
+    categories: tx.categories?.map(cat => ({
       id: String(cat.id),
       name: cat.name,
       description: cat.description || '',
       color: cat.color,
       userId: String(cat.userId),
-    }));
-  }
+    })),
+  };
+
+  console.log('Debug - Backend note after conversion:', backendTx.note);
+  console.log('Debug - Backend description after conversion:', backendTx.description);
 
   return backendTx;
 }
@@ -97,13 +93,13 @@ function toBackendTransaction(tx: Transaction): BackendTransaction {
 // Convert the backend transaction format to the frontend format
 function toFrontendTransaction(tx: BackendTransaction): Transaction {
   console.log('Debug - Converting backend tx to frontend:', JSON.stringify(tx, null, 2));
-  console.log('Debug - Backend note before conversion:', tx.note);
-  console.log('Debug - Backend description before conversion:', tx.description);
+  console.log('Debug - Backend date field:', tx.date);
+  console.log('Debug - Backend transaction_date field:', tx.transactionDate);
 
   const frontendTx: Transaction = {
     id: tx.id,
-    entered: tx.date,
-    transactionDate: tx.transactionDate || tx.date,
+    entered: tx.date, // backend 'date' maps to entered
+    transactionDate: tx.transactionDate || tx.date, // backend 'transaction_date' maps to transactionDate
     payTo: tx.payTo || '',
     amount: tx.amount,
     note: tx.note || '',
@@ -112,25 +108,23 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
     paidDate: tx.paidDate,
     enteredBy: tx.enteredBy || '',
     optional: tx.optional || false,
-  };
-
-  console.log('Debug - Frontend note after conversion:', frontendTx.note);
-
-  if (tx.categories && tx.categories.length > 0) {
-    frontendTx.categories = tx.categories.map(cat => ({
+    categories: tx.categories?.map(cat => ({
       id: cat.id,
       name: cat.name,
       description: cat.description,
       color: cat.color || '',
       userId: String(cat.userId),
-    }));
-  }
+    })),
+  };
+
+  console.log('Debug - Frontend entered field:', frontendTx.entered);
+  console.log('Debug - Frontend transactionDate field:', frontendTx.transactionDate);
 
   return frontendTx;
 }
 
 // Define explicit types for transaction filters
-export interface TransactionFilterParams {
+ export interface TransactionFilterParams {
   startDate?: string;
   endDate?: string;
   txStartDate?: string;
@@ -156,7 +150,7 @@ export const fetchTransactions = async (params: Record<string, string | boolean 
     const queryString = query ? `?${query}` : '';
     
     console.log('Sending query params:', params);
-    const response = await api.get<Transaction[] | null>(`/transactions${queryString}`);
+    const response = await api.get<BackendTransaction[] | null>(`/transactions${queryString}`);
     
     console.log('Transactions response:', response.data);
     
@@ -169,13 +163,15 @@ export const fetchTransactions = async (params: Record<string, string | boolean 
     // Debug note data in received transactions
     if (response.data && response.data.length > 0) {
       const sampleTx = response.data[0];
-      console.log('Debug - Sample transaction data:', JSON.stringify(sampleTx, null, 2));
-      console.log('Debug - Note field in first transaction:', sampleTx.note);
+      console.log('Debug - Sample backend transaction data:', JSON.stringify(sampleTx, null, 2));
+      console.log('Debug - Backend date field:', sampleTx.date);
+      console.log('Debug - Backend transactionDate field:', sampleTx.transactionDate);
       // Log all raw properties to see what's available
       console.log('Debug - All properties in first transaction:', Object.keys(sampleTx));
     }
     
-    return response.data;
+    // Transform backend transactions to frontend format
+    return response.data.map(tx => toFrontendTransaction(tx));
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
       console.log('API error response:', error.response);
