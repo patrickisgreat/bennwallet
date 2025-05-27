@@ -188,12 +188,12 @@ function TransactionTable({
                       </td>
                       <td className="px-1 py-2">
                         <div className="text-sm text-gray-900">
-                          {formatDate(tx.transactionDate)}
+                          {tx.entered ? formatDate(tx.entered) : 'No date'}
                         </div>
                       </td>
                       <td className="px-1 py-2">
                         <div className="text-sm text-gray-900">
-                          {tx.entered ? formatDate(tx.entered) : 'No date'}
+                          {formatDate(tx.transactionDate)}
                         </div>
                       </td>
                       <td className="px-1 py-2">
