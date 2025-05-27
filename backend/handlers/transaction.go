@@ -267,6 +267,14 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		
+		// Debug logging to trace the date values
+		log.Printf("Transaction %s - Raw dateStr from DB (date column): %s", t.ID, dateStr)
+		if transactionDate.Valid {
+			log.Printf("Transaction %s - Raw transactionDate from DB (transaction_date column): %s", t.ID, transactionDate.String)
+		} else {
+			log.Printf("Transaction %s - transactionDate is NULL", t.ID)
+		}
 
 		// Convert date strings to time.Time
 		// Try multiple date formats since production might have timestamps
@@ -332,6 +340,10 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		if note.Valid {
 			t.Note = note.String
 		}
+		
+		// Debug final assigned values
+		log.Printf("Transaction %s - Final t.Date: %s", t.ID, t.Date.Format("2006-01-02 15:04:05"))
+		log.Printf("Transaction %s - Final t.TransactionDate: %s", t.ID, t.TransactionDate.Format("2006-01-02 15:04:05"))
 
 		// Check if transaction_categories table exists
 		var hasTransactionCategoriesTable bool

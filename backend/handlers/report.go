@@ -109,13 +109,21 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		args = append(args, userID)
 	}
 
-	// Add date filters
+	// Add date filters - use transaction_date if available, otherwise fall back to date
 	if request.StartDate != "" {
-		query += fmt.Sprintf(" AND t.date::date >= $%d::date", len(args)+1)
+		if hasTransactionDateColumn {
+			query += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", len(args)+1)
+		} else {
+			query += fmt.Sprintf(" AND t.date::date >= $%d::date", len(args)+1)
+		}
 		args = append(args, request.StartDate)
 	}
 	if request.EndDate != "" {
-		query += fmt.Sprintf(" AND t.date::date <= $%d::date", len(args)+1)
+		if hasTransactionDateColumn {
+			query += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", len(args)+1)
+		} else {
+			query += fmt.Sprintf(" AND t.date::date <= $%d::date", len(args)+1)
+		}
 		args = append(args, request.EndDate)
 	}
 
@@ -285,12 +293,20 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		argCount := 1
 
 		if request.StartDate != "" {
-			debugQuery += fmt.Sprintf(" AND t.date::date >= $%d::date", argCount)
+			if hasTransactionDateColumn {
+				debugQuery += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", argCount)
+			} else {
+				debugQuery += fmt.Sprintf(" AND t.date::date >= $%d::date", argCount)
+			}
 			debugArgs = append(debugArgs, request.StartDate)
 			argCount++
 		}
 		if request.EndDate != "" {
-			debugQuery += fmt.Sprintf(" AND t.date::date <= $%d::date", argCount)
+			if hasTransactionDateColumn {
+				debugQuery += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", argCount)
+			} else {
+				debugQuery += fmt.Sprintf(" AND t.date::date <= $%d::date", argCount)
+			}
 			debugArgs = append(debugArgs, request.EndDate)
 			argCount++
 		}

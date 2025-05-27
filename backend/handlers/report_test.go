@@ -124,9 +124,9 @@ func insertTestTransactions() {
 	for _, tx := range testTransactions {
 		_, err := database.DB.Exec(`
 			INSERT INTO transactions 
-			(id, amount, description, date, type, pay_to, paid, entered_by, optional, user_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, tx.id, tx.amount, tx.description, tx.date, tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.optional, tx.userId)
+			(id, amount, description, date, transaction_date, type, pay_to, paid, entered_by, optional, user_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`, tx.id, tx.amount, tx.description, tx.date, tx.date.Format("2006-01-02"), tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.optional, tx.userId)
 
 		if err != nil {
 			panic(err)
