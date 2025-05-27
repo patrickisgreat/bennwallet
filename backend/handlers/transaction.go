@@ -269,9 +269,25 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Convert date strings to time.Time
-		t.Date, err = time.Parse("2006-01-02", dateStr)
-		if err != nil {
-			log.Printf("Error parsing date %s: %v", dateStr, err)
+		// Try multiple date formats since production might have timestamps
+		var dateFormats = []string{
+			"2006-01-02",                    // Date only format
+			"2006-01-02 15:04:05",          // Timestamp without microseconds
+			"2006-01-02 15:04:05.999999",   // Timestamp with microseconds
+			time.RFC3339,                    // ISO 8601
+		}
+		
+		var parsed bool
+		for _, format := range dateFormats {
+			t.Date, err = time.Parse(format, dateStr)
+			if err == nil {
+				parsed = true
+				break
+			}
+		}
+		
+		if !parsed {
+			log.Printf("Error parsing date %s with any format: %v", dateStr, err)
 			// Use current time as fallback
 			t.Date = time.Now()
 		}
@@ -280,15 +296,32 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 			t.PaidDate = paidDate.String
 		}
 
-		if transactionDate.Valid {
-			txDate, err := time.Parse("2006-01-02", transactionDate.String)
-			if err != nil {
-				log.Printf("Error parsing transaction_date %s: %v", transactionDate.String, err)
+		// Handle transaction_date - it might be NULL in production
+		if transactionDate.Valid && transactionDate.String != "" {
+			// Try multiple formats for transaction_date as well
+			var txParsed bool
+			for _, format := range dateFormats {
+				t.TransactionDate, err = time.Parse(format, transactionDate.String)
+				if err == nil {
+					txParsed = true
+					break
+				}
+			}
+			
+			if !txParsed {
+				log.Printf("Error parsing transaction_date %s with any format: %v", transactionDate.String, err)
 				t.TransactionDate = t.Date // Fallback to entered date
 			} else {
-				t.TransactionDate = txDate
+				// Log when dates are different to help debug production issue
+				if t.TransactionDate.Format("2006-01-02") != t.Date.Format("2006-01-02") {
+					log.Printf("Transaction %s has different dates - entered: %s, transaction: %s", 
+						t.ID, t.Date.Format("2006-01-02"), t.TransactionDate.Format("2006-01-02"))
+				}
 			}
 		} else {
+			// Log when transaction_date is NULL/empty
+			log.Printf("Transaction %s has NULL/empty transaction_date, using entered date %s as fallback", 
+				t.ID, t.Date.Format("2006-01-02"))
 			t.TransactionDate = t.Date // Fall back to entered date if transaction date not available
 		}
 
