@@ -197,15 +197,16 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		query += fmt.Sprintf(" AND (%s)", strings.Join(enteredByConditions, " OR "))
 	}
 
-	// Add paid filter
+	// Add paid filter - filter by paid status if specified
 	if request.Paid != nil {
 		query += fmt.Sprintf(" AND t.paid = $%d", len(args)+1)
 		args = append(args, *request.Paid)
 	}
 
-	// Add optional filter (only if explicitly false)
-	if hasOptionalColumn && request.Optional != nil && !*request.Optional {
-		query += " AND t.optional = false"
+	// Add optional filter - exclude optional transactions when checkbox is checked
+	if hasOptionalColumn && request.Optional != nil && *request.Optional {
+		query += fmt.Sprintf(" AND t.optional = $%d", len(args)+1)
+		args = append(args, false)
 	}
 
 	// Add user access control if user_id column exists and user is not admin
@@ -310,8 +311,8 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 			debugArgs = append(debugArgs, request.EndDate)
 			argCount++
 		}
-		if request.Paid != nil && *request.Paid {
-			debugQuery += " AND t.paid = true"
+		if request.Paid != nil {
+			debugQuery += fmt.Sprintf(" AND t.paid = %v", *request.Paid)
 		}
 		if hasOptionalColumn && request.Optional != nil && *request.Optional {
 			debugQuery += " AND t.optional = false"
