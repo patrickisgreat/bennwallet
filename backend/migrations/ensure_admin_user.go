@@ -27,8 +27,7 @@ func EnsureAdminUser(db *sql.DB) error {
 	// Add hardcoded admins - these should be application maintainers/owners
 	// Including the Firebase UID for the user
 	adminUsers = append(adminUsers,
-		"UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", // User's ID from logs
-		"admin-user-1",                 // Default test admin ID
+		"UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", // Patrick Bennett's Firebase UID
 	)
 
 	log.Printf("Ensuring %d admin users exist with proper privileges", len(adminUsers))

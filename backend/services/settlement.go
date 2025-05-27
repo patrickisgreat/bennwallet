@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,40 +25,47 @@ func NewSettlementService(db *sql.DB) *SettlementService {
 func (s *SettlementService) CreateSettlement(userID string, transactionID string, notes string) (*models.Settlement, error) {
 	// First, get the transaction to determine the amount and who it's for
 	var transaction models.Transaction
+	var owedBy sql.NullString
 	err := s.db.QueryRow(`
-		SELECT id, amount, pay_to, entered_by, user_id 
+		SELECT id, amount, paid_by, owed_by, entered_by, user_id 
 		FROM transactions 
 		WHERE id = $1
-	`, transactionID).Scan(&transaction.ID, &transaction.Amount, &transaction.PayTo, &transaction.EnteredBy, &transaction.UserID)
+	`, transactionID).Scan(&transaction.ID, &transaction.Amount, &transaction.PaidBy, &owedBy, &transaction.EnteredBy, &transaction.UserID)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction: %w", err)
 	}
 
-	// The settlement is created BY the current user
-	// If they entered this transaction, they're saying someone else can use it to pay them back
-	// The "created_for" should be who owes them money
-	var createdBy, createdFor string
-	createdBy = userID
-	
-	// For a settlement to make sense:
-	// - Current user must have entered the transaction (they are owed money)
-	// - The transaction must have a PayTo indicating who owes them
-	if transaction.EnteredBy != userID {
-		return nil, fmt.Errorf("you can only create settlements for transactions you entered")
+	// Set OwedBy if it was in the database
+	if owedBy.Valid {
+		transaction.OwedBy = owedBy.String
 	}
 
-	// Find the user who should pay (from PayTo field)
-	var payToUserID string
+	// Determine who creates the settlement and who it's for
+	// Settlement is always between current user and the other person in the transaction
+	var createdBy, createdFor string
+	createdBy = userID
+
+	if transaction.OwedBy == userID {
+		// Current user owes money, settlement is with the person who paid
+		createdFor = transaction.PaidBy
+	} else if transaction.PaidBy == userID {
+		// Current user paid, settlement is with the person who owes
+		createdFor = transaction.OwedBy
+	} else {
+		return nil, fmt.Errorf("you can only create settlements for transactions where you paid or owe money")
+	}
+
+	// Verify the other user exists
+	var otherUserID string
 	err = s.db.QueryRow(`
-		SELECT id FROM users WHERE name = $1 OR username = $1 LIMIT 1
-	`, transaction.PayTo).Scan(&payToUserID)
-	
+		SELECT id FROM users WHERE id = $1
+	`, createdFor).Scan(&otherUserID)
+
 	if err != nil {
 		// If we can't find the user, we can't create a settlement
-		return nil, fmt.Errorf("cannot find user '%s' to create settlement", transaction.PayTo)
+		return nil, fmt.Errorf("cannot find user with ID '%s' to create settlement", createdFor)
 	}
-	createdFor = payToUserID
 
 	settlementID := uuid.New().String()
 	now := time.Now()
@@ -69,33 +77,29 @@ func (s *SettlementService) CreateSettlement(userID string, transactionID string
 	}
 	defer tx.Rollback()
 
-	// Create the settlement
+	// Create an empty settlement that can grow as transactions are added
+	log.Printf("DEBUG: Creating settlement %s between %s and %s", settlementID, createdBy, createdFor)
 	_, err = tx.Exec(`
 		INSERT INTO settlements (id, created_by, created_for, total_amount, remaining_amount, status, notes, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, settlementID, createdBy, createdFor, transaction.Amount, transaction.Amount, "active", notes, now, now)
+	`, settlementID, createdBy, createdFor, 0, 0, "active", notes, now, now)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settlement: %w", err)
 	}
 
-	// Add the initial transaction as a settlement item
-	_, err = tx.Exec(`
-		INSERT INTO settlement_items (settlement_id, transaction_id, applied_amount, created_by, created_at)
-		VALUES ($1, $2, $3, $4, $5)
-	`, settlementID, transactionID, transaction.Amount, userID, now)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create settlement item: %w", err)
+	log.Printf("DEBUG: Settlement created, now applying initial transaction %s with amount %f", transactionID, transaction.Amount)
+	// Apply the initial transaction using the standard method
+	if err := s.applyTransactionToSettlementTx(tx, settlementID, transactionID, transaction.Amount, userID); err != nil {
+		return nil, fmt.Errorf("failed to apply initial transaction: %w", err)
 	}
 
-	// Create history entry
+	// Create history entry for settlement creation
 	details := models.SettlementDetails{
-		"transaction_id": transactionID,
-		"amount":         transaction.Amount,
+		"action": "settlement_created",
 	}
 
-	if err := s.addHistoryEntry(tx, settlementID, "created", userID, &transactionID, &transaction.Amount, details); err != nil {
+	if err := s.addHistoryEntry(tx, settlementID, "created", userID, nil, nil, details); err != nil {
 		return nil, err
 	}
 
@@ -114,9 +118,18 @@ func (s *SettlementService) ApplyTransactionToSettlement(settlementID string, tr
 	}
 	defer tx.Rollback()
 
+	if err := s.applyTransactionToSettlementTx(tx, settlementID, transactionID, amount, userID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// applyTransactionToSettlementTx is the internal method that works within an existing transaction
+func (s *SettlementService) applyTransactionToSettlementTx(tx *sql.Tx, settlementID string, transactionID string, amount float64, userID string) error {
 	// Get the settlement
 	var settlement models.Settlement
-	err = tx.QueryRow(`
+	err := tx.QueryRow(`
 		SELECT id, remaining_amount, status, created_by, created_for
 		FROM settlements
 		WHERE id = $1
@@ -126,19 +139,17 @@ func (s *SettlementService) ApplyTransactionToSettlement(settlementID string, tr
 		return fmt.Errorf("failed to get settlement: %w", err)
 	}
 
+	// Debug logging
+	log.Printf("DEBUG: Settlement %s status: %s, remaining: %f", settlementID, settlement.Status, settlement.RemainingAmount)
+
 	// Validate the settlement is active
 	if settlement.Status != "active" {
-		return fmt.Errorf("settlement is not active")
+		return fmt.Errorf("settlement is not active (status: %s)", settlement.Status)
 	}
 
 	// Validate the user has permission (either creator or target)
 	if userID != settlement.CreatedBy && userID != settlement.CreatedFor {
 		return fmt.Errorf("user does not have permission to modify this settlement")
-	}
-
-	// Validate amount doesn't exceed remaining
-	if amount > settlement.RemainingAmount {
-		return fmt.Errorf("amount exceeds remaining settlement amount")
 	}
 
 	// Add the settlement item
@@ -151,44 +162,39 @@ func (s *SettlementService) ApplyTransactionToSettlement(settlementID string, tr
 		return fmt.Errorf("failed to create settlement item: %w", err)
 	}
 
-	// Update remaining amount
-	newRemaining := settlement.RemainingAmount - amount
-	status := settlement.Status
-	var completedAt *time.Time
-
-	if newRemaining <= 0 {
-		status = "completed"
-		now := time.Now()
-		completedAt = &now
-	}
-
+	// Mark the transaction as paid since it's been settled
 	_, err = tx.Exec(`
-		UPDATE settlements 
-		SET remaining_amount = $1, status = $2, completed_at = $3, updated_at = $4
-		WHERE id = $5
-	`, newRemaining, status, completedAt, time.Now(), settlementID)
+		UPDATE transactions 
+		SET paid = true, paid_date = $1
+		WHERE id = $2
+	`, time.Now().Format("2006-01-02"), transactionID)
 
 	if err != nil {
-		return fmt.Errorf("failed to update settlement: %w", err)
+		return fmt.Errorf("failed to mark transaction as paid: %w", err)
+	}
+
+	// Simply add the transaction amount to the settlement's total
+	// Don't manage "remaining amount" - settlements can grow indefinitely until manually completed
+	_, err = tx.Exec(`
+		UPDATE settlements 
+		SET total_amount = total_amount + $1, updated_at = $2
+		WHERE id = $3
+	`, amount, time.Now(), settlementID)
+
+	if err != nil {
+		return fmt.Errorf("failed to update settlement total: %w", err)
 	}
 
 	// Add history entry
 	details := models.SettlementDetails{
-		"remaining_before": settlement.RemainingAmount,
-		"remaining_after":  newRemaining,
+		"amount_added": amount,
 	}
 
 	if err := s.addHistoryEntry(tx, settlementID, "transaction_applied", userID, &transactionID, &amount, details); err != nil {
 		return err
 	}
 
-	if status == "completed" {
-		if err := s.addHistoryEntry(tx, settlementID, "completed", userID, nil, nil, nil); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 // RemoveTransactionFromSettlement removes a transaction from a settlement
@@ -220,10 +226,21 @@ func (s *SettlementService) RemoveTransactionFromSettlement(settlementID string,
 		return fmt.Errorf("failed to remove settlement item: %w", err)
 	}
 
-	// Update the settlement's remaining amount
+	// Mark the transaction as unpaid since it's no longer settled
+	_, err = tx.Exec(`
+		UPDATE transactions 
+		SET paid = false, paid_date = NULL
+		WHERE id = $1
+	`, transactionID)
+
+	if err != nil {
+		return fmt.Errorf("failed to mark transaction as unpaid: %w", err)
+	}
+
+	// Update the settlement's total amount (subtract the removed amount)
 	_, err = tx.Exec(`
 		UPDATE settlements 
-		SET remaining_amount = remaining_amount + $1, 
+		SET total_amount = total_amount - $1,
 		    status = CASE WHEN status = 'completed' THEN 'active' ELSE status END,
 		    completed_at = CASE WHEN status = 'completed' THEN NULL ELSE completed_at END,
 		    updated_at = $2
@@ -298,6 +315,9 @@ func (s *SettlementService) GetUserSettlements(userID string, status string) ([]
 	if status != "" {
 		query += " AND s.status = $2"
 		args = append(args, status)
+	} else {
+		// By default, exclude cancelled settlements (soft delete)
+		query += " AND s.status != 'cancelled'"
 	}
 
 	query += " GROUP BY s.id, u1.name, u2.name ORDER BY s.created_at DESC"
@@ -326,13 +346,136 @@ func (s *SettlementService) GetUserSettlements(userID string, status string) ([]
 	return settlements, nil
 }
 
+// UpdateSettlementStatus updates the status of a settlement (e.g., complete, cancel)
+func (s *SettlementService) UpdateSettlementStatus(settlementID string, status string, userID string, notes string) (*models.Settlement, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// Get settlement details before updating
+	settlement, err := s.GetSettlement(settlementID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update the settlement status
+	now := time.Now()
+	_, err = tx.Exec(`
+		UPDATE settlements 
+		SET status = $1, updated_at = $2, notes = CASE WHEN $3 = '' THEN notes ELSE $3 END
+		WHERE id = $4
+	`, status, now, notes, settlementID)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to update settlement status: %w", err)
+	}
+
+	// If completing the settlement and there's a net amount, create adjustment transactions
+	if status == "completed" && settlement.TotalAmount > 0 {
+		err = s.createSettlementAdjustmentTransactions(tx, settlement, now)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create settlement adjustment transactions: %w", err)
+		}
+	}
+
+	// Create history entry
+	details := models.SettlementDetails{
+		"status": status,
+		"notes":  notes,
+	}
+
+	if err := s.addHistoryEntry(tx, settlementID, "status_updated", userID, nil, nil, details); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return s.GetSettlement(settlementID)
+}
+
+// createSettlementAdjustmentTransactions creates adjustment transactions to reflect the settlement
+func (s *SettlementService) createSettlementAdjustmentTransactions(tx *sql.Tx, settlement *models.Settlement, now time.Time) error {
+	// Calculate net amounts by user
+	userAmounts := make(map[string]float64)
+
+	// Get all settlement items to calculate net
+	for _, item := range settlement.Items {
+		// Get the transaction details
+		var paidBy, owedBy sql.NullString
+		err := tx.QueryRow(`
+			SELECT paid_by, owed_by FROM transactions WHERE id = $1
+		`, item.TransactionID).Scan(&paidBy, &owedBy)
+
+		if err != nil {
+			continue // Skip if we can't find the transaction
+		}
+
+		// Add/subtract amounts based on who paid/owes
+		if paidBy.Valid {
+			userAmounts[paidBy.String] += item.AppliedAmount
+		}
+		if owedBy.Valid {
+			userAmounts[owedBy.String] -= item.AppliedAmount
+		}
+	}
+
+	// Create adjustment transactions for non-zero balances
+	for userID, amount := range userAmounts {
+		if amount == 0 {
+			continue // Skip zero amounts
+		}
+
+		// Determine the other user
+		var otherUserID string
+		if userID == settlement.CreatedBy {
+			otherUserID = settlement.CreatedFor
+		} else {
+			otherUserID = settlement.CreatedBy
+		}
+
+		// Create settlement adjustment transaction
+		adjID := fmt.Sprintf("settlement-adj-%s-%d", settlement.ID, now.Unix())
+		description := fmt.Sprintf("Settlement adjustment")
+
+		var paidBy, owedBy string
+		if amount > 0 {
+			// This user is owed money
+			paidBy = userID
+			owedBy = otherUserID
+		} else {
+			// This user owes money
+			paidBy = otherUserID
+			owedBy = userID
+			amount = -amount // Make positive
+		}
+
+		_, err := tx.Exec(`
+			INSERT INTO transactions 
+			(id, amount, description, date, transaction_date, type, paid_by, owed_by, paid, paid_date, entered_by, optional, note, user_id) 
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		`, adjID, amount, description, now.Format("2006-01-02"), now.Format("2006-01-02"),
+			"settlement", paidBy, owedBy, true, now.Format("2006-01-02"), settlement.CreatedBy, false,
+			fmt.Sprintf("Settlement adjustment - ID: %s", settlement.ID[:8]), settlement.CreatedBy)
+
+		if err != nil {
+			return fmt.Errorf("failed to create adjustment transaction: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // Helper functions
 
 func (s *SettlementService) getSettlementItems(settlementID string) ([]models.SettlementItem, error) {
 	rows, err := s.db.Query(`
 		SELECT si.id, si.settlement_id, si.transaction_id, si.applied_amount, 
 		       si.created_at, si.created_by, 
-		       t.amount, t.description, t.date, t.pay_to, t.entered_by
+		       t.amount, t.description, t.date, t.paid_by, t.owed_by, t.entered_by
 		FROM settlement_items si
 		JOIN transactions t ON si.transaction_id = t.id
 		WHERE si.settlement_id = $1
@@ -350,14 +493,20 @@ func (s *SettlementService) getSettlementItems(settlementID string) ([]models.Se
 		var transaction models.Transaction
 		var dateStr string
 
+		var owedBy sql.NullString
 		err := rows.Scan(
 			&item.ID, &item.SettlementID, &item.TransactionID, &item.AppliedAmount,
 			&item.CreatedAt, &item.CreatedBy,
 			&transaction.Amount, &transaction.Description, &dateStr,
-			&transaction.PayTo, &transaction.EnteredBy,
+			&transaction.PaidBy, &owedBy, &transaction.EnteredBy,
 		)
 		if err != nil {
 			return nil, err
+		}
+
+		// Set OwedBy if it was in the database
+		if owedBy.Valid {
+			transaction.OwedBy = owedBy.String
 		}
 
 		// Parse the date string
@@ -431,14 +580,20 @@ func (s *SettlementService) addHistoryEntry(tx *sql.Tx, settlementID, action, ac
 func (s *SettlementService) ApplyTransactionAsPayment(userID string, transactionID string, notes string) (*models.Settlement, error) {
 	// Get the transaction
 	var transaction models.Transaction
+	var owedBy sql.NullString
 	err := s.db.QueryRow(`
-		SELECT id, amount, pay_to, entered_by, user_id 
+		SELECT id, amount, paid_by, owed_by, entered_by, user_id 
 		FROM transactions 
 		WHERE id = $1 AND paid = false
-	`, transactionID).Scan(&transaction.ID, &transaction.Amount, &transaction.PayTo, &transaction.EnteredBy, &transaction.UserID)
-	
+	`, transactionID).Scan(&transaction.ID, &transaction.Amount, &transaction.PaidBy, &owedBy, &transaction.EnteredBy, &transaction.UserID)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction: %w", err)
+	}
+
+	// Set OwedBy if it was in the database
+	if owedBy.Valid {
+		transaction.OwedBy = owedBy.String
 	}
 
 	// The user applying this transaction should be the one who owes money
@@ -459,12 +614,12 @@ func (s *SettlementService) ApplyTransactionAsPayment(userID string, transaction
 	}
 	defer tx.Rollback()
 
-	// Create the settlement
+	// Create the settlement as active (can be added to later)
 	_, err = tx.Exec(`
 		INSERT INTO settlements (id, created_by, created_for, total_amount, remaining_amount, status, notes, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, settlementID, transaction.EnteredBy, userID, transaction.Amount, 0, "completed", notes, now, now)
-	
+	`, settlementID, transaction.EnteredBy, userID, transaction.Amount, transaction.Amount, "active", notes, now, now)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settlement: %w", err)
 	}
@@ -474,19 +629,19 @@ func (s *SettlementService) ApplyTransactionAsPayment(userID string, transaction
 		INSERT INTO settlement_items (settlement_id, transaction_id, applied_amount, created_by, created_at)
 		VALUES ($1, $2, $3, $4, $5)
 	`, settlementID, transactionID, transaction.Amount, userID, now)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settlement item: %w", err)
 	}
 
 	// Create history entry
 	details := models.SettlementDetails{
-		"transaction_id": transactionID,
-		"amount": transaction.Amount,
-		"applied_by": userID,
+		"transaction_id":      transactionID,
+		"amount":              transaction.Amount,
+		"applied_by":          userID,
 		"payment_application": true,
 	}
-	
+
 	if err := s.addHistoryEntry(tx, settlementID, "created", userID, &transactionID, &transaction.Amount, details); err != nil {
 		return nil, err
 	}

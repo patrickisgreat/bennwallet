@@ -21,14 +21,15 @@ function AddTransactionForm({
 }: AddTransactionFormProps) {
   const { currentUser } = useUser();
 
-  // Set default payTo - using string type instead of specific literals
-  const [payTo, setPayTo] = useState<string>('');
+  // Set default paidBy - using string type instead of specific literals
+  const [paidBy, setPaidBy] = useState<string>('');
+  const [owedBy, setOwedBy] = useState<string>('');
   const [amount, setAmount] = useState<string>('0.00');
   const [note, setNote] = useState('');
   const [category, setCategory] = useState('');
   const [optional, setOptional] = useState(false);
   const [transactionDate, setTransactionDate] = useState<string>(
-    editingTransaction?.transactionDate 
+    editingTransaction?.transactionDate
       ? new Date(editingTransaction.transactionDate).toISOString().split('T')[0]
       : new Date().toISOString().split('T')[0]
   );
@@ -37,8 +38,9 @@ function AddTransactionForm({
 
   // First define the resetForm function before it's used
   const resetForm = () => {
-    // Set payTo to current user's name when resetting the form (if available)
-    setPayTo(currentUser?.name || '');
+    // Set paidBy to current user's name when resetting the form (if available)
+    setPaidBy(currentUser?.name || '');
+    setOwedBy('');
     setAmount('0.00');
     setNote('');
     setCategory('');
@@ -51,19 +53,19 @@ function AddTransactionForm({
     try {
       const fields = await fetchUniqueTransactionFields();
       console.log('Loaded unique user fields:', fields);
-      
+
       // Store the user options even if the array is empty
       setUserOptions(fields.payTo);
-      
-      // Only set a default payTo if we're not already editing a transaction
+
+      // Only set a default paidBy if we're not already editing a transaction
       // and only if we have options available
       if (!editingTransaction && currentUser?.name && fields.payTo.length > 0) {
         // If current user is in the list, set it as the default
         if (fields.payTo.includes(currentUser.name)) {
-          setPayTo(currentUser.name);
+          setPaidBy(currentUser.name);
         } else {
           // Otherwise, set the first available option
-          setPayTo(fields.payTo[0]);
+          setPaidBy(fields.payTo[0]);
         }
       }
     } catch (err) {
@@ -80,41 +82,47 @@ function AddTransactionForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
-  // Update payTo when currentUser changes
+  // Update paidBy when currentUser changes
   useEffect(() => {
     if (currentUser && !editingTransaction && userOptions.length > 0) {
       // Only update if we're not editing (to avoid overwriting edited values)
       // and if we have options loaded
       if (userOptions.includes(currentUser.name)) {
-        setPayTo(currentUser.name);
+        setPaidBy(currentUser.name);
       }
     }
   }, [currentUser, editingTransaction, userOptions]);
 
   useEffect(() => {
     if (editingTransaction) {
-      // Ensure we always have valid values, even if properties are missing
-      setPayTo(editingTransaction.payTo || '');
+      // Handle paidBy field - use paidBy or fall back to payTo
+      setPaidBy(editingTransaction.paidBy || editingTransaction.payTo || '');
+
+      // Handle owedBy field
+      setOwedBy(editingTransaction.owedBy || '');
+
       setAmount(editingTransaction.amount ? editingTransaction.amount.toFixed(2) : '0.00');
-      
+
       // Make sure we handle note correctly, falling back to empty string if it's undefined
       setNote(editingTransaction.note !== undefined ? editingTransaction.note : '');
-      
+
       // Get the category from either the categories array or the legacy category field
       if (editingTransaction.categories && editingTransaction.categories.length > 0) {
         setCategory(editingTransaction.categories[0].name || '');
       } else {
         setCategory(editingTransaction.category || '');
       }
-      
+
       setOptional(editingTransaction.optional || false);
-      
+
       // Make sure we have a valid date
       if (editingTransaction.transactionDate) {
         try {
-          setTransactionDate(new Date(editingTransaction.transactionDate).toISOString().split('T')[0]);
+          setTransactionDate(
+            new Date(editingTransaction.transactionDate).toISOString().split('T')[0]
+          );
         } catch (e) {
-          console.error("Invalid transaction date", e);
+          console.error('Invalid transaction date', e);
           setTransactionDate(new Date().toISOString().split('T')[0]);
         }
       } else {
@@ -170,12 +178,12 @@ function AddTransactionForm({
       return;
     }
 
-    // Validate payTo
-    if (!payTo) {
+    // Validate paidBy
+    if (!paidBy) {
       if (userOptions.length === 0) {
-        alert('No recipients available. Please contact your administrator to add users to the system.');
+        alert('No users available. Please contact your administrator to add users to the system.');
       } else {
-        alert('Please select a recipient');
+        alert('Please select who paid');
       }
       return;
     }
@@ -186,9 +194,10 @@ function AddTransactionForm({
       if (editingTransaction) {
         // Create category object for the update
         const categoryObject = createCategoryObject(category);
-        
+
         onEditSubmit(editingTransaction.id, {
-          payTo,
+          paidBy,
+          owedBy,
           amount: parsedAmount,
           note,
           category, // Keep legacy category field for compatibility
@@ -199,12 +208,13 @@ function AddTransactionForm({
       } else {
         // Create category object for the new transaction
         const categoryObject = createCategoryObject(category);
-        
+
         const newTransaction: Transaction = {
           id: uuidv4(),
           entered: new Date().toISOString(), // Always use current timestamp for entered date
           transactionDate: new Date(transactionDate + 'T00:00:00').toISOString(),
-          payTo,
+          paidBy: paidBy || currentUser.name, // Default to current user
+          owedBy: owedBy,
           amount: parsedAmount,
           note,
           category, // Keep legacy category field for compatibility
@@ -241,14 +251,29 @@ function AddTransactionForm({
     <form onSubmit={handleSubmit} className="bg-white p-4 rounded shadow mb-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Pay To</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Paid By</label>
           <select
-            value={payTo}
-            onChange={e => setPayTo(e.target.value)}
+            value={paidBy}
+            onChange={e => setPaidBy(e.target.value)}
             className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
             required
           >
             <option value="">Select recipient</option>
+            {userOptions.map(name => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Owed By</label>
+          <select
+            value={owedBy}
+            onChange={e => setOwedBy(e.target.value)}
+            className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
+          >
+            <option value="">N/A - Not a debt</option>
             {userOptions.map(name => (
               <option key={name} value={name}>
                 {name}
@@ -288,7 +313,7 @@ function AddTransactionForm({
               name="transactionDate"
               id="transactionDate"
               value={transactionDate}
-              onChange={(e) => setTransactionDate(e.target.value)}
+              onChange={e => setTransactionDate(e.target.value)}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
             />
           </div>
@@ -326,7 +351,7 @@ function AddTransactionForm({
         <button
           type="submit"
           className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 disabled:opacity-50"
-          disabled={submitting || !payTo}
+          disabled={submitting || !owedBy}
         >
           {submitting ? 'Processing...' : editingTransaction ? 'Update' : 'Add'} Transaction
         </button>

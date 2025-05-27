@@ -56,10 +56,16 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		{"fix_ynab_categories_column", FixYNABCategoriesColumn},
 		// Add settlements tables for transaction offsetting
 		{"add_settlements_tables", AddSettlementsTables},
+		// Restructure transactions to properly track debt
+		{"restructure_transaction_debt_tracking", RestructureTransactionDebtTracking},
 		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
 		// Add settlement test data for development
 		{"seed_settlement_test_data", AddSettlementTestData},
+		// Update seed data for new debt tracking structure
+		{"update_seed_data_for_debt_tracking", UpdateSeedDataForDebtTracking},
+		// Fix settlement foreign keys to allow transaction deletion
+		{"fix_settlement_foreign_keys", FixSettlementForeignKeys},
 	}
 
 	// Check if we're in production

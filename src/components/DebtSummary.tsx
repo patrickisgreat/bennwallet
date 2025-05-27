@@ -1,7 +1,11 @@
-import { useState, useEffect } from 'react';
-import { fetchTransactions, createSettlement, fetchUsers } from '../utils/api';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  fetchTransactions,
+  createSettlement,
+  fetchUsers,
+  applyTransactionToSettlement,
+} from '../utils/api';
 import { Transaction } from '../types/transaction';
-import { User } from '../utils/api';
 import { formatMoney } from '../utils/formatters';
 
 interface DebtSummary {
@@ -18,7 +22,6 @@ interface DebtSummary {
 export default function DebtSummary() {
   const [debts, setDebts] = useState<DebtSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [users, setUsers] = useState<User[]>([]);
   const [selectedDebtor, setSelectedDebtor] = useState<string | null>(null);
   const [selectedTransactions, setSelectedTransactions] = useState<string[]>([]);
   const [settlementNotes, setSettlementNotes] = useState('');
@@ -26,93 +29,97 @@ export default function DebtSummary() {
 
   useEffect(() => {
     loadDebtSummary();
-  }, []);
+  }, [loadDebtSummary]);
 
-  const loadDebtSummary = async () => {
+  const loadDebtSummary = useCallback(async () => {
     try {
       setLoading(true);
-      const [transactions, allUsers] = await Promise.all([
-        fetchTransactions(),
-        fetchUsers()
-      ]);
-      setUsers(allUsers);
+      const [transactions, allUsers] = await Promise.all([fetchTransactions(), fetchUsers()]);
 
       // Calculate debts by user
       const debtMap = new Map<string, DebtSummary>();
 
       transactions.forEach(tx => {
-        // Skip paid transactions
-        if (tx.paid) return;
+        // Skip paid transactions unless they are settlement adjustments
+        if (tx.paid && tx.category !== 'settlement') return;
 
-        if (tx.enteredBy === currentUserId && tx.payTo) {
-          // Current user entered this, so someone owes them
-          // Find the user ID for payTo
-          const payToUser = allUsers.find(u => 
-            u.name === tx.payTo || u.username === tx.payTo
+        // With new debt tracking: paidBy and owedBy fields
+        if (tx.paidBy && tx.owedBy) {
+          const paidByUser = allUsers.find(
+            u => u.name === tx.paidBy || u.username === tx.paidBy || u.id === tx.paidBy
           );
-          
-          if (payToUser) {
-            if (!debtMap.has(payToUser.id)) {
-              debtMap.set(payToUser.id, {
-                userId: payToUser.id,
-                userName: payToUser.name,
+          const owedByUser = allUsers.find(
+            u => u.name === tx.owedBy || u.username === tx.owedBy || u.id === tx.owedBy
+          );
+
+          // Current user paid, someone else owes them
+          if (paidByUser && paidByUser.id === currentUserId && owedByUser) {
+            if (!debtMap.has(owedByUser.id)) {
+              debtMap.set(owedByUser.id, {
+                userId: owedByUser.id,
+                userName: owedByUser.name,
                 youOwe: 0,
                 theyOwe: 0,
                 net: 0,
                 transactionsYouOwe: [],
                 transactionsTheyOwe: [],
-                yourTransactionsToApply: []
+                yourTransactionsToApply: [],
               });
             }
-            const debt = debtMap.get(payToUser.id)!;
+            const debt = debtMap.get(owedByUser.id)!;
             debt.theyOwe += tx.amount;
             debt.transactionsTheyOwe.push(tx);
           }
-        } else if (tx.enteredBy !== currentUserId) {
-          // Someone else entered this, so current user owes them
-          if (!debtMap.has(tx.enteredBy)) {
-            const enteredByUser = allUsers.find(u => u.id === tx.enteredBy);
-            if (enteredByUser) {
-              debtMap.set(tx.enteredBy, {
-                userId: tx.enteredBy,
-                userName: enteredByUser.name,
+          // Someone else paid, current user owes them
+          else if (owedByUser && owedByUser.id === currentUserId && paidByUser) {
+            if (!debtMap.has(paidByUser.id)) {
+              debtMap.set(paidByUser.id, {
+                userId: paidByUser.id,
+                userName: paidByUser.name,
                 youOwe: 0,
                 theyOwe: 0,
                 net: 0,
                 transactionsYouOwe: [],
                 transactionsTheyOwe: [],
-                yourTransactionsToApply: []
+                yourTransactionsToApply: [],
               });
             }
-          }
-          const debt = debtMap.get(tx.enteredBy);
-          if (debt) {
+            const debt = debtMap.get(paidByUser.id)!;
             debt.youOwe += tx.amount;
             debt.transactionsYouOwe.push(tx);
           }
         }
       });
 
-      // Now find transactions where current user entered and others can apply
+      // Now find transactions where current user paid and others owe (can be applied to settlements)
       transactions.forEach(tx => {
-        if (tx.paid) return;
-        
-        if (tx.enteredBy === currentUserId && tx.payTo) {
-          // Find all users who might want to apply this transaction
-          debtMap.forEach((debt, userId) => {
-            const user = allUsers.find(u => u.id === userId);
-            if (user && (user.name === tx.payTo || user.username === tx.payTo)) {
-              debt.yourTransactionsToApply.push(tx);
+        if (tx.paid && tx.category !== 'settlement') return;
+
+        if (tx.paidBy && tx.owedBy) {
+          const paidByUser = allUsers.find(
+            u => u.name === tx.paidBy || u.username === tx.paidBy || u.id === tx.paidBy
+          );
+
+          // If current user paid, this transaction can be applied by whoever owes
+          if (paidByUser && paidByUser.id === currentUserId) {
+            const owedByUser = allUsers.find(
+              u => u.name === tx.owedBy || u.username === tx.owedBy || u.id === tx.owedBy
+            );
+
+            if (owedByUser && debtMap.has(owedByUser.id)) {
+              debtMap.get(owedByUser.id)!.yourTransactionsToApply.push(tx);
             }
-          });
+          }
         }
       });
 
       // Calculate net amounts and convert to array
-      const debtArray = Array.from(debtMap.values()).map(debt => ({
-        ...debt,
-        net: debt.youOwe - debt.theyOwe
-      })).filter(debt => debt.youOwe > 0 || debt.theyOwe > 0);
+      const debtArray = Array.from(debtMap.values())
+        .map(debt => ({
+          ...debt,
+          net: debt.youOwe - debt.theyOwe,
+        }))
+        .filter(debt => debt.youOwe > 0 || debt.theyOwe > 0);
 
       setDebts(debtArray);
     } catch (error) {
@@ -120,32 +127,45 @@ export default function DebtSummary() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUserId]);
 
   const handleCreateSettlement = async () => {
     if (!selectedDebtor || selectedTransactions.length === 0) return;
 
     try {
       setLoading(true);
-      
-      // Create settlements for each selected transaction
-      for (const txId of selectedTransactions) {
-        await createSettlement({
-          transactionId: txId,
-          notes: settlementNotes
-        });
+
+      // Create ONE settlement with the first transaction
+      const settlement = await createSettlement({
+        transactionId: selectedTransactions[0],
+        notes: settlementNotes,
+      });
+
+      // Apply remaining transactions to the same settlement
+      for (let i = 1; i < selectedTransactions.length; i++) {
+        const txId = selectedTransactions[i];
+        const tx = selectedDebt?.yourTransactionsToApply.find(t => t.id === txId);
+        if (tx) {
+          await applyTransactionToSettlement(settlement.id, {
+            transactionId: txId,
+            amount: tx.amount,
+          });
+        }
       }
 
       // Reset and reload
       setSelectedDebtor(null);
       setSelectedTransactions([]);
       setSettlementNotes('');
+
+      // Small delay to ensure settlement is committed before reloading
+      await new Promise(resolve => setTimeout(resolve, 500));
       await loadDebtSummary();
-      
-      alert('Settlement(s) created successfully!');
+
+      alert('Settlement created successfully!');
     } catch (error) {
-      console.error('Error creating settlements:', error);
-      alert('Failed to create settlements. Please try again.');
+      console.error('Error creating settlement:', error);
+      alert('Failed to create settlement. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -164,7 +184,7 @@ export default function DebtSummary() {
   return (
     <div className="p-4">
       <h2 className="text-2xl font-bold mb-6">Debt Summary</h2>
-      
+
       {debts.length === 0 ? (
         <p className="text-gray-500">No outstanding debts</p>
       ) : (
@@ -184,21 +204,15 @@ export default function DebtSummary() {
                   <div>
                     <h4 className="font-medium">{debt.userName}</h4>
                     <div className="text-sm text-gray-600 mt-1">
-                      {debt.youOwe > 0 && (
-                        <p>You owe: {formatMoney(debt.youOwe)}</p>
-                      )}
-                      {debt.theyOwe > 0 && (
-                        <p>They owe: {formatMoney(debt.theyOwe)}</p>
-                      )}
+                      {debt.youOwe > 0 && <p>You owe: {formatMoney(debt.youOwe)}</p>}
+                      {debt.theyOwe > 0 && <p>They owe: {formatMoney(debt.theyOwe)}</p>}
                     </div>
                   </div>
                   <div className="text-right">
                     <p className={`font-bold ${debt.net > 0 ? 'text-red-600' : 'text-green-600'}`}>
                       {debt.net > 0 ? 'You owe' : 'They owe'}
                     </p>
-                    <p className="text-lg font-bold">
-                      {formatMoney(Math.abs(debt.net))}
-                    </p>
+                    <p className="text-lg font-bold">{formatMoney(Math.abs(debt.net))}</p>
                   </div>
                 </div>
               </div>
@@ -211,37 +225,45 @@ export default function DebtSummary() {
               <h3 className="text-lg font-semibold mb-3">
                 Create Settlement with {selectedDebt.userName}
               </h3>
-              
+
               {selectedDebt.youOwe > 0 ? (
                 <>
                   <p className="text-sm text-gray-600 mb-3">
-                    You owe {selectedDebt.userName} {formatMoney(selectedDebt.youOwe)}. 
-                    Select YOUR transactions (where others owe you) to apply against this debt.
+                    You owe {selectedDebt.userName} {formatMoney(selectedDebt.youOwe)}. Select YOUR
+                    transactions (where others owe you) to apply against this debt.
                   </p>
-                  
+
                   <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
                     <p className="text-sm font-medium">Your transactions to apply:</p>
                     {selectedDebt.yourTransactionsToApply.length === 0 ? (
                       <p className="text-sm text-gray-500">
-                        No transactions available. You need transactions where others owe you money to offset this debt.
+                        No transactions available. You need transactions where others owe you money
+                        to offset this debt.
                       </p>
                     ) : (
                       selectedDebt.yourTransactionsToApply.map(tx => (
-                        <label key={tx.id} className="flex items-start space-x-2 p-2 hover:bg-gray-50 rounded">
+                        <label
+                          key={tx.id}
+                          className="flex items-start space-x-2 p-2 hover:bg-gray-50 rounded"
+                        >
                           <input
                             type="checkbox"
                             checked={selectedTransactions.includes(tx.id)}
-                            onChange={(e) => {
+                            onChange={e => {
                               if (e.target.checked) {
                                 setSelectedTransactions([...selectedTransactions, tx.id]);
                               } else {
-                                setSelectedTransactions(selectedTransactions.filter(id => id !== tx.id));
+                                setSelectedTransactions(
+                                  selectedTransactions.filter(id => id !== tx.id)
+                                );
                               }
                             }}
                             className="mt-1"
                           />
                           <div className="flex-1">
-                            <p className="text-sm">{tx.payTo} - {formatMoney(tx.amount)}</p>
+                            <p className="text-sm">
+                              {tx.owedBy || tx.payTo} owes - {formatMoney(tx.amount)}
+                            </p>
                             <p className="text-xs text-gray-500">{tx.note || 'No note'}</p>
                           </div>
                         </label>
@@ -252,7 +274,7 @@ export default function DebtSummary() {
                   {selectedTransactions.length > 0 && (
                     <div className="mb-4 p-2 bg-blue-50 rounded">
                       <p className="text-sm">
-                        Total selected: {formatMoney(totalSelected)} 
+                        Total selected: {formatMoney(totalSelected)}
                         {totalSelected > selectedDebt.youOwe && (
                           <span className="text-orange-600 ml-2">
                             (Exceeds debt by {formatMoney(totalSelected - selectedDebt.youOwe)})
@@ -264,8 +286,8 @@ export default function DebtSummary() {
                 </>
               ) : (
                 <p className="text-sm text-gray-600 mb-3">
-                  {selectedDebt.userName} owes you {formatMoney(selectedDebt.theyOwe)}. 
-                  They can create settlements to apply their transactions against this debt.
+                  {selectedDebt.userName} owes you {formatMoney(selectedDebt.theyOwe)}. They can
+                  create settlements to apply their transactions against this debt.
                 </p>
               )}
 
@@ -275,7 +297,7 @@ export default function DebtSummary() {
                 </label>
                 <textarea
                   value={settlementNotes}
-                  onChange={(e) => setSettlementNotes(e.target.value)}
+                  onChange={e => setSettlementNotes(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md"
                   rows={2}
                   placeholder="Add any notes about this settlement..."

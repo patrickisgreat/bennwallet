@@ -1,16 +1,13 @@
-import { useState, useEffect } from 'react';
-import { 
-  fetchUserSettlements, 
-  fetchSettlement, 
+import { useState, useEffect, useCallback } from 'react';
+import {
+  fetchUserSettlements,
+  fetchSettlement,
   applyTransactionToSettlement,
   removeTransactionFromSettlement,
-  fetchTransactions 
+  fetchAvailableSettlementTransactions,
+  updateSettlementStatus,
 } from '../utils/api';
-import { 
-  Settlement, 
-  SettlementSummary, 
-  SettlementItem 
-} from '../types/settlement';
+import { Settlement, SettlementSummary, SettlementItem } from '../types/settlement';
 import { Transaction } from '../types/transaction';
 import { formatDate, formatMoney } from '../utils/formatters';
 
@@ -23,12 +20,7 @@ export default function SettlementManager() {
   const [applyAmount, setApplyAmount] = useState<string>('');
   const [selectedTransaction, setSelectedTransaction] = useState<string>('');
 
-  // Load settlements
-  useEffect(() => {
-    loadSettlements();
-  }, [statusFilter]);
-
-  const loadSettlements = async () => {
+  const loadSettlements = useCallback(async () => {
     try {
       setLoading(true);
       const data = await fetchUserSettlements(statusFilter);
@@ -38,22 +30,23 @@ export default function SettlementManager() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter]);
+
+  // Load settlements
+  useEffect(() => {
+    loadSettlements();
+  }, [loadSettlements]);
 
   const loadSettlementDetails = async (id: string) => {
     try {
       setLoading(true);
       const settlement = await fetchSettlement(id);
       setSelectedSettlement(settlement);
-      
+
       // Load available transactions for applying
       if (settlement) {
-        const transactions = await fetchTransactions();
-        // Filter out transactions already in this settlement
-        const usedTransactionIds = settlement.items?.map(item => item.transactionId) || [];
-        setAvailableTransactions(
-          transactions.filter(tx => !usedTransactionIds.includes(tx.id))
-        );
+        const transactions = await fetchAvailableSettlementTransactions(id);
+        setAvailableTransactions(transactions);
       }
     } catch (error) {
       console.error('Error loading settlement details:', error);
@@ -67,13 +60,10 @@ export default function SettlementManager() {
 
     try {
       setLoading(true);
-      const updated = await applyTransactionToSettlement(
-        selectedSettlement.id,
-        {
-          transactionId: selectedTransaction,
-          amount: parseFloat(applyAmount)
-        }
-      );
+      const updated = await applyTransactionToSettlement(selectedSettlement.id, {
+        transactionId: selectedTransaction,
+        amount: parseFloat(applyAmount),
+      });
       setSelectedSettlement(updated);
       setSelectedTransaction('');
       setApplyAmount('');
@@ -124,6 +114,27 @@ export default function SettlementManager() {
     }
   };
 
+  const handleCancelSettlement = async () => {
+    if (!selectedSettlement || selectedSettlement.status !== 'active') return;
+
+    const reason = window.prompt('Please provide a reason for cancelling this settlement:');
+    if (reason === null) return; // User cancelled
+
+    try {
+      setLoading(true);
+      const updated = await updateSettlementStatus(selectedSettlement.id, 'cancelled', reason);
+      setSelectedSettlement(updated);
+      // Reload settlements list
+      loadSettlements();
+      alert('Settlement cancelled successfully');
+    } catch (error) {
+      console.error('Error cancelling settlement:', error);
+      alert('Failed to cancel settlement');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">Settlement Manager</h1>
@@ -134,7 +145,7 @@ export default function SettlementManager() {
           <span className="mr-2 text-sm font-medium">Status:</span>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={e => setStatusFilter(e.target.value)}
             className="border rounded px-3 py-1"
           >
             <option value="">All</option>
@@ -149,14 +160,14 @@ export default function SettlementManager() {
         {/* Settlements List */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">Settlements</h2>
-          
+
           {loading && !selectedSettlement ? (
             <p className="text-gray-500">Loading...</p>
           ) : settlements.length === 0 ? (
             <p className="text-gray-500">No settlements found</p>
           ) : (
             <div className="space-y-4">
-              {settlements.map((settlement) => (
+              {settlements.map(settlement => (
                 <div
                   key={settlement.id}
                   onClick={() => loadSettlementDetails(settlement.id)}
@@ -171,25 +182,26 @@ export default function SettlementManager() {
                         Created {formatDate(settlement.createdAt)}
                       </p>
                     </div>
-                    <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(settlement.status)}`}>
+                    <span
+                      className={`px-2 py-1 text-xs rounded-full ${getStatusColor(settlement.status)}`}
+                    >
                       {settlement.status}
                     </span>
                   </div>
                   <div className="flex justify-between items-end">
                     <div>
-                      <p className="text-sm text-gray-600">
-                        {settlement.itemCount} transaction(s)
-                      </p>
+                      <p className="text-sm text-gray-600">{settlement.itemCount} transaction(s)</p>
                     </div>
                     <div className="text-right">
                       <p className="text-sm text-gray-600">
-                        {formatMoney(settlement.remainingAmount)} / {formatMoney(settlement.totalAmount)}
+                        {formatMoney(settlement.remainingAmount)} /{' '}
+                        {formatMoney(settlement.totalAmount)}
                       </p>
                       <div className="w-32 bg-gray-200 rounded-full h-2 mt-1">
                         <div
                           className="bg-blue-600 h-2 rounded-full"
                           style={{
-                            width: `${((settlement.totalAmount - settlement.remainingAmount) / settlement.totalAmount) * 100}%`
+                            width: `${((settlement.totalAmount - settlement.remainingAmount) / settlement.totalAmount) * 100}%`,
                           }}
                         />
                       </div>
@@ -204,7 +216,7 @@ export default function SettlementManager() {
         {/* Settlement Details */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">Settlement Details</h2>
-          
+
           {!selectedSettlement ? (
             <p className="text-gray-500">Select a settlement to view details</p>
           ) : (
@@ -212,9 +224,22 @@ export default function SettlementManager() {
               <div className="mb-6">
                 <div className="flex justify-between items-center mb-2">
                   <h3 className="font-medium">Overview</h3>
-                  <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(selectedSettlement.status)}`}>
-                    {selectedSettlement.status}
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span
+                      className={`px-2 py-1 text-xs rounded-full ${getStatusColor(selectedSettlement.status)}`}
+                    >
+                      {selectedSettlement.status}
+                    </span>
+                    {selectedSettlement.status === 'active' && (
+                      <button
+                        onClick={handleCancelSettlement}
+                        className="text-red-600 hover:text-red-800 text-sm font-medium"
+                        disabled={loading}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
@@ -249,8 +274,11 @@ export default function SettlementManager() {
                 <h3 className="font-medium mb-2">Applied Transactions</h3>
                 {selectedSettlement.items && selectedSettlement.items.length > 0 ? (
                   <div className="space-y-2">
-                    {selectedSettlement.items.map((item) => (
-                      <div key={item.id} className="border rounded p-3 flex justify-between items-center">
+                    {selectedSettlement.items.map(item => (
+                      <div
+                        key={item.id}
+                        className="border rounded p-3 flex justify-between items-center"
+                      >
                         <div className="flex-1">
                           <p className="text-sm font-medium">
                             {item.transaction?.description || 'Transaction'}
@@ -285,11 +313,11 @@ export default function SettlementManager() {
                   <div className="space-y-3">
                     <select
                       value={selectedTransaction}
-                      onChange={(e) => setSelectedTransaction(e.target.value)}
+                      onChange={e => setSelectedTransaction(e.target.value)}
                       className="w-full border rounded px-3 py-2"
                     >
                       <option value="">Select a transaction</option>
-                      {availableTransactions.map((tx) => (
+                      {availableTransactions.map(tx => (
                         <option key={tx.id} value={tx.id}>
                           {tx.payTo} - {formatMoney(tx.amount)} - {formatDate(tx.transactionDate)}
                         </option>
@@ -300,7 +328,7 @@ export default function SettlementManager() {
                       step="0.01"
                       placeholder="Amount to apply"
                       value={applyAmount}
-                      onChange={(e) => setApplyAmount(e.target.value)}
+                      onChange={e => setApplyAmount(e.target.value)}
                       max={selectedSettlement.remainingAmount}
                       className="w-full border rounded px-3 py-2"
                     />
@@ -320,7 +348,7 @@ export default function SettlementManager() {
                 <div className="mt-6 border-t pt-4">
                   <h3 className="font-medium mb-2">History</h3>
                   <div className="space-y-2">
-                    {selectedSettlement.history.map((entry) => (
+                    {selectedSettlement.history.map(entry => (
                       <div key={entry.id} className="text-sm">
                         <p className="text-gray-600">
                           {formatDate(entry.createdAt)} - {entry.action.replace('_', ' ')}

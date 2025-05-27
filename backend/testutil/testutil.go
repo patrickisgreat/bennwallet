@@ -20,7 +20,7 @@ type contextKey string
 
 const UserIDKey contextKey = "user_id"
 const UserRoleKey contextKey = "user_role"
-const TestUserID string = "test-user-id"
+const TestUserID string = "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"
 
 // PostgresConfig holds configuration for a PostgreSQL database connection
 type PostgresConfig struct {
@@ -127,7 +127,7 @@ func SetupPostgresTestDB() (*sql.DB, error) {
 		INSERT INTO users (id, username, name, role)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (id) DO NOTHING`,
-		TestUserID, "testuser", "Test User", "admin",
+		TestUserID, "Patrick Bennett", "Patrick Bennett", "admin",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert test user: %w", err)
@@ -359,10 +359,9 @@ func SetupTestDB(t testing.TB) (*sql.DB, func()) {
 	_, err = db.Exec(`
 		INSERT INTO users (id, username, name, role, status, is_admin) 
 		VALUES 
-		('test-user-id', 'testuser', 'Test User', 'admin', 'approved', true),
-		('1', 'sarah', 'Sarah', 'admin', 'approved', true),
-		('2', 'patrick', 'Patrick', 'admin', 'approved', true),
-		('admin1', 'admin1', 'Admin One', 'admin', 'approved', true)
+		('UgwzWuP8iHNF8nhqDHMwFFcg8Sc2', 'Patrick Bennett', 'Patrick Bennett', 'superadmin', 'approved', true),
+		('sarah-wallis-id', 'Sarah Wallis', 'Sarah Wallis', 'admin', 'approved', true),
+		('kim-donaldson-id', 'Kim Donaldson', 'Kim Donaldson', 'admin', 'approved', true)
 		ON CONFLICT (id) DO NOTHING
 	`)
 	if err != nil {

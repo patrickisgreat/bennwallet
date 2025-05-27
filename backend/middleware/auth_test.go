@@ -79,8 +79,8 @@ func TestAuthMiddleware_DevMode(t *testing.T) {
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get the user ID from context
 		userID := r.Context().Value(UserIDKey)
-		if userID == nil || userID.(string) != "admin-user-1" {
-			t.Errorf("Expected user_id 'admin-user-1', got %v", userID)
+		if userID == nil || userID.(string) != "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2" {
+			t.Errorf("Expected user_id 'UgwzWuP8iHNF8nhqDHMwFFcg8Sc2', got %v", userID)
 		}
 
 		// Check role
@@ -422,8 +422,8 @@ func TestAuthMiddleware_NoFirebaseAuth(t *testing.T) {
 	// Setup test HTTP server
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := GetUserIDFromContext(r)
-		if userID != "admin-user-1" {
-			t.Errorf("Expected user ID admin-user-1, got %s", userID)
+		if userID != "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2" {
+			t.Errorf("Expected user ID UgwzWuP8iHNF8nhqDHMwFFcg8Sc2, got %s", userID)
 		}
 		w.WriteHeader(http.StatusOK)
 	})

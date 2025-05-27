@@ -25,7 +25,7 @@ var (
 	port       = flag.String("port", ":8080", "Port to listen on")
 	resetDB    = flag.Bool("reset-db", false, "Reset database")
 	devMode    = flag.Bool("dev", true, "Run in development mode with test auth")
-	testUserID = flag.String("test-user", "admin-user-1", "Test user ID for dev mode")
+	testUserID = flag.String("test-user", "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", "Test user ID for dev mode")
 	noExit     = flag.Bool("no-exit", false, "Don't exit after migrations")
 )
 
@@ -299,8 +299,10 @@ func registerRoutes(r *mux.Router) {
 	protectedRouter.HandleFunc("/settlements", settlementHandler.CreateSettlement).Methods("POST")
 	protectedRouter.HandleFunc("/settlements", settlementHandler.GetUserSettlements).Methods("GET")
 	protectedRouter.HandleFunc("/settlements/{id}", settlementHandler.GetSettlement).Methods("GET")
+	protectedRouter.HandleFunc("/settlements/{id}/status", settlementHandler.UpdateSettlementStatus).Methods("PUT")
 	protectedRouter.HandleFunc("/settlements/{id}/apply", settlementHandler.ApplyTransaction).Methods("POST")
 	protectedRouter.HandleFunc("/settlements/{id}/transactions/{transactionId}", settlementHandler.RemoveTransaction).Methods("DELETE")
+	protectedRouter.HandleFunc("/settlements/{id}/available-transactions", settlementHandler.GetAvailableSettlementTransactions).Methods("GET")
 	protectedRouter.HandleFunc("/settlements/apply-payment", settlementHandler.ApplyOthersTransactionToDebt).Methods("POST")
 	protectedRouter.HandleFunc("/transactions/{transactionId}/settlements", settlementHandler.GetTransactionSettlements).Methods("GET")
 }

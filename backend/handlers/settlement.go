@@ -7,10 +7,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/gorilla/mux"
 	"log"
 	"net/http"
-
-	"github.com/gorilla/mux"
+	"time"
 )
 
 type SettlementHandler struct {
@@ -77,11 +77,12 @@ func (h *SettlementHandler) ApplyOthersTransactionToDebt(w http.ResponseWriter, 
 
 	// Get the transaction to verify it exists and the user can apply it
 	var tx models.Transaction
+	var owedBy sql.NullString
 	err := h.db.QueryRow(`
-		SELECT id, amount, entered_by, pay_to 
+		SELECT id, amount, entered_by, paid_by, owed_by 
 		FROM transactions 
 		WHERE id = $1 AND paid = false
-	`, req.TransactionID).Scan(&tx.ID, &tx.Amount, &tx.EnteredBy, &tx.PayTo)
+	`, req.TransactionID).Scan(&tx.ID, &tx.Amount, &tx.EnteredBy, &tx.PaidBy, &owedBy)
 
 	if err != nil {
 		log.Printf("Error fetching transaction %s: %v", req.TransactionID, err)
@@ -91,6 +92,11 @@ func (h *SettlementHandler) ApplyOthersTransactionToDebt(w http.ResponseWriter, 
 			http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)
 		}
 		return
+	}
+
+	// Set OwedBy if it was in the database
+	if owedBy.Valid {
+		tx.OwedBy = owedBy.String
 	}
 
 	// Verify this transaction was entered by someone else
@@ -269,7 +275,7 @@ func (h *SettlementHandler) GetTransactionSettlements(w http.ResponseWriter, r *
 	var settlements []models.Settlement
 	for rows.Next() {
 		var s models.Settlement
-		err := rows.Scan(&s.ID, &s.CreatedBy, &s.CreatedFor, &s.TotalAmount, 
+		err := rows.Scan(&s.ID, &s.CreatedBy, &s.CreatedFor, &s.TotalAmount,
 			&s.RemainingAmount, &s.Status, &s.CreatedAt)
 		if err != nil {
 			continue
@@ -279,4 +285,162 @@ func (h *SettlementHandler) GetTransactionSettlements(w http.ResponseWriter, r *
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(settlements)
+}
+
+// GetAvailableSettlementTransactions retrieves transactions available for applying to a settlement
+func (h *SettlementHandler) GetAvailableSettlementTransactions(w http.ResponseWriter, r *http.Request) {
+	settlementID := mux.Vars(r)["id"]
+	userIDValue := r.Context().Value(middleware.UserIDKey)
+	if userIDValue == nil {
+		http.Error(w, "No user ID in context", http.StatusUnauthorized)
+		return
+	}
+	userID := userIDValue.(string)
+
+	// First get the settlement to know who created it
+	settlement, err := h.settlementService.GetSettlement(settlementID)
+	if err != nil {
+		log.Printf("Error getting settlement: %v", err)
+		http.Error(w, "Settlement not found", http.StatusNotFound)
+		return
+	}
+
+	// Get unpaid transactions between the two users that can be used for offsetting
+	var otherUserID string
+	if userID == settlement.CreatedBy {
+		// Current user created the settlement, so the other person is CreatedFor
+		otherUserID = settlement.CreatedFor
+	} else {
+		// Current user is the one who owes, so the other person is CreatedBy
+		otherUserID = settlement.CreatedBy
+	}
+
+	log.Printf("GetAvailableTransactionsForSettlement: userID=%s, otherUserID=%s, settlementID=%s", userID, otherUserID, settlementID)
+
+	// Find ALL unpaid transactions between these two users
+	// This allows bidirectional offsetting
+	query := `
+		SELECT t.id, t.amount, t.description, t.date, t.transaction_date, 
+		       t.type, t.paid_by, t.owed_by, t.paid, t.paid_date, t.entered_by, 
+		       t.optional, t.note, t.user_id
+		FROM transactions t
+		WHERE t.paid = false
+		  AND (
+		    -- Transactions where current user paid and other user owes
+		    (t.paid_by = $1 AND t.owed_by = $2)
+		    OR
+		    -- Transactions where other user paid and current user owes  
+		    (t.paid_by = $2 AND t.owed_by = $1)
+		  )
+		  AND t.id NOT IN (
+		    SELECT transaction_id FROM settlement_items WHERE settlement_id = $3
+		  )
+		ORDER BY t.transaction_date DESC
+	`
+
+	rows, err := h.db.Query(query, userID, otherUserID, settlementID)
+	if err != nil {
+		log.Printf("Error getting available transactions: %v", err)
+		http.Error(w, "Failed to get transactions", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var transactions []models.Transaction
+	for rows.Next() {
+		var t models.Transaction
+		var paidDate, transactionDate, userID, note, owedBy sql.NullString
+		var dateStr string
+
+		err := rows.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate,
+			&t.Type, &t.PaidBy, &owedBy, &t.Paid, &paidDate, &t.EnteredBy,
+			&t.Optional, &note, &userID)
+		if err != nil {
+			log.Printf("Error scanning transaction: %v", err)
+			continue
+		}
+
+		// Parse dates
+		t.Date, _ = time.Parse("2006-01-02", dateStr)
+		if transactionDate.Valid {
+			t.TransactionDate, _ = time.Parse("2006-01-02", transactionDate.String)
+		} else {
+			t.TransactionDate = t.Date
+		}
+		if paidDate.Valid {
+			t.PaidDate = paidDate.String
+		}
+		if note.Valid {
+			t.Note = note.String
+		}
+		if userID.Valid {
+			t.UserID = userID.String
+		}
+		if owedBy.Valid {
+			t.OwedBy = owedBy.String
+		}
+
+		transactions = append(transactions, t)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(transactions)
+}
+
+// UpdateSettlementStatus updates the status of a settlement (for cancelling, completing, etc.)
+func (h *SettlementHandler) UpdateSettlementStatus(w http.ResponseWriter, r *http.Request) {
+	settlementID := mux.Vars(r)["id"]
+	userIDValue := r.Context().Value(middleware.UserIDKey)
+	if userIDValue == nil {
+		http.Error(w, "No user ID in context", http.StatusUnauthorized)
+		return
+	}
+	userID := userIDValue.(string)
+
+	// Parse request body
+	var req struct {
+		Status string `json:"status"`
+		Notes  string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate status
+	validStatuses := map[string]bool{
+		"active":    true,
+		"completed": true,
+		"cancelled": true,
+	}
+	if !validStatuses[req.Status] {
+		http.Error(w, "Invalid status. Must be 'active', 'completed', or 'cancelled'", http.StatusBadRequest)
+		return
+	}
+
+	// Get the settlement to check permissions
+	settlement, err := h.settlementService.GetSettlement(settlementID)
+	if err != nil {
+		log.Printf("Error getting settlement: %v", err)
+		http.Error(w, "Settlement not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if user has permission to update this settlement
+	// Only the creator or the person it was created for can update it
+	if userID != settlement.CreatedBy && userID != settlement.CreatedFor {
+		http.Error(w, "You don't have permission to update this settlement", http.StatusForbidden)
+		return
+	}
+
+	// Use the settlement service to update status (this handles adjustment transactions)
+	updatedSettlement, err := h.settlementService.UpdateSettlementStatus(settlementID, req.Status, userID, req.Notes)
+	if err != nil {
+		log.Printf("Error updating settlement status: %v", err)
+		http.Error(w, "Failed to update settlement status", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updatedSettlement)
 }
