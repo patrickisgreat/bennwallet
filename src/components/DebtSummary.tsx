@@ -27,10 +27,6 @@ export default function DebtSummary() {
   const [settlementNotes, setSettlementNotes] = useState('');
   const currentUserId = localStorage.getItem('userId') || '';
 
-  useEffect(() => {
-    loadDebtSummary();
-  }, [loadDebtSummary]);
-
   const loadDebtSummary = useCallback(async () => {
     try {
       setLoading(true);
@@ -128,6 +124,10 @@ export default function DebtSummary() {
       setLoading(false);
     }
   }, [currentUserId]);
+
+  useEffect(() => {
+    loadDebtSummary();
+  }, [loadDebtSummary]);
 
   const handleCreateSettlement = async () => {
     if (!selectedDebtor || selectedTransactions.length === 0) return;
