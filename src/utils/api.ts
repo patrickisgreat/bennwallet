@@ -1,5 +1,11 @@
 import axios, { InternalAxiosRequestConfig, AxiosError } from 'axios';
 import { Transaction } from '../types/transaction';
+import { 
+  Settlement, 
+  SettlementSummary, 
+  CreateSettlementRequest, 
+  ApplyTransactionRequest 
+} from '../types/settlement';
 import { auth } from '../firebase/firebase';
 
 // Set the API base URL based on environment
@@ -710,5 +716,88 @@ export async function revokePermission(
   } catch (error) {
     console.error('Error revoking permission:', error);
     return false;
+  }
+}
+
+// Settlement API functions
+export async function createSettlement(data: CreateSettlementRequest): Promise<Settlement> {
+  try {
+    const response = await api.post<Settlement>('/settlements', data);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating settlement:', error);
+    throw error;
+  }
+}
+
+export async function fetchUserSettlements(status?: string): Promise<SettlementSummary[]> {
+  try {
+    const queryParams = status ? `?status=${status}` : '';
+    const response = await api.get<SettlementSummary[]>(`/settlements${queryParams}`);
+    return response.data || [];
+  } catch (error) {
+    console.error('Error fetching settlements:', error);
+    return [];
+  }
+}
+
+export async function fetchSettlement(id: string): Promise<Settlement | null> {
+  try {
+    const response = await api.get<Settlement>(`/settlements/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching settlement:', error);
+    return null;
+  }
+}
+
+export async function applyTransactionToSettlement(
+  settlementId: string, 
+  data: ApplyTransactionRequest
+): Promise<Settlement> {
+  try {
+    const response = await api.post<Settlement>(`/settlements/${settlementId}/apply`, data);
+    return response.data;
+  } catch (error) {
+    console.error('Error applying transaction to settlement:', error);
+    throw error;
+  }
+}
+
+export async function removeTransactionFromSettlement(
+  settlementId: string, 
+  transactionId: string
+): Promise<Settlement> {
+  try {
+    const response = await api.delete<Settlement>(
+      `/settlements/${settlementId}/transactions/${transactionId}`
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Error removing transaction from settlement:', error);
+    throw error;
+  }
+}
+
+export async function fetchTransactionSettlements(transactionId: string): Promise<Settlement[]> {
+  try {
+    const response = await api.get<Settlement[]>(`/transactions/${transactionId}/settlements`);
+    return response.data || [];
+  } catch (error) {
+    console.error('Error fetching transaction settlements:', error);
+    return [];
+  }
+}
+
+export async function applyTransactionAsPayment(transactionId: string, notes?: string): Promise<Settlement> {
+  try {
+    const response = await api.post<Settlement>('/settlements/apply-payment', {
+      transactionId,
+      notes: notes || ''
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error applying transaction as payment:', error);
+    throw error;
   }
 }

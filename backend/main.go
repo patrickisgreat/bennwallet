@@ -293,6 +293,16 @@ func registerRoutes(r *mux.Router) {
 	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.UpdateCustomReport).Methods("PUT")
 	protectedRouter.HandleFunc("/reports/custom/{id}", handlers.DeleteCustomReport).Methods("DELETE")
 	protectedRouter.HandleFunc("/reports/custom/{id}/run", handlers.RunCustomReport).Methods("POST")
+
+	// Settlement routes
+	settlementHandler := handlers.NewSettlementHandler(database.DB)
+	protectedRouter.HandleFunc("/settlements", settlementHandler.CreateSettlement).Methods("POST")
+	protectedRouter.HandleFunc("/settlements", settlementHandler.GetUserSettlements).Methods("GET")
+	protectedRouter.HandleFunc("/settlements/{id}", settlementHandler.GetSettlement).Methods("GET")
+	protectedRouter.HandleFunc("/settlements/{id}/apply", settlementHandler.ApplyTransaction).Methods("POST")
+	protectedRouter.HandleFunc("/settlements/{id}/transactions/{transactionId}", settlementHandler.RemoveTransaction).Methods("DELETE")
+	protectedRouter.HandleFunc("/settlements/apply-payment", settlementHandler.ApplyOthersTransactionToDebt).Methods("POST")
+	protectedRouter.HandleFunc("/transactions/{transactionId}/settlements", settlementHandler.GetTransactionSettlements).Methods("GET")
 }
 
 // runMigrations handles the migrate command-line functionality

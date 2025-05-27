@@ -54,8 +54,12 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		{"add_ynab_categories_table", AddYNABCategoriesTable},
 		// Fix YNAB categories column inconsistency
 		{"fix_ynab_categories_column", FixYNABCategoriesColumn},
+		// Add settlements tables for transaction offsetting
+		{"add_settlements_tables", AddSettlementsTables},
 		// Test data seeding is ONLY for development and testing
 		{"seed_test_data", SeedTestData},
+		// Add settlement test data for development
+		{"seed_settlement_test_data", AddSettlementTestData},
 	}
 
 	// Check if we're in production

@@ -1,6 +1,8 @@
 import { Transaction } from '../types/transaction';
 import { useState } from 'react';
 import { formatDate, formatMoney } from '../utils/formatters';
+import { api } from '../utils/api';
+import { useNavigate } from 'react-router-dom';
 
 export interface TransactionTableProps {
   transactions: Transaction[];
@@ -20,6 +22,23 @@ function TransactionTable({
   onSortChange,
 }: TransactionTableProps) {
   const [selectedTransactions, setSelectedTransactions] = useState<string[]>([]);
+  const navigate = useNavigate();
+  const currentUserId = localStorage.getItem('userId') || '';
+  const [applyingTransaction, setApplyingTransaction] = useState<string | null>(null);
+
+  // Calculate totals
+  const totals = transactions.reduce((acc, tx) => {
+    acc.total += tx.amount;
+    if (tx.paid) {
+      acc.paid += tx.amount;
+    } else {
+      acc.unpaid += tx.amount;
+    }
+    if (tx.optional) {
+      acc.optional += tx.amount;
+    }
+    return acc;
+  }, { total: 0, paid: 0, unpaid: 0, optional: 0 });
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -53,6 +72,34 @@ function TransactionTable({
     });
   };
 
+  const handleApplyToDebt = async (transaction: Transaction) => {
+    try {
+      setApplyingTransaction(transaction.id);
+      
+      // If this is a transaction someone else entered, apply it as payment
+      if (transaction.enteredBy !== currentUserId) {
+        const response = await api.post('/settlements/apply-payment', {
+          transactionId: transaction.id,
+          notes: `Applied ${transaction.payTo} transaction to debt`
+        });
+        
+        if (response.status === 200) {
+          alert('Transaction applied to your debt successfully!');
+          // Navigate to settlements page to see the result
+          navigate('/settlements');
+        }
+      } else {
+        // If this is user's own transaction, go to settlements page to create a settlement
+        navigate('/settlements');
+      }
+    } catch (error: any) {
+      console.error('Error applying transaction:', error);
+      alert(error.response?.data || 'Failed to apply transaction');
+    } finally {
+      setApplyingTransaction(null);
+    }
+  };
+
   // Column header click handler for sorting
   const handleSortClick = (column: keyof Transaction) => {
     if (onSortChange) {
@@ -78,7 +125,28 @@ function TransactionTable({
   };
 
   return (
-    <div className="mt-6 bg-white overflow-hidden shadow rounded-lg">
+    <div className="mt-6">
+      {/* Totals Summary */}
+      <div className="mb-4 grid grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-lg shadow">
+          <div className="text-sm font-medium text-gray-500">Total</div>
+          <div className="text-2xl font-bold text-gray-900">{formatMoney(totals.total)}</div>
+        </div>
+        <div className="bg-green-50 p-4 rounded-lg shadow">
+          <div className="text-sm font-medium text-green-700">Paid</div>
+          <div className="text-2xl font-bold text-green-900">{formatMoney(totals.paid)}</div>
+        </div>
+        <div className="bg-yellow-50 p-4 rounded-lg shadow">
+          <div className="text-sm font-medium text-yellow-700">Unpaid</div>
+          <div className="text-2xl font-bold text-yellow-900">{formatMoney(totals.unpaid)}</div>
+        </div>
+        <div className="bg-purple-50 p-4 rounded-lg shadow">
+          <div className="text-sm font-medium text-purple-700">Optional</div>
+          <div className="text-2xl font-bold text-purple-900">{formatMoney(totals.optional)}</div>
+        </div>
+      </div>
+
+      <div className="bg-white overflow-hidden shadow rounded-lg">
       {selectedTransactions.length > 0 && (
         <div className="bg-blue-50 p-4 flex justify-between items-center">
           <span className="text-blue-700">
@@ -236,6 +304,21 @@ function TransactionTable({
                         <div className="text-sm text-gray-900 truncate">{tx.enteredBy}</div>
                       </td>
                       <td className="px-1 py-2 text-right text-sm font-medium">
+                        {!tx.paid && (
+                          <button
+                            onClick={() => handleApplyToDebt(tx)}
+                            disabled={applyingTransaction === tx.id}
+                            className="text-green-600 hover:text-green-900 mr-2 disabled:opacity-50"
+                            title={
+                              tx.enteredBy === currentUserId 
+                                ? "Create settlement for others to apply" 
+                                : "Apply this to your debt"
+                            }
+                          >
+                            {applyingTransaction === tx.id ? 'Applying...' : 
+                             tx.enteredBy === currentUserId ? 'Settlement' : 'Apply'}
+                          </button>
+                        )}
                         <button
                           onClick={() => onEdit(tx.id)}
                           className="text-indigo-600 hover:text-indigo-900 mr-1"
@@ -257,6 +340,7 @@ function TransactionTable({
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }
