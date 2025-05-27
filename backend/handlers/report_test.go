@@ -159,10 +159,10 @@ func TestGetYNABSplits(t *testing.T) {
 		expectedFirst string // category name of first result
 	}{
 		{
-			name: "All paid transactions, no optional",
+			name: "All paid transactions, exclude optional",
 			filter: models.ReportFilter{
 				Paid:     boolPtr(true),
-				Optional: boolPtr(false),
+				Optional: boolPtr(true), // true = exclude optional transactions
 			},
 			expectedCount: 3,         // Food, Housing, Fun categories
 			expectedTotal: 635.00,    // Sum of all paid, non-optional transactions
@@ -199,14 +199,16 @@ func TestGetYNABSplits(t *testing.T) {
 			expectedTotal: 305.00,    // 50 + 75 + 150 + 30
 			expectedFirst: "Housing", // Highest total in this date range
 		},
+		// Note: We don't have a way to filter for only unpaid transactions in the UI
+		// The paid checkbox is for "show only paid" not "show only unpaid"
 		{
-			name: "Unpaid transactions only",
+			name: "All transactions (no filters)",
 			filter: models.ReportFilter{
-				Paid: boolPtr(false),
+				// No paid or optional filter - should show all transactions
 			},
-			expectedCount: 1,     // Only Housing has unpaid transactions
-			expectedTotal: 80.00, // Single unpaid transaction
-			expectedFirst: "Housing",
+			expectedCount: 4,      // Food, Housing, Fun, Misc categories
+			expectedTotal: 745.00, // All transactions including unpaid and optional
+			expectedFirst: "Housing", // Housing has highest total: 430.00 (350 paid + 80 unpaid)
 		},
 	}
 

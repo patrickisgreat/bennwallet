@@ -16,8 +16,8 @@ function ReportsPage() {
     category: '',
     payTo: '',
     enteredBy: '',
-    paid: false, // Change to false - don't show only paid by default
-    optional: true, // Change to true - don't exclude optional by default
+    paid: false, // false = show all transactions (not just paid)
+    optional: false, // false = show all transactions (including optional)
   });
   const [total, setTotal] = useState(0);
   const [uniqueFields, setUniqueFields] = useState<{ payTo: string[]; enteredBy: string[] }>({
@@ -94,8 +94,8 @@ function ReportsPage() {
         category: filter.category || undefined,
         payTo: filter.payTo || undefined,
         enteredBy: filter.enteredBy || undefined,
-        paid: filter.paid,
-        optional: filter.optional,
+        paid: filter.paid ? true : undefined, // Only send if checkbox is checked
+        optional: filter.optional ? true : undefined, // Only send if checkbox is checked
       };
 
       // Add more detailed logging for debugging
@@ -327,8 +327,8 @@ function ReportsPage() {
               id="exclude-optional"
               type="checkbox"
               name="optional"
-              checked={filter.optional === false}
-              onChange={e => setFilter(prev => ({ ...prev, optional: !e.target.checked }))}
+              checked={filter.optional === true}
+              onChange={handleCheckboxChange}
               className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
             />
             <label htmlFor="exclude-optional" className="ml-2 block text-sm text-gray-900">
