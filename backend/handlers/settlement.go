@@ -7,10 +7,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/gorilla/mux"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 type SettlementHandler struct {
@@ -275,7 +276,7 @@ func (h *SettlementHandler) GetTransactionSettlements(w http.ResponseWriter, r *
 	var settlements []models.Settlement
 	for rows.Next() {
 		var s models.Settlement
-		err := rows.Scan(&s.ID, &s.CreatedBy, &s.CreatedFor, &s.TotalAmount,
+		err := rows.Scan(&s.ID, &s.CreatorID, &s.RecipientID, &s.TotalAmount,
 			&s.RemainingAmount, &s.Status, &s.CreatedAt)
 		if err != nil {
 			continue
@@ -307,12 +308,12 @@ func (h *SettlementHandler) GetAvailableSettlementTransactions(w http.ResponseWr
 
 	// Get unpaid transactions between the two users that can be used for offsetting
 	var otherUserID string
-	if userID == settlement.CreatedBy {
-		// Current user created the settlement, so the other person is CreatedFor
-		otherUserID = settlement.CreatedFor
+	if userID == settlement.CreatorID {
+		// Current user created the settlement, so the other person is RecipientID
+		otherUserID = settlement.RecipientID
 	} else {
-		// Current user is the one who owes, so the other person is CreatedBy
-		otherUserID = settlement.CreatedBy
+		// Current user is the one who owes, so the other person is CreatorID
+		otherUserID = settlement.CreatorID
 	}
 
 	log.Printf("GetAvailableTransactionsForSettlement: userID=%s, otherUserID=%s, settlementID=%s", userID, otherUserID, settlementID)
@@ -428,7 +429,7 @@ func (h *SettlementHandler) UpdateSettlementStatus(w http.ResponseWriter, r *htt
 
 	// Check if user has permission to update this settlement
 	// Only the creator or the person it was created for can update it
-	if userID != settlement.CreatedBy && userID != settlement.CreatedFor {
+	if userID != settlement.CreatorID && userID != settlement.RecipientID {
 		http.Error(w, "You don't have permission to update this settlement", http.StatusForbidden)
 		return
 	}

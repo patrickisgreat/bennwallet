@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import ReportsPage from '../ReportsPage';
 import { useAuth } from '../../context/AuthContext';
-import { fetchYNABSplits, syncToYNAB } from '../../utils/api';
+import { fetchYNABSplits, syncToYNAB, fetchUniqueTransactionFields } from '../../utils/api';
 
 // Mock the auth hook
 vi.mock('../../context/AuthContext', () => ({
@@ -13,6 +13,7 @@ vi.mock('../../context/AuthContext', () => ({
 vi.mock('../../utils/api', () => ({
   fetchYNABSplits: vi.fn(),
   syncToYNAB: vi.fn(),
+  fetchUniqueTransactionFields: vi.fn(),
 }));
 
 // Mock localStorage
@@ -42,6 +43,11 @@ describe('ReportsPage', () => {
     ]);
 
     (syncToYNAB as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
+
+    (fetchUniqueTransactionFields as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      payTo: ['Alice', 'Bob'],
+      enteredBy: ['test-user', 'other-user'],
+    });
   });
 
   it('renders without crashing', () => {

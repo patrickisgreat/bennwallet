@@ -80,7 +80,7 @@ func (s *SettlementService) CreateSettlement(userID string, transactionID string
 	// Create an empty settlement that can grow as transactions are added
 	log.Printf("DEBUG: Creating settlement %s between %s and %s", settlementID, createdBy, createdFor)
 	_, err = tx.Exec(`
-		INSERT INTO settlements (id, created_by, created_for, total_amount, remaining_amount, status, notes, created_at, updated_at)
+		INSERT INTO settlements (id, creator_id, recipient_id, total_amount, remaining_amount, status, notes, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`, settlementID, createdBy, createdFor, 0, 0, "active", notes, now, now)
 
@@ -130,17 +130,17 @@ func (s *SettlementService) applyTransactionToSettlementTx(tx *sql.Tx, settlemen
 	// Get the settlement
 	var settlement models.Settlement
 	err := tx.QueryRow(`
-		SELECT id, remaining_amount, status, created_by, created_for
+		SELECT id, total_amount, status, creator_id, recipient_id
 		FROM settlements
 		WHERE id = $1
-	`, settlementID).Scan(&settlement.ID, &settlement.RemainingAmount, &settlement.Status, &settlement.CreatedBy, &settlement.CreatedFor)
+	`, settlementID).Scan(&settlement.ID, &settlement.TotalAmount, &settlement.Status, &settlement.CreatorID, &settlement.RecipientID)
 
 	if err != nil {
 		return fmt.Errorf("failed to get settlement: %w", err)
 	}
 
 	// Debug logging
-	log.Printf("DEBUG: Settlement %s status: %s, remaining: %f", settlementID, settlement.Status, settlement.RemainingAmount)
+	log.Printf("DEBUG: Settlement %s status: %s, total: %f", settlementID, settlement.Status, settlement.TotalAmount)
 
 	// Validate the settlement is active
 	if settlement.Status != "active" {
@@ -148,7 +148,7 @@ func (s *SettlementService) applyTransactionToSettlementTx(tx *sql.Tx, settlemen
 	}
 
 	// Validate the user has permission (either creator or target)
-	if userID != settlement.CreatedBy && userID != settlement.CreatedFor {
+	if userID != settlement.CreatorID && userID != settlement.RecipientID {
 		return fmt.Errorf("user does not have permission to modify this settlement")
 	}
 
@@ -266,19 +266,20 @@ func (s *SettlementService) RemoveTransactionFromSettlement(settlementID string,
 // GetSettlement retrieves a settlement with all its items and history
 func (s *SettlementService) GetSettlement(settlementID string) (*models.Settlement, error) {
 	var settlement models.Settlement
+	var completedAt sql.NullTime
 	err := s.db.QueryRow(`
-		SELECT id, created_by, created_for, total_amount, remaining_amount, status, 
-		       created_at, updated_at, completed_at, notes
+		SELECT id, total_amount, status, creator_id, recipient_id, created_at, updated_at, completed_at, notes
 		FROM settlements
 		WHERE id = $1
-	`, settlementID).Scan(
-		&settlement.ID, &settlement.CreatedBy, &settlement.CreatedFor,
-		&settlement.TotalAmount, &settlement.RemainingAmount, &settlement.Status,
-		&settlement.CreatedAt, &settlement.UpdatedAt, &settlement.CompletedAt, &settlement.Notes,
-	)
+	`, settlementID).Scan(&settlement.ID, &settlement.TotalAmount, &settlement.Status, &settlement.CreatorID, &settlement.RecipientID, &settlement.CreatedAt, &settlement.UpdatedAt, &completedAt, &settlement.Notes)
 
 	if err != nil {
 		return nil, err
+	}
+
+	// Handle nullable completed_at
+	if completedAt.Valid {
+		settlement.CompletedAt = &completedAt.Time
 	}
 
 	// Get settlement items
@@ -301,30 +302,34 @@ func (s *SettlementService) GetSettlement(settlementID string) (*models.Settleme
 // GetUserSettlements retrieves all settlements for a user
 func (s *SettlementService) GetUserSettlements(userID string, status string) ([]models.SettlementSummary, error) {
 	query := `
-		SELECT s.id, s.created_by, u1.name as created_by_name, s.created_for, u2.name as created_for_name,
-		       s.total_amount, s.remaining_amount, s.status, s.created_at,
-		       COUNT(si.id) as item_count
+		SELECT 
+			s.id,
+			s.creator_id,
+			creator.name as creator_name,
+			s.recipient_id,
+			recipient.name as recipient_name,
+			s.total_amount,
+			s.status,
+			s.created_at,
+			COUNT(si.id) as item_count
 		FROM settlements s
-		JOIN users u1 ON s.created_by = u1.id
-		JOIN users u2 ON s.created_for = u2.id
+		LEFT JOIN users creator ON s.creator_id = creator.id
+		LEFT JOIN users recipient ON s.recipient_id = recipient.id
 		LEFT JOIN settlement_items si ON s.id = si.settlement_id
-		WHERE (s.created_by = $1 OR s.created_for = $1)
+		WHERE (s.creator_id = $1 OR s.recipient_id = $1)
 	`
-
 	args := []interface{}{userID}
+
 	if status != "" {
 		query += " AND s.status = $2"
 		args = append(args, status)
-	} else {
-		// By default, exclude cancelled settlements (soft delete)
-		query += " AND s.status != 'cancelled'"
 	}
 
-	query += " GROUP BY s.id, u1.name, u2.name ORDER BY s.created_at DESC"
+	query += " GROUP BY s.id, creator.name, recipient.name ORDER BY s.created_at DESC"
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get settlements: %w", err)
 	}
 	defer rows.Close()
 
@@ -332,13 +337,18 @@ func (s *SettlementService) GetUserSettlements(userID string, status string) ([]
 	for rows.Next() {
 		var summary models.SettlementSummary
 		err := rows.Scan(
-			&summary.ID, &summary.CreatedBy, &summary.CreatedByName,
-			&summary.CreatedFor, &summary.CreatedForName,
-			&summary.TotalAmount, &summary.RemainingAmount, &summary.Status,
-			&summary.CreatedAt, &summary.ItemCount,
+			&summary.ID,
+			&summary.CreatorID,
+			&summary.CreatorName,
+			&summary.RecipientID,
+			&summary.RecipientName,
+			&summary.TotalAmount,
+			&summary.Status,
+			&summary.CreatedAt,
+			&summary.ItemCount,
 		)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan settlement: %w", err)
 		}
 		settlements = append(settlements, summary)
 	}
@@ -348,6 +358,17 @@ func (s *SettlementService) GetUserSettlements(userID string, status string) ([]
 
 // UpdateSettlementStatus updates the status of a settlement (e.g., complete, cancel)
 func (s *SettlementService) UpdateSettlementStatus(settlementID string, status string, userID string, notes string) (*models.Settlement, error) {
+	// Validate status
+	validStatuses := map[string]bool{
+		"active":    true,
+		"completed": true,
+		"cancelled": true,
+	}
+
+	if !validStatuses[status] {
+		return nil, fmt.Errorf("invalid status: %s", status)
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
@@ -362,11 +383,22 @@ func (s *SettlementService) UpdateSettlementStatus(settlementID string, status s
 
 	// Update the settlement status
 	now := time.Now()
-	_, err = tx.Exec(`
+	query := `
 		UPDATE settlements 
 		SET status = $1, updated_at = $2, notes = CASE WHEN $3 = '' THEN notes ELSE $3 END
-		WHERE id = $4
-	`, status, now, notes, settlementID)
+	`
+	args := []interface{}{status, now, notes}
+
+	// Set completed_at if completing the settlement
+	if status == "completed" {
+		query += ", completed_at = $4 WHERE id = $5"
+		args = append(args, now, settlementID)
+	} else {
+		query += " WHERE id = $4"
+		args = append(args, settlementID)
+	}
+
+	_, err = tx.Exec(query, args...)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to update settlement status: %w", err)
@@ -377,6 +409,36 @@ func (s *SettlementService) UpdateSettlementStatus(settlementID string, status s
 		err = s.createSettlementAdjustmentTransactions(tx, settlement, now)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create settlement adjustment transactions: %w", err)
+		}
+
+		// Mark all transactions in the settlement as paid
+		_, err = tx.Exec(`
+			UPDATE transactions 
+			SET paid = true, paid_date = $1
+			WHERE id IN (
+				SELECT transaction_id 
+				FROM settlement_items 
+				WHERE settlement_id = $2
+			)
+		`, now.Format("2006-01-02"), settlementID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to mark transactions as paid: %w", err)
+		}
+	}
+
+	// If cancelling the settlement, mark all associated transactions as unpaid
+	if status == "cancelled" {
+		_, err = tx.Exec(`
+			UPDATE transactions 
+			SET paid = false 
+			WHERE id IN (
+				SELECT transaction_id 
+				FROM settlement_items 
+				WHERE settlement_id = $1
+			)
+		`, settlementID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to mark transactions as unpaid: %w", err)
 		}
 	}
 
@@ -431,14 +493,14 @@ func (s *SettlementService) createSettlementAdjustmentTransactions(tx *sql.Tx, s
 
 		// Determine the other user
 		var otherUserID string
-		if userID == settlement.CreatedBy {
-			otherUserID = settlement.CreatedFor
+		if userID == settlement.CreatorID {
+			otherUserID = settlement.RecipientID
 		} else {
-			otherUserID = settlement.CreatedBy
+			otherUserID = userID
 		}
 
 		// Create settlement adjustment transaction
-		adjID := fmt.Sprintf("settlement-adj-%s-%d", settlement.ID, now.Unix())
+		adjID := uuid.New().String()
 		description := fmt.Sprintf("Settlement adjustment")
 
 		var paidBy, owedBy string
@@ -458,8 +520,8 @@ func (s *SettlementService) createSettlementAdjustmentTransactions(tx *sql.Tx, s
 			(id, amount, description, date, transaction_date, type, paid_by, owed_by, paid, paid_date, entered_by, optional, note, user_id) 
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		`, adjID, amount, description, now.Format("2006-01-02"), now.Format("2006-01-02"),
-			"settlement", paidBy, owedBy, true, now.Format("2006-01-02"), settlement.CreatedBy, false,
-			fmt.Sprintf("Settlement adjustment - ID: %s", settlement.ID[:8]), settlement.CreatedBy)
+			"settlement", paidBy, owedBy, true, now.Format("2006-01-02"), settlement.CreatorID, false,
+			fmt.Sprintf("Settlement adjustment - ID: %s", settlement.ID[:8]), settlement.CreatorID)
 
 		if err != nil {
 			return fmt.Errorf("failed to create adjustment transaction: %w", err)
@@ -616,7 +678,7 @@ func (s *SettlementService) ApplyTransactionAsPayment(userID string, transaction
 
 	// Create the settlement as active (can be added to later)
 	_, err = tx.Exec(`
-		INSERT INTO settlements (id, created_by, created_for, total_amount, remaining_amount, status, notes, created_at, updated_at)
+		INSERT INTO settlements (id, creator_id, recipient_id, total_amount, remaining_amount, status, notes, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`, settlementID, transaction.EnteredBy, userID, transaction.Amount, transaction.Amount, "active", notes, now, now)
 

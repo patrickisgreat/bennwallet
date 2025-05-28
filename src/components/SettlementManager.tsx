@@ -176,7 +176,7 @@ export default function SettlementManager() {
                   <div className="flex justify-between items-start mb-2">
                     <div>
                       <p className="font-medium">
-                        {settlement.createdByName} → {settlement.createdForName}
+                        {settlement.creatorName} → {settlement.recipientName}
                       </p>
                       <p className="text-sm text-gray-500">
                         Created {formatDate(settlement.createdAt)}

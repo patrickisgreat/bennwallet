@@ -2,11 +2,21 @@ import { render } from '@testing-library/react';
 import { UserProvider, useUser } from '../UserContext';
 import { vi, describe, it, expect } from 'vitest';
 
+// Mock the API
+vi.mock('../../utils/api', () => ({
+  fetchCurrentUser: vi.fn().mockResolvedValue({
+    id: 'test-uid',
+    username: 'test@example.com',
+    name: 'Test User',
+    role: 'user',
+  }),
+}));
+
 // Mock the AuthContext
 const mockAuthUser = {
   uid: 'test-uid',
   email: 'test@example.com',
-  displayName: 'Test User'
+  displayName: 'Test User',
 };
 
 type MockUser = typeof mockAuthUser | null;
@@ -16,8 +26,8 @@ vi.mock('../AuthContext', () => ({
   useAuth: () => ({
     currentUser: mockCurrentUser,
     loading: false,
-    error: null
-  })
+    error: null,
+  }),
 }));
 
 // Test component that uses the UserContext
@@ -74,4 +84,4 @@ describe('UserContext', () => {
     const noUser = await findByTestId('no-user');
     expect(noUser).toBeInTheDocument();
   });
-}); 
+});

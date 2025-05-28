@@ -852,3 +852,19 @@ export async function applyTransactionAsPayment(
     throw error;
   }
 }
+
+export async function fetchSettlements(status?: string): Promise<SettlementSummary[]> {
+  try {
+    const queryParams = new URLSearchParams();
+    if (status) {
+      queryParams.set('status', status);
+    }
+    const query = queryParams.toString();
+    const queryString = query ? `?${query}` : '';
+    const response = await api.get<SettlementSummary[]>(`/settlements${queryString}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching settlements:', error);
+    throw error;
+  }
+}

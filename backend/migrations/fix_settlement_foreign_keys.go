@@ -9,8 +9,23 @@ import (
 func FixSettlementForeignKeys(db *sql.DB) error {
 	log.Println("Fixing settlement foreign key constraints...")
 
+	// Check if the table exists first
+	var exists bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables 
+			WHERE table_schema = 'public' 
+			AND table_name = 'settlement_items'
+		)
+	`).Scan(&exists)
+
+	if err != nil || !exists {
+		log.Println("settlement_items table does not exist, skipping foreign key fix")
+		return nil
+	}
+
 	// Drop the existing foreign key constraint
-	_, err := db.Exec(`
+	_, err = db.Exec(`
 		ALTER TABLE settlement_items 
 		DROP CONSTRAINT IF EXISTS settlement_items_transaction_id_fkey;
 	`)

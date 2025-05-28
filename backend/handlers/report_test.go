@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/models"
+	"bennwallet/backend/testutil"
 
 	_ "github.com/lib/pq"
 )
@@ -20,20 +20,12 @@ const testUserID = "test-user-id"
 
 func setupReportTestDB(t *testing.T) {
 	// Use the centralized test setup
-	db, cleanup := database.SetupTestDB(t)
+	db, cleanup := testutil.SetupTestDB(t)
 	database.DB = db
 	t.Cleanup(cleanup)
 
 	// Insert sample data for testing
 	insertTestTransactions()
-}
-
-// Helper function to get environment variable with default
-func getEnvWithDefault(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return defaultValue
 }
 
 func insertTestTransactions() {
@@ -45,8 +37,18 @@ func insertTestTransactions() {
 	midDate, _ := time.Parse(dateFormat, "2023-02-15")
 	endDate, _ := time.Parse(dateFormat, "2023-03-31")
 
-	// Insert test category groups
+	// Create test user first
 	_, err := database.DB.Exec(`
+		INSERT INTO users (id, username, name, role, status, is_admin) 
+		VALUES ($1, 'testuser', 'Test User', 'user', 'active', false)
+		ON CONFLICT (id) DO NOTHING
+	`, testUserID)
+	if err != nil {
+		panic(err)
+	}
+
+	// Insert test category groups
+	_, err = database.DB.Exec(`
 		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
 		VALUES 
 		('group-1', 'Food', 'group-1', 'test-user-id', false),
@@ -125,8 +127,8 @@ func insertTestTransactions() {
 		_, err := database.DB.Exec(`
 			INSERT INTO transactions 
 			(id, amount, description, date, transaction_date, type, pay_to, paid, entered_by, optional, user_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		`, tx.id, tx.amount, tx.description, tx.date, tx.date.Format("2006-01-02"), tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.optional, tx.userId)
+			VALUES ($1, $2, $3, TO_CHAR($4::date, 'YYYY-MM-DD'), TO_CHAR($5::date, 'YYYY-MM-DD'), $6, $7, $8, $9, $10, $11)
+		`, tx.id, tx.amount, tx.description, tx.date, tx.date, tx.txType, tx.payTo, tx.paid, tx.enteredBy, tx.optional, tx.userId)
 
 		if err != nil {
 			panic(err)
@@ -202,12 +204,12 @@ func TestGetYNABSplits(t *testing.T) {
 		// Note: We don't have a way to filter for only unpaid transactions in the UI
 		// The paid checkbox is for "show only paid" not "show only unpaid"
 		{
-			name: "All transactions (no filters)",
+			name:   "All transactions (no filters)",
 			filter: models.ReportFilter{
 				// No paid or optional filter - should show all transactions
 			},
-			expectedCount: 4,      // Food, Housing, Fun, Misc categories
-			expectedTotal: 745.00, // All transactions including unpaid and optional
+			expectedCount: 4,         // Food, Housing, Fun, Misc categories
+			expectedTotal: 745.00,    // All transactions including unpaid and optional
 			expectedFirst: "Housing", // Housing has highest total: 430.00 (350 paid + 80 unpaid)
 		},
 	}

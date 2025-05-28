@@ -2,8 +2,8 @@ import { Transaction } from './transaction';
 
 export interface Settlement {
   id: string;
-  createdBy: string;
-  createdFor: string;
+  creatorId: string;
+  recipientId: string;
   totalAmount: number;
   remainingAmount: number;
   status: 'active' | 'completed' | 'cancelled';
@@ -32,16 +32,16 @@ export interface SettlementHistory {
   actorId: string;
   transactionId?: string;
   amount?: number;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
   createdAt: string;
 }
 
 export interface SettlementSummary {
   id: string;
-  createdBy: string;
-  createdByName: string;
-  createdFor: string;
-  createdForName: string;
+  creatorId: string;
+  creatorName: string;
+  recipientId: string;
+  recipientName: string;
   totalAmount: number;
   remainingAmount: number;
   status: 'active' | 'completed' | 'cancelled';
@@ -57,4 +57,8 @@ export interface CreateSettlementRequest {
 export interface ApplyTransactionRequest {
   transactionId: string;
   amount: number;
+}
+
+export interface SettlementDetails {
+  [key: string]: string | number | boolean | null | undefined;
 }
