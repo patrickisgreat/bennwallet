@@ -57,7 +57,7 @@ func TestGetUsers(t *testing.T) {
 	}
 
 	// Delete all users first to ensure a clean state
-	_, err = db.Exec("DELETE FROM users")
+	_, err = db.Exec("TRUNCATE TABLE users CASCADE")
 	if err != nil {
 		t.Fatalf("Failed to clear users table: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestGetUserByUsername(t *testing.T) {
 	}
 
 	// Delete all users first to ensure a clean state
-	_, err = db.Exec("DELETE FROM users")
+	_, err = db.Exec("TRUNCATE TABLE users CASCADE")
 	if err != nil {
 		t.Fatalf("Failed to clear users table: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestGetUserByUsername_NotFound(t *testing.T) {
 	}
 
 	// Delete all users first to ensure a clean state
-	_, err = db.Exec("DELETE FROM users")
+	_, err = db.Exec("TRUNCATE TABLE users CASCADE")
 	if err != nil {
 		t.Fatalf("Failed to clear users table: %v", err)
 	}

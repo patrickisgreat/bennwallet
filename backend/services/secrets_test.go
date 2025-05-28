@@ -2,6 +2,7 @@ package services
 
 import (
 	"bennwallet/backend/database"
+	"bennwallet/backend/testutil"
 	"os"
 	"strings"
 	"testing"
@@ -9,7 +10,7 @@ import (
 
 func TestStoreAndGetSecret(t *testing.T) {
 	// Setup test database
-	testDB, cleanup := database.SetupTestDB(t)
+	testDB, cleanup := testutil.SetupTestDB(t)
 	defer cleanup()
 
 	// Override the database for this test
@@ -69,7 +70,7 @@ func TestStoreAndGetSecret(t *testing.T) {
 
 func TestStoreSecretWithFlyEnv(t *testing.T) {
 	// Setup test database
-	testDB, cleanup := database.SetupTestDB(t)
+	testDB, cleanup := testutil.SetupTestDB(t)
 	defer cleanup()
 
 	// Override the database for this test
@@ -126,7 +127,7 @@ func TestStoreSecretWithFlyEnv(t *testing.T) {
 
 func TestUpdateYNABSettings(t *testing.T) {
 	// Setup test database
-	testDB, cleanup := database.SetupTestDB(t)
+	testDB, cleanup := testutil.SetupTestDB(t)
 	defer cleanup()
 
 	// Override the database for this test

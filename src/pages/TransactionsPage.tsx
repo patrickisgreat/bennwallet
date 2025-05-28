@@ -41,6 +41,7 @@ function TransactionsPage() {
   const [payToOptions, setPayToOptions] = useState<string[]>([]);
   const [enteredByOptions, setEnteredByOptions] = useState<string[]>([]);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'iOwe' | 'othersOwe' | 'all'>('iOwe');
 
   // Initialize filter with appropriate defaults based on user
   const [filter, setFilter] = useState<TransactionFilter>({
@@ -60,27 +61,27 @@ function TransactionsPage() {
 
   // Function to sort transactions
   const sortTransactions = (
-    data: Transaction[], 
-    column: keyof Transaction, 
+    data: Transaction[],
+    column: keyof Transaction,
     direction: 'asc' | 'desc'
   ): Transaction[] => {
     return [...data].sort((a, b) => {
       const aValue = a[column];
       const bValue = b[column];
-      
+
       // Special handling for dates
       if (column === 'transactionDate' || column === 'entered' || column === 'paidDate') {
         // Safely convert to Date objects or timestamps
         const aDate = aValue ? new Date(aValue as string).getTime() : 0;
         const bDate = bValue ? new Date(bValue as string).getTime() : 0;
-        
+
         return direction === 'asc' ? aDate - bDate : bDate - aDate;
       }
-      
+
       if (aValue === bValue) return 0;
       if (aValue === null || aValue === undefined) return 1;
       if (bValue === null || bValue === undefined) return -1;
-      
+
       if (direction === 'asc') {
         return aValue < bValue ? -1 : 1;
       } else {
@@ -94,6 +95,15 @@ function TransactionsPage() {
     loadUniqueFields();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reload transactions when viewMode changes
+  useEffect(() => {
+    if (user?.name) {
+      // Only reload if user is loaded
+      loadTransactions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, user?.name]);
 
   // Load unique fields for dropdowns and update default filter if needed
   const loadUniqueFields = async () => {
@@ -138,26 +148,36 @@ function TransactionsPage() {
     loadTransactions();
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  }, [filter, viewMode]);
 
   const loadTransactions = async () => {
     if (!currentUser) return;
 
     setLoading(true);
     setApiError(null);
-    
+
     try {
       // Create API filter parameters
-      const filterParams = {
+      const filterParams: Record<string, string | boolean | undefined> = {
         startDate: filter.startDate || undefined,
         endDate: filter.endDate || undefined,
         txStartDate: filter.txStartDate || undefined,
         txEndDate: filter.txEndDate || undefined,
-        payTo: filter.payTo || undefined,
         enteredBy: filter.enteredBy || undefined,
-        paid: filter.paidStatus === 'paid' ? true : 
-              filter.paidStatus === 'unpaid' ? false : undefined,
+        paid:
+          filter.paidStatus === 'paid' ? true : filter.paidStatus === 'unpaid' ? false : undefined,
       };
+
+      // Apply view mode filtering
+      if (viewMode === 'iOwe' && user?.name) {
+        filterParams.owedBy = user.name;
+      } else if (viewMode === 'othersOwe' && user?.name) {
+        filterParams.paidBy = user.name;
+        // We'll filter out transactions where owedBy = current user in the frontend
+      } else if (filter.payTo) {
+        // For backward compatibility and the filter dropdown
+        filterParams.payTo = filter.payTo;
+      }
 
       // Only include parameters with values
       const apiParams: Record<string, string | boolean | undefined> = {};
@@ -169,14 +189,16 @@ function TransactionsPage() {
 
       console.log('Fetching transactions with API params:', apiParams);
       const data = await fetchTransactions(apiParams);
-      
+
       // Log categories for debugging
       if (data && data.length > 0) {
         console.log(`Received ${data.length} transactions from API`);
         data.forEach(tx => {
           if (tx.categories && tx.categories.length > 0) {
-            console.log(`Transaction ${tx.id} has ${tx.categories.length} categories:`, 
-                        tx.categories.map(cat => cat.name).join(', '));
+            console.log(
+              `Transaction ${tx.id} has ${tx.categories.length} categories:`,
+              tx.categories.map(cat => cat.name).join(', ')
+            );
           } else if (tx.category) {
             console.log(`Transaction ${tx.id} has legacy category: ${tx.category}`);
           } else {
@@ -184,18 +206,27 @@ function TransactionsPage() {
           }
         });
       }
-      
+
       // Update state with the fetched data
-      setTransactions(data);
-      
+      let finalData = data;
+
+      // Additional frontend filtering for 'othersOwe' mode
+      if (viewMode === 'othersOwe' && user?.name) {
+        finalData = data.filter(tx => tx.owedBy !== user.name);
+      }
+
+      setTransactions(finalData);
+
       // Apply sorting
-      const sorted = sortTransactions(data, sortColumn, sortDirection);
+      const sorted = sortTransactions(finalData, sortColumn, sortDirection);
       setFilteredTransactions(sorted);
-      
+
       setError(null);
     } catch (err) {
       console.error('Error loading transactions:', err);
-      setApiError('Failed to load transactions. The server returned an error (500). Please contact your administrator.');
+      setApiError(
+        'Failed to load transactions. The server returned an error (500). Please contact your administrator.'
+      );
       // Don't clear transactions on error
     } finally {
       setLoading(false);
@@ -211,14 +242,14 @@ function TransactionsPage() {
     try {
       const success = await updateTransaction(id, updates);
       if (success) {
-        const updatedTransactions = transactions.map(tx => 
+        const updatedTransactions = transactions.map(tx =>
           tx.id === id ? { ...tx, ...updates } : tx
         );
         setTransactions(updatedTransactions);
-        
+
         // Also update the filtered transactions to ensure the UI reflects the change
         setFilteredTransactions(sortTransactions(updatedTransactions, sortColumn, sortDirection));
-        
+
         // Remove forced refresh to prevent notes from reverting
         // Local state updates above should be sufficient
       } else {
@@ -258,19 +289,19 @@ function TransactionsPage() {
 
   const handleEditSubmit = async (id: string, updates: Partial<Transaction>) => {
     try {
-      console.log("Submitting edit with updates:", updates);
+      console.log('Submitting edit with updates:', updates);
       // First update the transaction
       const success = await updateTransaction(id, updates);
-      
+
       if (success) {
-        console.log("Update successful, updating local state with:", updates);
+        console.log('Update successful, updating local state with:', updates);
         // Update local state for immediate UI feedback
-        const updatedTransactions = transactions.map(tx => 
+        const updatedTransactions = transactions.map(tx =>
           tx.id === id ? { ...tx, ...updates } : tx
         );
         setTransactions(updatedTransactions);
         setFilteredTransactions(sortTransactions(updatedTransactions, sortColumn, sortDirection));
-        
+
         // Clear editing state
         setEditingTransaction(null);
       } else {
@@ -551,11 +582,15 @@ function TransactionsPage() {
       setSortColumn(column);
       setSortDirection('desc');
     }
-    
+
     // Re-sort the filtered transactions
-    setFilteredTransactions(sortTransactions(transactions, 
-      column === sortColumn && sortDirection === 'asc' ? column : column, 
-      column === sortColumn && sortDirection === 'asc' ? 'desc' : 'asc'));
+    setFilteredTransactions(
+      sortTransactions(
+        transactions,
+        column === sortColumn && sortDirection === 'asc' ? column : column,
+        column === sortColumn && sortDirection === 'asc' ? 'desc' : 'asc'
+      )
+    );
   };
 
   return (
@@ -601,6 +636,44 @@ function TransactionsPage() {
           </button>
         </div>
       )}
+
+      {/* View Mode Toggle */}
+      <div className="bg-white p-4 rounded shadow mb-4">
+        <div className="flex justify-center gap-4">
+          <button
+            onClick={() => setViewMode('iOwe')}
+            className={`px-4 py-2 rounded ${
+              viewMode === 'iOwe'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            What I Owe
+          </button>
+          <button
+            onClick={() => setViewMode('othersOwe')}
+            className={`px-4 py-2 rounded ${
+              viewMode === 'othersOwe'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            What Others Owe Me
+          </button>
+          {user?.isAdmin && (
+            <button
+              onClick={() => setViewMode('all')}
+              className={`px-4 py-2 rounded ${
+                viewMode === 'all'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              All Transactions
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="bg-white p-4 rounded shadow mb-4">
@@ -670,7 +743,7 @@ function TransactionsPage() {
             <h3 className="font-medium text-gray-700 mb-2">Other Filters</h3>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Pay To</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Owed By</label>
                 <select
                   name="payTo"
                   value={filter.payTo}
@@ -687,7 +760,7 @@ function TransactionsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Entered By</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Owed To</label>
                 <select
                   name="enteredBy"
                   value={filter.enteredBy}
@@ -722,14 +795,20 @@ function TransactionsPage() {
 
       {/* Display API error messages */}
       {apiError && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6" role="alert">
+        <div
+          className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6"
+          role="alert"
+        >
           <p>{apiError}</p>
         </div>
       )}
-      
+
       {/* Empty state message when no options are available */}
       {payToOptions.length === 0 && enteredByOptions.length === 0 && !apiError && (
-        <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-6" role="alert">
+        <div
+          className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-6"
+          role="alert"
+        >
           <p>No transaction data found. You may need to add some transactions first.</p>
         </div>
       )}

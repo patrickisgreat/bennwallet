@@ -30,7 +30,6 @@ func NewServer(db *sql.DB) *Server {
 
 // RegisterRoutes registers all API routes
 func (s *Server) RegisterRoutes() {
-	// ... existing routes ...
 
 	// Add a route for linking Firebase UID with username
 	s.router.HandleFunc("/users/link-firebase", s.LinkFirebaseUser).Methods("POST")

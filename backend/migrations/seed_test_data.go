@@ -32,21 +32,16 @@ func SeedTestData(db *sql.DB) error {
 	log.Println("🧪 Seeding TEST DATA for development/PR environment...")
 	log.Println("WARNING: This data is for testing purposes only and should not be used in production.")
 
-	// 1. Make sure we have our default users
+	// 1. Make sure we have our default users - simplified to just 3
 	defaultUsers := []struct {
 		id       string
 		username string
 		name     string
 		role     string
 	}{
-		{id: "1", username: "sarah", name: "Sarah", role: "superadmin"},
-		{id: "2", username: "patrick", name: "Patrick", role: "superadmin"},
-		{id: "admin", username: "admin", name: "Admin", role: "admin"},
 		{id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", username: "Patrick Bennett", name: "Patrick Bennett", role: "superadmin"},
-		{id: "regular1", username: "regularuser1", name: "Regular User 1", role: "user"},
-		{id: "regular2", username: "regularuser2", name: "Regular User 2", role: "user"},
-		{id: "regular3", username: "regularuser3", name: "Regular User 3", role: "user"},
-		{id: "test-user-id", username: "testuser", name: "Test User", role: "user"},
+		{id: "sarah-wallis-id", username: "sarah", name: "Sarah Wallis", role: "user"},
+		{id: "kim-donaldson-id", username: "kim", name: "Kim Donaldson", role: "user"},
 	}
 
 	for _, user := range defaultUsers {
@@ -76,49 +71,18 @@ func SeedTestData(db *sql.DB) error {
 		}
 	}
 
-	// 1b. Add a test admin user for development - MOVED BEFORE CATEGORIES
-	adminUser := struct {
-		id       string
-		username string
-		name     string
-		role     string
-	}{
-		id:       "admin-user-1",
-		username: "admin-user",
-		name:     "Admin User",
-		role:     "superadmin",
-	}
-
-	// Insert admin user with ON CONFLICT DO NOTHING
-	_, err := db.Exec(`
-		INSERT INTO users (id, username, name, role) 
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (id) DO UPDATE SET 
-		    role = 'superadmin'`,
-		adminUser.id, adminUser.username, adminUser.name, adminUser.role)
-	if err != nil {
-		return fmt.Errorf("failed to insert admin user %s: %w", adminUser.username, err)
-	}
-	log.Printf("Created or updated admin test user with ID: %s", adminUser.id)
-
 	// 2. Add category groups first
 	categoryGroups := []struct {
 		id      string
 		name    string
 		user_id string
 	}{
-		{id: "group-1", name: "Essentials", user_id: "1"},
-		{id: "group-2", name: "Lifestyle", user_id: "1"},
-		{id: "group-3", name: "Essentials", user_id: "2"},
-		{id: "group-4", name: "Lifestyle", user_id: "2"},
-		{id: "group-5", name: "Essentials", user_id: "regular1"},
-		{id: "group-6", name: "Essentials", user_id: "regular2"},
-		{id: "group-7", name: "Essentials", user_id: "regular3"},
-		{id: "group-8", name: "Essentials", user_id: "admin-user-1"},
-		{id: "group-9", name: "Essentials", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
-		{id: "group-10", name: "Lifestyle", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
-		{id: "group-11", name: "Essentials", user_id: "test-user-id"},
-		{id: "group-12", name: "Lifestyle", user_id: "test-user-id"},
+		{id: "pb-group-1", name: "Essentials", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
+		{id: "pb-group-2", name: "Lifestyle", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
+		{id: "sw-group-1", name: "Essentials", user_id: "sarah-wallis-id"},
+		{id: "sw-group-2", name: "Lifestyle", user_id: "sarah-wallis-id"},
+		{id: "kd-group-1", name: "Essentials", user_id: "kim-donaldson-id"},
+		{id: "kd-group-2", name: "Lifestyle", user_id: "kim-donaldson-id"},
 	}
 
 	for _, group := range categoryGroups {
@@ -141,72 +105,37 @@ func SeedTestData(db *sql.DB) error {
 		color          string
 		category_group string
 	}{
-		{name: "Food", description: "Groceries and dining out", user_id: "1", color: "#4CAF50", category_group: "group-1"},
-		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "1", color: "#2196F3", category_group: "group-1"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "1", color: "#FFC107", category_group: "group-1"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "1", color: "#9C27B0", category_group: "group-2"},
-		{name: "Utilities", description: "Bills and services", user_id: "1", color: "#F44336", category_group: "group-1"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "1", color: "#3F51B5", category_group: "group-1"},
-		{name: "Personal Care", description: "Haircuts, gym", user_id: "1", color: "#009688", category_group: "group-2"},
-		{name: "Education", description: "Tuition, books", user_id: "1", color: "#FF5722", category_group: "group-2"},
-		{name: "Pets", description: "Pet food, vet", user_id: "1", color: "#795548", category_group: "group-2"},
-		{name: "Gifts", description: "Presents, donations", user_id: "1", color: "#E91E63", category_group: "group-2"},
-
-		{name: "Food", description: "Groceries and dining out", user_id: "2", color: "#4CAF50", category_group: "group-3"},
-		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "2", color: "#2196F3", category_group: "group-3"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "2", color: "#FFC107", category_group: "group-3"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "2", color: "#9C27B0", category_group: "group-4"},
-		{name: "Utilities", description: "Bills and services", user_id: "2", color: "#F44336", category_group: "group-3"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "2", color: "#3F51B5", category_group: "group-3"},
-		{name: "Shopping", description: "Clothes, electronics", user_id: "2", color: "#607D8B", category_group: "group-4"},
-		{name: "Travel", description: "Vacations, trips", user_id: "2", color: "#8BC34A", category_group: "group-4"},
-
-		// Regular user 1 categories
-		{name: "Food", description: "Groceries and dining out", user_id: "regular1", color: "#4CAF50", category_group: "group-5"},
-		{name: "Rent", description: "Monthly rent", user_id: "regular1", color: "#2196F3", category_group: "group-5"},
-		{name: "Transportation", description: "Car, bus, train", user_id: "regular1", color: "#FFC107", category_group: "group-5"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "regular1", color: "#9C27B0", category_group: "group-5"},
-
-		// Regular user 2 categories
-		{name: "Food", description: "Groceries and dining out", user_id: "regular2", color: "#4CAF50", category_group: "group-6"},
-		{name: "Utilities", description: "Bills and services", user_id: "regular2", color: "#F44336", category_group: "group-6"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "regular2", color: "#FFC107", category_group: "group-6"},
-		{name: "Shopping", description: "Clothes, electronics", user_id: "regular2", color: "#607D8B", category_group: "group-6"},
-
-		// Regular user 3 categories
-		{name: "Food", description: "Groceries and dining out", user_id: "regular3", color: "#4CAF50", category_group: "group-7"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "regular3", color: "#3F51B5", category_group: "group-7"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "regular3", color: "#9C27B0", category_group: "group-7"},
-		{name: "Travel", description: "Vacations, trips", user_id: "regular3", color: "#8BC34A", category_group: "group-7"},
-
-		// Admin user categories
-		{name: "Rent", description: "Monthly rent", user_id: "admin-user-1", color: "#2196F3", category_group: "group-8"},
-		{name: "Groceries", description: "Food and household items", user_id: "admin-user-1", color: "#4CAF50", category_group: "group-8"},
-		{name: "Utilities", description: "Electricity, water, internet", user_id: "admin-user-1", color: "#F44336", category_group: "group-8"},
-		{name: "Transportation", description: "Bus, train, Uber", user_id: "admin-user-1", color: "#FFC107", category_group: "group-8"},
-		{name: "Entertainment", description: "Movies, games", user_id: "admin-user-1", color: "#9C27B0", category_group: "group-8"},
-		{name: "Health", description: "Medical, dental", user_id: "admin-user-1", color: "#3F51B5", category_group: "group-8"},
-		{name: "Test", description: "Test Category", user_id: "admin-user-1", color: "#FF0000", category_group: "group-8"},
-
 		// Patrick Bennett categories
-		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#2196F3", category_group: "group-9"},
-		{name: "Food", description: "Groceries and dining out", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#4CAF50", category_group: "group-9"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#FFC107", category_group: "group-9"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#9C27B0", category_group: "group-10"},
-		{name: "Utilities", description: "Bills and services", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#F44336", category_group: "group-9"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#3F51B5", category_group: "group-9"},
-		{name: "Shopping", description: "Clothes, electronics", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#607D8B", category_group: "group-10"},
-		{name: "Travel", description: "Vacations, trips", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#8BC34A", category_group: "group-10"},
+		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#2196F3", category_group: "pb-group-1"},
+		{name: "Food", description: "Groceries and dining out", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#4CAF50", category_group: "pb-group-1"},
+		{name: "Transportation", description: "Car, public transit, gas", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#FFC107", category_group: "pb-group-1"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#9C27B0", category_group: "pb-group-2"},
+		{name: "Utilities", description: "Bills and services", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#F44336", category_group: "pb-group-1"},
+		{name: "Healthcare", description: "Medical expenses", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#3F51B5", category_group: "pb-group-1"},
+		{name: "Shopping", description: "Clothes, electronics", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#607D8B", category_group: "pb-group-2"},
+		{name: "Travel", description: "Vacations, trips", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", color: "#8BC34A", category_group: "pb-group-2"},
 
-		// Test user categories
-		{name: "Food", description: "Groceries and dining out", user_id: "test-user-id", color: "#4CAF50", category_group: "group-11"},
-		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "test-user-id", color: "#2196F3", category_group: "group-11"},
-		{name: "Transportation", description: "Car, public transit, gas", user_id: "test-user-id", color: "#FFC107", category_group: "group-11"},
-		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "test-user-id", color: "#9C27B0", category_group: "group-12"},
-		{name: "Utilities", description: "Bills and services", user_id: "test-user-id", color: "#F44336", category_group: "group-11"},
-		{name: "Healthcare", description: "Medical expenses", user_id: "test-user-id", color: "#3F51B5", category_group: "group-11"},
-		{name: "Shopping", description: "Clothes, electronics", user_id: "test-user-id", color: "#607D8B", category_group: "group-12"},
-		{name: "Travel", description: "Vacations, trips", user_id: "test-user-id", color: "#8BC34A", category_group: "group-12"},
+		// Sarah Wallis categories
+		{name: "Food", description: "Groceries and dining out", user_id: "sarah-wallis-id", color: "#4CAF50", category_group: "sw-group-1"},
+		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "sarah-wallis-id", color: "#2196F3", category_group: "sw-group-1"},
+		{name: "Transportation", description: "Car, public transit, gas", user_id: "sarah-wallis-id", color: "#FFC107", category_group: "sw-group-1"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "sarah-wallis-id", color: "#9C27B0", category_group: "sw-group-2"},
+		{name: "Utilities", description: "Bills and services", user_id: "sarah-wallis-id", color: "#F44336", category_group: "sw-group-1"},
+		{name: "Healthcare", description: "Medical expenses", user_id: "sarah-wallis-id", color: "#3F51B5", category_group: "sw-group-1"},
+		{name: "Personal Care", description: "Haircuts, gym", user_id: "sarah-wallis-id", color: "#009688", category_group: "sw-group-2"},
+		{name: "Education", description: "Tuition, books", user_id: "sarah-wallis-id", color: "#FF5722", category_group: "sw-group-2"},
+		{name: "Pets", description: "Pet food, vet", user_id: "sarah-wallis-id", color: "#795548", category_group: "sw-group-2"},
+		{name: "Gifts", description: "Presents, donations", user_id: "sarah-wallis-id", color: "#E91E63", category_group: "sw-group-2"},
+
+		// Kim Donaldson categories
+		{name: "Food", description: "Groceries and dining out", user_id: "kim-donaldson-id", color: "#4CAF50", category_group: "kd-group-1"},
+		{name: "Housing", description: "Rent, mortgage, repairs", user_id: "kim-donaldson-id", color: "#2196F3", category_group: "kd-group-1"},
+		{name: "Transportation", description: "Car, public transit, gas", user_id: "kim-donaldson-id", color: "#FFC107", category_group: "kd-group-1"},
+		{name: "Entertainment", description: "Movies, games, hobbies", user_id: "kim-donaldson-id", color: "#9C27B0", category_group: "kd-group-2"},
+		{name: "Utilities", description: "Bills and services", user_id: "kim-donaldson-id", color: "#F44336", category_group: "kd-group-1"},
+		{name: "Healthcare", description: "Medical expenses", user_id: "kim-donaldson-id", color: "#3F51B5", category_group: "kd-group-1"},
+		{name: "Shopping", description: "Clothes, electronics", user_id: "kim-donaldson-id", color: "#607D8B", category_group: "kd-group-2"},
+		{name: "Travel", description: "Vacations, trips", user_id: "kim-donaldson-id", color: "#8BC34A", category_group: "kd-group-2"},
 	}
 
 	categoryIds := make(map[string]string) // Map to store category IDs by name and user
@@ -266,12 +195,12 @@ func SeedTestData(db *sql.DB) error {
 			date:             "2025-04-15",
 			transaction_date: "2025-04-15",
 			txType:           "expense",
-			payTo:            "1", // Sarah
+			payTo:            "sarah-wallis-id",
 			paid:             true,
 			paid_date:        "2025-04-16",
 			optional:         false,
-			enteredBy:        "2", // Patrick
-			userId:           "2",
+			enteredBy:        "kim-donaldson-id",
+			userId:           "kim-donaldson-id",
 			categoryName:     "Food",
 			note:             "Weekly grocery shopping for essentials",
 		},
@@ -282,12 +211,12 @@ func SeedTestData(db *sql.DB) error {
 			date:             "2025-04-01",
 			transaction_date: "2025-04-01",
 			txType:           "expense",
-			payTo:            "2", // Patrick
+			payTo:            "kim-donaldson-id",
 			paid:             true,
 			paid_date:        "2025-04-02",
 			optional:         false,
-			enteredBy:        "1", // Sarah
-			userId:           "1",
+			enteredBy:        "sarah-wallis-id",
+			userId:           "sarah-wallis-id",
 			categoryName:     "Housing",
 			note:             "Monthly apartment rental payment",
 		},
@@ -298,12 +227,12 @@ func SeedTestData(db *sql.DB) error {
 			date:             "2025-04-10",
 			transaction_date: "2025-04-10",
 			txType:           "expense",
-			payTo:            "regular1", // Regular User 1
+			payTo:            "sarah-wallis-id",
 			paid:             false,
 			paid_date:        "",
 			optional:         false,
-			enteredBy:        "2", // Patrick
-			userId:           "2",
+			enteredBy:        "kim-donaldson-id",
+			userId:           "kim-donaldson-id",
 			categoryName:     "Utilities",
 			note:             "Fiber internet monthly subscription",
 		},
@@ -314,12 +243,12 @@ func SeedTestData(db *sql.DB) error {
 			date:             "2025-04-25",
 			transaction_date: "2025-04-25",
 			txType:           "income",
-			payTo:            "regular2", // Regular User 2
+			payTo:            "kim-donaldson-id",
 			paid:             true,
 			paid_date:        "2025-04-25",
 			optional:         true,
-			enteredBy:        "1", // Sarah
-			userId:           "1",
+			enteredBy:        "sarah-wallis-id",
+			userId:           "sarah-wallis-id",
 			categoryName:     "Entertainment",
 			note:             "Monthly paycheck from Acme Corp",
 		},
@@ -330,11 +259,11 @@ func SeedTestData(db *sql.DB) error {
 			date:             "2025-05-01",
 			transaction_date: "2025-05-01",
 			txType:           "expense",
-			payTo:            "Regular User 3", // Display name instead of ID for consistency with UI
+			payTo:            "kim-donaldson-id",
 			paid:             false,
 			paid_date:        "",
 			optional:         false,
-			enteredBy:        "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", // Patrick Bennett
+			enteredBy:        "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
 			userId:           "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
 			categoryName:     "Food",
 			note:             "Birthday dinner at Fancy Restaurant with friends",
@@ -342,40 +271,139 @@ func SeedTestData(db *sql.DB) error {
 		{
 			id:               "tx_6",
 			amount:           60.00,
-			description:      "Regular user transaction",
+			description:      "Movie night",
 			date:             "2025-05-05",
 			transaction_date: "2025-05-05",
 			txType:           "expense",
-			payTo:            "1", // Sarah
+			payTo:            "sarah-wallis-id",
 			paid:             true,
 			paid_date:        "2025-05-06",
 			optional:         false,
-			enteredBy:        "regular1", // Regular User 1
-			userId:           "regular1",
+			enteredBy:        "kim-donaldson-id",
+			userId:           "kim-donaldson-id",
 			categoryName:     "Entertainment",
 			note:             "Movie tickets and popcorn with friends",
 		},
 		{
 			id:               "tx_7",
 			amount:           120.75,
-			description:      "Another regular user transaction",
+			description:      "Transportation costs",
 			date:             "2025-05-10",
 			transaction_date: "2025-05-10",
 			txType:           "expense",
-			payTo:            "2", // Patrick
+			payTo:            "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
 			paid:             false,
 			paid_date:        "",
 			optional:         false,
-			enteredBy:        "regular2", // Regular User 2
-			userId:           "regular2",
+			enteredBy:        "sarah-wallis-id",
+			userId:           "sarah-wallis-id",
 			categoryName:     "Transportation",
 			note:             "Uber rides and bus fares for the week",
+		},
+		// Patrick Bennett paid for things, others owe him
+		{
+			id:               "tx_8",
+			amount:           250.00,
+			description:      "Hotel room split",
+			date:             "2025-05-15",
+			transaction_date: "2025-05-15",
+			txType:           "expense",
+			payTo:            "sarah-wallis-id",
+			paid:             false,
+			paid_date:        "",
+			optional:         false,
+			enteredBy:        "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			userId:           "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			categoryName:     "Travel",
+			note:             "Weekend trip hotel - Sarah's half",
+		},
+		{
+			id:               "tx_9",
+			amount:           89.50,
+			description:      "Concert tickets",
+			date:             "2025-05-20",
+			transaction_date: "2025-05-20",
+			txType:           "expense",
+			payTo:            "kim-donaldson-id",
+			paid:             false,
+			paid_date:        "",
+			optional:         false,
+			enteredBy:        "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			userId:           "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			categoryName:     "Entertainment",
+			note:             "Kim's ticket for the show",
+		},
+		// Others paid for things, Patrick Bennett owes them
+		{
+			id:               "tx_10",
+			amount:           135.00,
+			description:      "Groceries split",
+			date:             "2025-05-18",
+			transaction_date: "2025-05-18",
+			txType:           "expense",
+			payTo:            "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			paid:             false,
+			paid_date:        "",
+			optional:         false,
+			enteredBy:        "sarah-wallis-id",
+			userId:           "sarah-wallis-id",
+			categoryName:     "Food",
+			note:             "Costco run - Patrick Bennett's share",
+		},
+		{
+			id:               "tx_11",
+			amount:           45.75,
+			description:      "Lunch meeting",
+			date:             "2025-05-22",
+			transaction_date: "2025-05-22",
+			txType:           "expense",
+			payTo:            "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			paid:             true,
+			paid_date:        "2025-05-23",
+			optional:         false,
+			enteredBy:        "kim-donaldson-id",
+			userId:           "kim-donaldson-id",
+			categoryName:     "Food",
+			note:             "Business lunch - Patrick Bennett already paid back",
+		},
+		// Additional transactions
+		{
+			id:               "tx_12",
+			amount:           75.00,
+			description:      "Uber to airport",
+			date:             "2025-05-25",
+			transaction_date: "2025-05-25",
+			txType:           "expense",
+			payTo:            "sarah-wallis-id",
+			paid:             false,
+			paid_date:        "",
+			optional:         false,
+			enteredBy:        "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			userId:           "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			categoryName:     "Transportation",
+			note:             "Shared Uber - Sarah's portion",
+		},
+		{
+			id:               "tx_13",
+			amount:           200.00,
+			description:      "Birthday gift",
+			date:             "2025-05-26",
+			transaction_date: "2025-05-26",
+			txType:           "expense",
+			payTo:            "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2",
+			paid:             false,
+			paid_date:        "",
+			optional:         false,
+			enteredBy:        "kim-donaldson-id",
+			userId:           "kim-donaldson-id",
+			categoryName:     "Shopping",
+			note:             "Group gift - Patrick Bennett's contribution",
 		},
 	}
 
 	// Check if transaction_categories table exists
 	var hasTransactionCategoriesTable bool
-	err = db.QueryRow(`
+	err := db.QueryRow(`
 		SELECT EXISTS (
 			SELECT 1 FROM information_schema.tables
 			WHERE table_name = 'transaction_categories'
@@ -431,13 +459,14 @@ func SeedTestData(db *sql.DB) error {
 
 		// Insert the transactions
 		for _, tx := range sampleTransactions {
+			// In the new schema: paid_by is who paid (the enteredBy), owed_by is who owes (the old payTo)
 			_, err := db.Exec(`
 				INSERT INTO transactions 
-				(id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, optional, entered_by, user_id, note) 
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+				(id, amount, description, date, transaction_date, type, paid_by, owed_by, paid, paid_date, optional, entered_by, user_id, note) 
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			`,
 				tx.id, tx.amount, tx.description, tx.date, tx.transaction_date,
-				tx.txType, tx.payTo, tx.paid, tx.paid_date, tx.optional,
+				tx.txType, tx.enteredBy, tx.payTo, tx.paid, tx.paid_date, tx.optional,
 				tx.enteredBy, tx.userId, tx.note)
 
 			if err != nil {
@@ -526,80 +555,29 @@ func SeedTestData(db *sql.DB) error {
 		resourceType   string
 		permissionType string
 	}{
-		// Admin permissions
-		{grantedUserId: "2", ownerUserId: "1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "1", ownerUserId: "2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "admin", ownerUserId: "1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "admin", ownerUserId: "1", resourceType: "transactions", permissionType: "write"},
-		{grantedUserId: "admin", ownerUserId: "2", resourceType: "transactions", permissionType: "read"},
+		// Permissions between the 3 users
+		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "sarah-wallis-id", resourceType: "transactions", permissionType: "read"},
+		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "sarah-wallis-id", resourceType: "transactions", permissionType: "write"},
+		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "kim-donaldson-id", resourceType: "transactions", permissionType: "read"},
+		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "kim-donaldson-id", resourceType: "transactions", permissionType: "write"},
 
-		// Regular user permissions
-		{grantedUserId: "1", ownerUserId: "regular1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "2", ownerUserId: "regular1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular1", ownerUserId: "1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular1", ownerUserId: "2", resourceType: "transactions", permissionType: "read"},
+		{grantedUserId: "sarah-wallis-id", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "transactions", permissionType: "read"},
+		{grantedUserId: "sarah-wallis-id", ownerUserId: "kim-donaldson-id", resourceType: "transactions", permissionType: "read"},
 
-		{grantedUserId: "1", ownerUserId: "regular2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "2", ownerUserId: "regular2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular2", ownerUserId: "1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular2", ownerUserId: "2", resourceType: "transactions", permissionType: "read"},
+		{grantedUserId: "kim-donaldson-id", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "transactions", permissionType: "read"},
+		{grantedUserId: "kim-donaldson-id", ownerUserId: "sarah-wallis-id", resourceType: "transactions", permissionType: "read"},
 
-		{grantedUserId: "1", ownerUserId: "regular3", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "2", ownerUserId: "regular3", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular3", ownerUserId: "1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular3", ownerUserId: "2", resourceType: "transactions", permissionType: "read"},
+		// Category permissions
+		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "sarah-wallis-id", resourceType: "categories", permissionType: "read"},
+		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "sarah-wallis-id", resourceType: "categories", permissionType: "write"},
+		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "kim-donaldson-id", resourceType: "categories", permissionType: "read"},
+		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "kim-donaldson-id", resourceType: "categories", permissionType: "write"},
 
-		// Cross-permissions between regular users
-		{grantedUserId: "regular1", ownerUserId: "regular2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular2", ownerUserId: "regular1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular1", ownerUserId: "regular3", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular3", ownerUserId: "regular1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular2", ownerUserId: "regular3", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular3", ownerUserId: "regular2", resourceType: "transactions", permissionType: "read"},
+		{grantedUserId: "sarah-wallis-id", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "categories", permissionType: "read"},
+		{grantedUserId: "sarah-wallis-id", ownerUserId: "kim-donaldson-id", resourceType: "categories", permissionType: "read"},
 
-		// Add permissions for Patrick Bennett to access everyone's transactions
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "1", resourceType: "transactions", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "2", resourceType: "transactions", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "admin", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "admin", resourceType: "transactions", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular1", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular1", resourceType: "transactions", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular2", resourceType: "transactions", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular3", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular3", resourceType: "transactions", permissionType: "write"},
-
-		// Add reciprocal permissions for other users to see Patrick's transactions
-		{grantedUserId: "1", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "2", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "admin", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular1", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular2", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "transactions", permissionType: "read"},
-		{grantedUserId: "regular3", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "transactions", permissionType: "read"},
-
-		// Add permissions for categories
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "1", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "1", resourceType: "categories", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "2", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "2", resourceType: "categories", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "admin", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "admin", resourceType: "categories", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular1", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular1", resourceType: "categories", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular2", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular2", resourceType: "categories", permissionType: "write"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular3", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", ownerUserId: "regular3", resourceType: "categories", permissionType: "write"},
-
-		// Add reciprocal permissions for categories
-		{grantedUserId: "1", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "2", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "admin", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "regular1", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "regular2", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "categories", permissionType: "read"},
-		{grantedUserId: "regular3", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "categories", permissionType: "read"},
+		{grantedUserId: "kim-donaldson-id", ownerUserId: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", resourceType: "categories", permissionType: "read"},
+		{grantedUserId: "kim-donaldson-id", ownerUserId: "sarah-wallis-id", resourceType: "categories", permissionType: "read"},
 	}
 
 	for _, perm := range permissionsData {
@@ -612,102 +590,6 @@ func SeedTestData(db *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("failed to insert permission: %w", err)
 		}
-	}
-
-	// 5. Add a test transaction for the admin user
-	adminTransaction := struct {
-		id               string
-		amount           float64
-		description      string
-		date             string
-		transaction_date string
-		txType           string
-		payTo            string
-		paid             bool
-		paid_date        string
-		optional         bool
-		enteredBy        string
-		userId           string
-		categoryName     string
-		note             string
-	}{
-		id:               "admin_tx_1",
-		amount:           99.99,
-		description:      "Admin Test Transaction",
-		date:             "2025-04-15",
-		transaction_date: "2025-04-15",
-		txType:           "expense",
-		payTo:            "regular1", // Regular User 1 instead of Sarah
-		paid:             true,
-		paid_date:        "2025-04-16",
-		optional:         false,
-		enteredBy:        adminUser.id, // Admin user ID
-		userId:           adminUser.id,
-		categoryName:     "Test",
-		note:             "This is a test transaction for admin user testing",
-	}
-
-	// Create a test category for admin if it doesn't already exist in ynab_categories
-	adminCategoryID := fmt.Sprintf("cat-%s-Test", adminUser.id)
-	_, err = db.Exec(`
-		INSERT INTO ynab_categories (id, name, user_id, group_id, category_group_id, hidden, budget_amount) 
-		VALUES ($1, $2, $3, $4, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE SET
-		name = $2,
-		group_id = $4,
-		category_group_id = $4,
-		hidden = $5,
-		budget_amount = $6
-	`, adminCategoryID, "Test", adminUser.id, "group-8", false, 0.0)
-	if err != nil {
-		return fmt.Errorf("failed to insert test category for admin: %w", err)
-	}
-
-	// Insert admin test transaction
-	_, err = db.Exec(`
-		INSERT INTO transactions 
-		(id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, optional, entered_by, user_id, note) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		ON CONFLICT (id) DO NOTHING
-	`, adminTransaction.id, adminTransaction.amount, adminTransaction.description,
-		adminTransaction.date, adminTransaction.transaction_date, adminTransaction.txType,
-		adminTransaction.payTo, adminTransaction.paid, adminTransaction.paid_date,
-		adminTransaction.optional, adminTransaction.enteredBy, adminTransaction.userId, adminTransaction.note)
-
-	if err != nil {
-		return fmt.Errorf("failed to insert admin test transaction: %w", err)
-	}
-
-	// Associate the transaction with the category
-	log.Printf("Associating admin transaction %s with category %s (ID: %s)",
-		adminTransaction.id, adminTransaction.categoryName, adminCategoryID)
-
-	_, err = db.Exec(`
-		INSERT INTO transaction_categories 
-		(transaction_id, category_id, amount) 
-		VALUES ($1, $2, $3)
-		ON CONFLICT (transaction_id, category_id) DO NOTHING
-	`, adminTransaction.id, adminCategoryID, adminTransaction.amount)
-
-	if err != nil {
-		return fmt.Errorf("failed to associate admin transaction with category: %w", err)
-	}
-
-	// Verify the association was created
-	var count int
-	err = db.QueryRow(`
-		SELECT COUNT(*) FROM transaction_categories 
-		WHERE transaction_id = $1 AND category_id = $2
-	`, adminTransaction.id, adminCategoryID).Scan(&count)
-
-	if err != nil {
-		log.Printf("Error verifying admin transaction-category association: %v", err)
-	} else if count == 0 {
-		log.Printf("WARNING: Failed to create admin transaction-category association for %s and %s",
-			adminTransaction.id, adminCategoryID)
-	} else {
-		log.Printf("VERIFIED: Associated admin transaction %s with category %s (ID: %s)",
-			adminTransaction.id, adminTransaction.categoryName, adminCategoryID)
 	}
 
 	// Make sure Patrick Bennett is always a superadmin

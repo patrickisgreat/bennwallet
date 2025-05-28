@@ -118,6 +118,16 @@ func TestGetCategories(t *testing.T) {
 		}
 	}
 
+	// Create test user first
+	_, err = db.Exec(`
+		INSERT INTO users (id, username, name, role, status, is_admin)
+		VALUES ($1, 'testuser', 'Test User', 'user', 'active', false)
+		ON CONFLICT (id) DO NOTHING
+	`, "test-user-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// First add a test category
 	_, err = db.Exec(`
 		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)

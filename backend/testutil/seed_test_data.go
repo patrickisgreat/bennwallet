@@ -10,10 +10,9 @@ func SeedTestData(db *sql.DB) error {
 	_, err := db.Exec(`
 		INSERT INTO users (id, username, name, role, status, is_admin) 
 		VALUES 
-		('test-user-id', 'testuser', 'Test User', 'admin', 'approved', true),
-		('1', 'sarah', 'Sarah', 'admin', 'approved', true),
-		('2', 'patrick', 'Patrick', 'admin', 'approved', true),
-		('admin1', 'admin1', 'Admin One', 'admin', 'approved', true)
+		('UgwzWuP8iHNF8nhqDHMwFFcg8Sc2', 'Patrick Bennett', 'Patrick Bennett', 'superadmin', 'approved', true),
+		('sarah-wallis-id', 'Sarah Wallis', 'Sarah Wallis', 'admin', 'approved', true),
+		('kim-donaldson-id', 'Kim Donaldson', 'Kim Donaldson', 'admin', 'approved', true)
 		ON CONFLICT (id) DO NOTHING
 	`)
 	if err != nil {
@@ -60,9 +59,12 @@ func SeedTestData(db *sql.DB) error {
 		name    string
 		user_id string
 	}{
-		{id: "test-group-1", name: "Essentials", user_id: TestUserID},
-		{id: "test-group-2", name: "Lifestyle", user_id: TestUserID},
-		{id: "test-group-3", name: "Monthly Bills", user_id: TestUserID},
+		{id: "pb-group-1", name: "Essentials", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
+		{id: "pb-group-2", name: "Lifestyle", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2"},
+		{id: "sw-group-1", name: "Essentials", user_id: "sarah-wallis-id"},
+		{id: "sw-group-2", name: "Lifestyle", user_id: "sarah-wallis-id"},
+		{id: "kd-group-1", name: "Essentials", user_id: "kim-donaldson-id"},
+		{id: "kd-group-2", name: "Monthly Bills", user_id: "kim-donaldson-id"},
 	}
 
 	// Insert category groups
@@ -87,12 +89,19 @@ func SeedTestData(db *sql.DB) error {
 		user_id        string
 		category_group string
 	}{
-		{id: "test-cat-1", name: "Groceries", user_id: TestUserID, category_group: "test-group-1"},
-		{id: "test-cat-2", name: "Rent", user_id: TestUserID, category_group: "test-group-1"},
-		{id: "test-cat-3", name: "Entertainment", user_id: TestUserID, category_group: "test-group-2"},
-		{id: "test-cat-4", name: "Dining Out", user_id: TestUserID, category_group: "test-group-2"},
-		{id: "test-cat-5", name: "Internet", user_id: TestUserID, category_group: "test-group-3"},
-		{id: "test-cat-6", name: "Electricity", user_id: TestUserID, category_group: "test-group-3"},
+		{id: "pb-cat-1", name: "Groceries", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", category_group: "pb-group-1"},
+		{id: "pb-cat-2", name: "Housing", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", category_group: "pb-group-1"},
+		{id: "pb-cat-3", name: "Transportation", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", category_group: "pb-group-1"},
+		{id: "pb-cat-4", name: "Entertainment", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", category_group: "pb-group-2"},
+		{id: "pb-cat-5", name: "Travel", user_id: "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2", category_group: "pb-group-2"},
+		{id: "sw-cat-1", name: "Groceries", user_id: "sarah-wallis-id", category_group: "sw-group-1"},
+		{id: "sw-cat-2", name: "Rent", user_id: "sarah-wallis-id", category_group: "sw-group-1"},
+		{id: "sw-cat-3", name: "Entertainment", user_id: "sarah-wallis-id", category_group: "sw-group-2"},
+		{id: "sw-cat-4", name: "Dining Out", user_id: "sarah-wallis-id", category_group: "sw-group-2"},
+		{id: "kd-cat-1", name: "Internet", user_id: "kim-donaldson-id", category_group: "kd-group-2"},
+		{id: "kd-cat-2", name: "Electricity", user_id: "kim-donaldson-id", category_group: "kd-group-2"},
+		{id: "kd-cat-3", name: "Groceries", user_id: "kim-donaldson-id", category_group: "kd-group-1"},
+		{id: "kd-cat-4", name: "Transportation", user_id: "kim-donaldson-id", category_group: "kd-group-1"},
 	}
 
 	// Insert categories with both group_id and category_group_id set

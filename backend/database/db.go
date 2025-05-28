@@ -7,8 +7,6 @@ import (
 	"os"
 	"time"
 
-	"testing"
-
 	// Import the PostgreSQL driver
 	_ "github.com/lib/pq"
 )
@@ -28,19 +26,6 @@ type PostgresConfig struct {
 
 // GetPostgresConfigFromEnv reads PostgreSQL configuration from environment variables
 func GetPostgresConfigFromEnv() PostgresConfig {
-	// Check if we're in a test environment
-	if os.Getenv("GO_ENV") == "test" {
-		return PostgresConfig{
-			Host:     "localhost",
-			Port:     "5432",
-			User:     "postgres",
-			Password: "postgres",
-			DBName:   "bennwallet_test",
-			SSLMode:  "disable",
-		}
-	}
-
-	// Otherwise use environment variables with defaults
 	return PostgresConfig{
 		Host:     getEnvOrDefault("DB_HOST", "localhost"),
 		Port:     getEnvOrDefault("DB_PORT", "5432"),
@@ -155,12 +140,14 @@ func InitDB() error {
 }
 
 // CreatePostgresSchema creates the base PostgreSQL schema
+// TODO split up the SQL and get it out of the logic for readability
 func CreatePostgresSchema(db *sql.DB) error {
 	// Check if we're in a test environment
 	isTest := os.Getenv("GO_ENV") == "test"
 
 	// For tests, we want to drop and recreate tables
 	if isTest {
+		// First drop all existing tables and types
 		_, err := db.Exec(`
 			DO $$ 
 			DECLARE
@@ -174,12 +161,17 @@ func CreatePostgresSchema(db *sql.DB) error {
 					EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
 				END LOOP;
 				
+				-- Drop all types in the public schema
+				FOR r IN (SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace) LOOP
+					EXECUTE 'DROP TYPE IF EXISTS ' || quote_ident(r.typname) || ' CASCADE';
+				END LOOP;
+				
 				-- Re-enable foreign key checks
 				EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
 			END $$;
 		`)
 		if err != nil {
-			return fmt.Errorf("failed to drop tables for test: %w", err)
+			return fmt.Errorf("failed to drop tables and types for test: %w", err)
 		}
 	}
 
@@ -190,7 +182,7 @@ func CreatePostgresSchema(db *sql.DB) error {
 			username TEXT NOT NULL UNIQUE,
 			name TEXT NOT NULL,
 			role TEXT NOT NULL,
-			status TEXT NOT NULL DEFAULT 'approved',
+			status TEXT NOT NULL DEFAULT 'active',
 			is_admin BOOLEAN NOT NULL DEFAULT false
 		);
 
@@ -207,7 +199,31 @@ func CreatePostgresSchema(db *sql.DB) error {
 			optional BOOLEAN NOT NULL DEFAULT FALSE,
 			entered_by TEXT NOT NULL,
 			user_id TEXT NOT NULL REFERENCES users(id),
-			note TEXT
+			note TEXT,
+			entered TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			paid_by TEXT REFERENCES users(id),
+			owed_by TEXT REFERENCES users(id)
+		);
+
+		CREATE TABLE IF NOT EXISTS settlements (
+			id TEXT PRIMARY KEY,
+			creator_id TEXT NOT NULL REFERENCES users(id),
+			recipient_id TEXT NOT NULL REFERENCES users(id),
+			total_amount NUMERIC(15,2) NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			notes TEXT,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			completed_at TIMESTAMP WITH TIME ZONE
+		);
+
+		CREATE TABLE IF NOT EXISTS settlement_transactions (
+			id SERIAL PRIMARY KEY,
+			settlement_id TEXT NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+			amount NUMERIC(15,2) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(settlement_id, transaction_id)
 		);
 
 		CREATE TABLE IF NOT EXISTS permissions (
@@ -318,132 +334,6 @@ func SeedDefaultData(db *sql.DB) error {
 
 	log.Println("Database setup completed. No data seeded as per application requirements.")
 	return nil
-}
-
-// SetupTestDB creates a new test database for PostgreSQL testing
-func SetupTestDB(t testing.TB) (*sql.DB, func()) {
-	// Set test environment
-	os.Setenv("GO_ENV", "test")
-	defer os.Unsetenv("GO_ENV")
-
-	// Create a test PostgreSQL database
-	testConfig := PostgresConfig{
-		Host:     getEnvOrDefault("TEST_DB_HOST", "localhost"),
-		Port:     getEnvOrDefault("TEST_DB_PORT", "5432"),
-		User:     getEnvOrDefault("TEST_DB_USER", "postgres"),
-		Password: getEnvOrDefault("TEST_DB_PASSWORD", "postgres"),
-		DBName:   getEnvOrDefault("TEST_DB_NAME", "bennwallet_test"),
-		SSLMode:  "disable",
-	}
-
-	connectionString := testConfig.ConnectionString()
-	db, err := sql.Open("postgres", connectionString)
-	if err != nil {
-		t.Fatalf("Failed to create test database connection: %v", err)
-	}
-
-	// First drop all existing tables to avoid conflicts
-	_, err = db.Exec(`
-		DO $$ 
-		DECLARE
-			r RECORD;
-		BEGIN
-			-- Disable foreign key checks during table deletion
-			EXECUTE 'SET CONSTRAINTS ALL DEFERRED';
-			
-			-- Drop all tables in the public schema
-			FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-				EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
-			END LOOP;
-			
-			-- Re-enable foreign key checks
-			EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
-		END $$;
-	`)
-	if err != nil {
-		t.Fatalf("Failed to drop existing tables: %v", err)
-	}
-
-	// Create schema
-	if err := CreatePostgresSchema(db); err != nil {
-		t.Fatalf("Failed to create test schema: %v", err)
-	}
-
-	// Insert test user for foreign key constraints
-	_, err = db.Exec(`
-		INSERT INTO users (id, username, name, role, status, is_admin) 
-		VALUES 
-		('test-user-id', 'testuser', 'Test User', 'admin', 'approved', true),
-		('1', 'sarah', 'Sarah', 'admin', 'approved', true),
-		('2', 'patrick', 'Patrick', 'admin', 'approved', true),
-		('admin1', 'admin1', 'Admin One', 'admin', 'approved', true)
-		ON CONFLICT (id) DO UPDATE SET 
-		username = EXCLUDED.username,
-		name = EXCLUDED.name,
-		role = EXCLUDED.role,
-		status = EXCLUDED.status,
-		is_admin = EXCLUDED.is_admin
-	`)
-	if err != nil {
-		t.Fatalf("Failed to insert test users: %v", err)
-	}
-
-	// Insert test category groups
-	_, err = db.Exec(`
-		INSERT INTO ynab_category_groups (id, name, category_group_id, user_id, hidden)
-		VALUES 
-		('group-1', 'Food', 'group-1', 'test-user-id', false),
-		('group-2', 'Housing', 'group-2', 'test-user-id', false),
-		('group-3', 'Fun', 'group-3', 'test-user-id', false)
-		ON CONFLICT (id) DO UPDATE SET
-		name = EXCLUDED.name,
-		category_group_id = EXCLUDED.category_group_id,
-		user_id = EXCLUDED.user_id,
-		hidden = EXCLUDED.hidden
-	`)
-	if err != nil {
-		t.Fatalf("Failed to insert test category groups: %v", err)
-	}
-
-	// Insert test categories
-	_, err = db.Exec(`
-		INSERT INTO ynab_categories (id, name, user_id, category_group_id, hidden)
-		VALUES 
-		('cat-test-user-id-Food', 'Food', 'test-user-id', 'group-1', false),
-		('cat-test-user-id-Housing', 'Housing', 'test-user-id', 'group-2', false),
-		('cat-test-user-id-Fun', 'Fun', 'test-user-id', 'group-3', false)
-		ON CONFLICT (id) DO UPDATE SET
-		name = EXCLUDED.name,
-		user_id = EXCLUDED.user_id,
-		category_group_id = EXCLUDED.category_group_id,
-		hidden = EXCLUDED.hidden
-	`)
-	if err != nil {
-		t.Fatalf("Failed to insert test categories: %v", err)
-	}
-
-	// Return the db and a cleanup function
-	return db, func() {
-		// Drop all tables on cleanup
-		db.Exec(`
-			DO $$ 
-			DECLARE
-				r RECORD;
-			BEGIN
-				-- Disable foreign key checks during table deletion
-				EXECUTE 'SET CONSTRAINTS ALL DEFERRED';
-				
-				-- Drop all tables in the public schema
-				FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-					EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
-				END LOOP;
-				
-				-- Re-enable foreign key checks
-				EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
-			END $$;
-		`)
-		db.Close()
-	}
 }
 
 // GetDBType returns the type of database being used

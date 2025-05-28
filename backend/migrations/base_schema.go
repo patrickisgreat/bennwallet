@@ -19,13 +19,21 @@ func CreateBaseSchema(db *sql.DB) error {
 		}
 	}
 
+	// Create UUID extension if it doesn't exist
+	_, err := db.Exec(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`)
+	if err != nil {
+		return fmt.Errorf("failed to create uuid-ossp extension: %w", err)
+	}
+
 	// Create base tables
-	_, err := db.Exec(`
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			username TEXT NOT NULL UNIQUE,
 			name TEXT NOT NULL,
-			role TEXT NOT NULL
+			role TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			is_admin BOOLEAN NOT NULL DEFAULT false
 		);
 
 		CREATE TABLE IF NOT EXISTS transactions (
@@ -41,7 +49,60 @@ func CreateBaseSchema(db *sql.DB) error {
 			optional BOOLEAN NOT NULL DEFAULT FALSE,
 			entered_by TEXT NOT NULL,
 			user_id TEXT NOT NULL REFERENCES users(id),
-			note TEXT
+			note TEXT,
+			entered TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			paid_by TEXT REFERENCES users(id),
+			owed_by TEXT REFERENCES users(id)
+		);
+
+		CREATE TABLE IF NOT EXISTS settlements (
+			id TEXT PRIMARY KEY,
+			creator_id TEXT NOT NULL REFERENCES users(id),
+			recipient_id TEXT NOT NULL REFERENCES users(id),
+			total_amount NUMERIC(15,2) NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			notes TEXT,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			completed_at TIMESTAMP WITH TIME ZONE
+		);
+
+		CREATE TABLE IF NOT EXISTS settlement_items (
+			id SERIAL PRIMARY KEY,
+			settlement_id TEXT NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+			applied_amount NUMERIC(15,2) NOT NULL,
+			created_by TEXT NOT NULL REFERENCES users(id),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(settlement_id, transaction_id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_settlement_items_settlement_id ON settlement_items(settlement_id);
+		CREATE INDEX IF NOT EXISTS idx_settlement_items_transaction_id ON settlement_items(transaction_id);
+		CREATE INDEX IF NOT EXISTS idx_settlement_items_created_by ON settlement_items(created_by);
+
+		CREATE TABLE IF NOT EXISTS settlement_history (
+			id SERIAL PRIMARY KEY,
+			settlement_id TEXT NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+			action TEXT NOT NULL,
+			actor_id TEXT NOT NULL REFERENCES users(id),
+			transaction_id TEXT REFERENCES transactions(id),
+			amount NUMERIC(15,2),
+			details JSONB,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_settlement_history_settlement_id ON settlement_history(settlement_id);
+		CREATE INDEX IF NOT EXISTS idx_settlement_history_actor_id ON settlement_history(actor_id);
+		CREATE INDEX IF NOT EXISTS idx_settlement_history_transaction_id ON settlement_history(transaction_id);
+
+		CREATE TABLE IF NOT EXISTS settlement_transactions (
+			id SERIAL PRIMARY KEY,
+			settlement_id TEXT NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+			transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+			amount NUMERIC(15,2) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(settlement_id, transaction_id)
 		);
 
 		CREATE TABLE IF NOT EXISTS permissions (

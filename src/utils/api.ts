@@ -1,5 +1,11 @@
 import axios, { InternalAxiosRequestConfig, AxiosError } from 'axios';
 import { Transaction } from '../types/transaction';
+import {
+  Settlement,
+  SettlementSummary,
+  CreateSettlementRequest,
+  ApplyTransactionRequest,
+} from '../types/settlement';
 import { auth } from '../firebase/firebase';
 
 // Set the API base URL based on environment
@@ -42,12 +48,15 @@ interface BackendTransaction {
   date: string; // for entered date
   transactionDate: string; // for transaction date
   type: string;
-  payTo?: string;
+  paidBy?: string;
+  owedBy?: string;
+  payTo?: string; // Deprecated but kept for compatibility
   paid?: boolean;
   paidDate?: string;
   enteredBy: string;
   optional?: boolean;
   note?: string;
+  inSettlement?: boolean;
   categories?: Array<{
     id: string; // Backend expects string, not number
     name: string;
@@ -61,15 +70,17 @@ interface BackendTransaction {
 function toBackendTransaction(tx: Transaction): BackendTransaction {
   console.log('Debug - Converting frontend tx to backend:', JSON.stringify(tx, null, 2));
   console.log('Debug - Frontend note before conversion:', tx.note);
-  
+
   const backendTx: BackendTransaction = {
     id: tx.id,
     amount: tx.amount,
-    description: `${tx.payTo ? tx.payTo + ' - ' : ''}${tx.category}`, // Create description from payTo and category
+    description: `${tx.owedBy ? tx.owedBy + ' - ' : ''}${tx.category}`, // Create description from owedBy and category
     date: tx.entered, // entered maps to backend 'date'
     transactionDate: tx.transactionDate, // transactionDate maps to backend 'transaction_date'
     type: tx.category,
-    payTo: tx.payTo,
+    paidBy: tx.paidBy,
+    owedBy: tx.owedBy,
+    payTo: tx.payTo, // Keep for backward compatibility
     paid: tx.paid,
     paidDate: tx.paidDate,
     enteredBy: tx.enteredBy,
@@ -100,7 +111,9 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
     id: tx.id,
     entered: tx.date, // backend 'date' maps to entered
     transactionDate: tx.transactionDate || tx.date, // backend 'transaction_date' maps to transactionDate
-    payTo: tx.payTo || '',
+    paidBy: tx.paidBy || '',
+    owedBy: tx.owedBy || '',
+    payTo: tx.payTo || '', // Keep for backward compatibility
     amount: tx.amount,
     note: tx.note || '',
     category: tx.type,
@@ -108,6 +121,7 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
     paidDate: tx.paidDate,
     enteredBy: tx.enteredBy || '',
     optional: tx.optional || false,
+    inSettlement: tx.inSettlement || false,
     categories: tx.categories?.map(cat => ({
       id: cat.id,
       name: cat.name,
@@ -124,7 +138,7 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
 }
 
 // Define explicit types for transaction filters
- export interface TransactionFilterParams {
+export interface TransactionFilterParams {
   startDate?: string;
   endDate?: string;
   txStartDate?: string;
@@ -134,10 +148,12 @@ function toFrontendTransaction(tx: BackendTransaction): Transaction {
   paid?: boolean;
 }
 
-export const fetchTransactions = async (params: Record<string, string | boolean | undefined> = {}): Promise<Transaction[]> => {
+export const fetchTransactions = async (
+  params: Record<string, string | boolean | undefined> = {}
+): Promise<Transaction[]> => {
   try {
     console.log('Fetching transactions with params:', params);
-    
+
     // Build query string
     const queryParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -145,21 +161,21 @@ export const fetchTransactions = async (params: Record<string, string | boolean 
         queryParams.set(key, String(value));
       }
     });
-    
+
     const query = queryParams.toString();
     const queryString = query ? `?${query}` : '';
-    
+
     console.log('Sending query params:', params);
     const response = await api.get<BackendTransaction[] | null>(`/transactions${queryString}`);
-    
+
     console.log('Transactions response:', response.data);
-    
+
     // Check if response is null or not an array, return empty array
     if (!response.data || !Array.isArray(response.data)) {
       console.log('API did not return an array:', response.data);
       return []; // Return empty array instead of throwing
     }
-    
+
     // Debug note data in received transactions
     if (response.data && response.data.length > 0) {
       const sampleTx = response.data[0];
@@ -169,7 +185,7 @@ export const fetchTransactions = async (params: Record<string, string | boolean 
       // Log all raw properties to see what's available
       console.log('Debug - All properties in first transaction:', Object.keys(sampleTx));
     }
-    
+
     // Transform backend transactions to frontend format
     return response.data.map(tx => toFrontendTransaction(tx));
   } catch (error) {
@@ -199,7 +215,7 @@ export async function updateTransaction(
   try {
     console.log('Debug - Updating transaction:', id);
     console.log('Debug - Update payload:', JSON.stringify(updates, null, 2));
-    
+
     // First fetch the existing transaction to get all fields
     const response = await api.get(`/transactions/${id}`);
     if (!response.data) {
@@ -210,7 +226,10 @@ export async function updateTransaction(
 
     // Convert backend to frontend format
     const existingTx = toFrontendTransaction(response.data);
-    console.log('Debug - Existing transaction after conversion:', JSON.stringify(existingTx, null, 2));
+    console.log(
+      'Debug - Existing transaction after conversion:',
+      JSON.stringify(existingTx, null, 2)
+    );
 
     // Merge the updates with the existing transaction
     const mergedTx = { ...existingTx, ...updates };
@@ -218,8 +237,11 @@ export async function updateTransaction(
 
     // Update with the merged data
     const backendTx = toBackendTransaction(mergedTx);
-    console.log('Debug - Transaction converted back to backend format:', JSON.stringify(backendTx, null, 2));
-    
+    console.log(
+      'Debug - Transaction converted back to backend format:',
+      JSON.stringify(backendTx, null, 2)
+    );
+
     await api.put(`/transactions/${id}`, backendTx);
     return true;
   } catch (error) {
@@ -435,10 +457,10 @@ export const fetchUniqueTransactionFields = async (): Promise<{
   try {
     console.log('Fetching unique transaction fields');
     const response = await api.get('/transactions/unique-fields');
-    
+
     console.log('Raw unique fields response:', response.data);
     console.log('Entered By values received:', response.data.enteredBy);
-    
+
     return {
       payTo: response.data.payTo || [],
       enteredBy: response.data.enteredBy || [],
@@ -545,7 +567,7 @@ export async function fetchUsers(): Promise<User[]> {
     console.log('Fetching users');
     const response = await api.get('/users');
     console.log('Users response:', response.data);
-    
+
     if (Array.isArray(response.data)) {
       return response.data;
     } else {
@@ -579,7 +601,7 @@ export async function checkDatabaseHealth(): Promise<{
     return {
       status: 'error',
       tables: {},
-      errors: ['Failed to check database health']
+      errors: ['Failed to check database health'],
     };
   }
 }
@@ -598,7 +620,7 @@ export async function fetchCategories(): Promise<Category[]> {
     console.log('Fetching categories from database');
     const response = await api.get('/categories');
     console.log('Categories response:', response.data);
-    
+
     if (Array.isArray(response.data)) {
       return response.data;
     } else {
@@ -671,8 +693,8 @@ export async function fetchAllPermissions(): Promise<Permission[]> {
 
 // Grant a permission to a user
 export async function grantPermission(
-  granteeId: string, 
-  resourceType: string, 
+  granteeId: string,
+  resourceType: string,
   permissionType: string,
   expiresAt?: Date
 ): Promise<boolean> {
@@ -681,7 +703,7 @@ export async function grantPermission(
       granteeId,
       resourceType,
       permissionType,
-      expiresAt: expiresAt ? expiresAt.toISOString() : undefined
+      expiresAt: expiresAt ? expiresAt.toISOString() : undefined,
     });
     return true;
   } catch (error) {
@@ -703,12 +725,146 @@ export async function revokePermission(
         granteeId,
         ownerId,
         resourceType,
-        permissionType
-      }
+        permissionType,
+      },
     });
     return true;
   } catch (error) {
     console.error('Error revoking permission:', error);
     return false;
+  }
+}
+
+// Settlement API
+export const fetchAvailableSettlementTransactions = async (
+  settlementId: string
+): Promise<Transaction[]> => {
+  try {
+    const response = await api.get<Transaction[]>(
+      `/settlements/${settlementId}/available-transactions`
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching available settlement transactions:', error);
+    throw new Error('Failed to fetch available transactions');
+  }
+};
+
+export const updateSettlementStatus = async (
+  settlementId: string,
+  status: string,
+  notes?: string
+): Promise<Settlement> => {
+  try {
+    const response = await api.put<Settlement>(`/settlements/${settlementId}/status`, {
+      status,
+      notes,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error updating settlement status:', error);
+    throw new Error('Failed to update settlement status');
+  }
+};
+
+// Settlement API functions
+export async function createSettlement(data: CreateSettlementRequest): Promise<Settlement> {
+  try {
+    const response = await api.post<Settlement>('/settlements', data);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating settlement:', error);
+    throw error;
+  }
+}
+
+export async function fetchUserSettlements(status?: string): Promise<SettlementSummary[]> {
+  try {
+    const queryParams = status ? `?status=${status}` : '';
+    const response = await api.get<SettlementSummary[]>(`/settlements${queryParams}`);
+    return response.data || [];
+  } catch (error) {
+    console.error('Error fetching settlements:', error);
+    return [];
+  }
+}
+
+export async function fetchSettlement(id: string): Promise<Settlement | null> {
+  try {
+    const response = await api.get<Settlement>(`/settlements/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching settlement:', error);
+    return null;
+  }
+}
+
+export async function applyTransactionToSettlement(
+  settlementId: string,
+  data: ApplyTransactionRequest
+): Promise<Settlement> {
+  try {
+    const response = await api.post<Settlement>(`/settlements/${settlementId}/apply`, data);
+    return response.data;
+  } catch (error) {
+    console.error('Error applying transaction to settlement:', error);
+    throw error;
+  }
+}
+
+export async function removeTransactionFromSettlement(
+  settlementId: string,
+  transactionId: string
+): Promise<Settlement> {
+  try {
+    const response = await api.delete<Settlement>(
+      `/settlements/${settlementId}/transactions/${transactionId}`
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Error removing transaction from settlement:', error);
+    throw error;
+  }
+}
+
+export async function fetchTransactionSettlements(transactionId: string): Promise<Settlement[]> {
+  try {
+    const response = await api.get<Settlement[]>(`/transactions/${transactionId}/settlements`);
+    return response.data || [];
+  } catch (error) {
+    console.error('Error fetching transaction settlements:', error);
+    return [];
+  }
+}
+
+export async function applyTransactionAsPayment(
+  transactionId: string,
+  notes?: string
+): Promise<Settlement> {
+  try {
+    const response = await api.post<Settlement>('/settlements/apply-payment', {
+      transactionId,
+      notes: notes || '',
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error applying transaction as payment:', error);
+    throw error;
+  }
+}
+
+export async function fetchSettlements(status?: string): Promise<SettlementSummary[]> {
+  try {
+    const queryParams = new URLSearchParams();
+    if (status) {
+      queryParams.set('status', status);
+    }
+    const query = queryParams.toString();
+    const queryString = query ? `?${query}` : '';
+    const response = await api.get<SettlementSummary[]>(`/settlements${queryString}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching settlements:', error);
+    throw error;
   }
 }

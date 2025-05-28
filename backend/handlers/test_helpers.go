@@ -12,6 +12,7 @@ import (
 
 	"bennwallet/backend/database"
 	"bennwallet/backend/middleware"
+	"bennwallet/backend/testutil"
 
 	_ "github.com/lib/pq"
 )
@@ -27,11 +28,12 @@ func SetupTestAuth(req *http.Request) *http.Request {
 
 // getTestDBConfig returns PostgreSQL test database configuration
 func getTestDBConfig() database.PostgresConfig {
+	// Use testutil package for consistent test database configuration
 	return database.PostgresConfig{
-		Host:     getEnvOrDefault("TEST_DB_HOST", "localhost"),
-		Port:     getEnvOrDefault("TEST_DB_PORT", "5432"),
-		User:     getEnvOrDefault("TEST_DB_USER", "postgres"),
-		Password: getEnvOrDefault("TEST_DB_PASSWORD", "postgres"),
+		Host:     getEnvOrDefault("POSTGRES_HOST", "localhost"),
+		Port:     getEnvOrDefault("POSTGRES_PORT", "5432"),
+		User:     getEnvOrDefault("POSTGRES_USER", "postgres"),
+		Password: getEnvOrDefault("POSTGRES_PASSWORD", "postgres"),
 		DBName:   getEnvOrDefault("TEST_DB_NAME", "bennwallet_test"),
 		SSLMode:  "disable",
 	}
@@ -166,47 +168,8 @@ func CreateTestDB() *sql.DB {
 
 // SetupPostgresTestDB creates a PostgreSQL database connection for testing and returns it
 func SetupPostgresTestDB() (*sql.DB, error) {
-	// Create a test database connection
-	config := getTestDBConfig()
-	db, err := sql.Open("postgres", config.ConnectionString())
-	if err != nil {
-		return nil, err
-	}
-
-	// Drop all tables for a clean test
-	_, err = db.Exec(`
-		DROP TABLE IF EXISTS transaction_categories CASCADE;
-		DROP TABLE IF EXISTS transactions CASCADE;
-		DROP TABLE IF EXISTS ynab_categories CASCADE;
-		DROP TABLE IF EXISTS ynab_category_groups CASCADE;
-		DROP TABLE IF EXISTS permissions CASCADE;
-		DROP TABLE IF EXISTS users CASCADE;
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	// Use shared schema creation
-	if err := database.CreatePostgresSchema(db); err != nil {
-		return nil, err
-	}
-
-	// Insert test user
-	_, err = db.Exec(`
-		INSERT INTO users (id, username, name, status, is_admin, role)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE SET
-			username = EXCLUDED.username,
-			name = EXCLUDED.name,
-			status = EXCLUDED.status,
-			is_admin = EXCLUDED.is_admin,
-			role = EXCLUDED.role
-	`, TestUserID, "testuser", "Test User", "approved", true, "admin")
-	if err != nil {
-		return nil, err
-	}
-
-	return db, nil
+	// Use the testutil package's setup function for consistency
+	return testutil.SetupPostgresTestDB()
 }
 
 // SeedYNABTestData seeds test data for YNAB category groups and categories

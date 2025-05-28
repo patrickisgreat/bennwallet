@@ -134,7 +134,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			log.Println("Firebase auth not initialized, skipping token verification")
 
 			// In dev mode, default to the first admin user for testing
-			ctx := context.WithValue(r.Context(), UserIDKey, "admin-user-1")
+			ctx := context.WithValue(r.Context(), UserIDKey, "UgwzWuP8iHNF8nhqDHMwFFcg8Sc2")
 			ctx = context.WithValue(ctx, UserRoleKey, "admin")
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return

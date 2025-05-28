@@ -115,35 +115,48 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 				t.date, 
 				t.transaction_date, 
 				t.type, 
-				COALESCE(payto_user.name, t.pay_to) as pay_to, 
+				COALESCE(paidby_user.name, t.paid_by) as paid_by, 
+				COALESCE(owedby_user.name, t.owed_by) as owed_by,
 				t.paid, 
 				t.paid_date, 
 				COALESCE(entered_user.name, t.entered_by) as entered_by, 
 				t.optional, 
 				t.note,
-				t.user_id
+				t.user_id,
+				CASE 
+					WHEN si.settlement_id IS NOT NULL THEN TRUE 
+					ELSE FALSE 
+				END as in_settlement
 			FROM transactions t
-			LEFT JOIN users payto_user ON t.pay_to = payto_user.id
+			LEFT JOIN users paidby_user ON t.paid_by = paidby_user.id
+			LEFT JOIN users owedby_user ON t.owed_by = owedby_user.id
 			LEFT JOIN users entered_user ON t.entered_by = entered_user.id
+			LEFT JOIN settlement_items si ON t.id = si.transaction_id
 			WHERE 1=1
 		`
 	} else {
 		query = `
 			SELECT 
-				id, 
-				amount, 
-				description, 
-				date, 
-				transaction_date, 
-				type, 
-				pay_to, 
-				paid, 
-				paid_date, 
-				entered_by, 
-				optional, 
-				note,
-				user_id
-			FROM transactions 
+				t.id, 
+				t.amount, 
+				t.description, 
+				t.date, 
+				t.transaction_date, 
+				t.type, 
+				t.paid_by, 
+				t.owed_by,
+				t.paid, 
+				t.paid_date, 
+				t.entered_by, 
+				t.optional, 
+				t.note,
+				t.user_id,
+				CASE 
+					WHEN si.settlement_id IS NOT NULL THEN TRUE 
+					ELSE FALSE 
+				END as in_settlement
+			FROM transactions t
+			LEFT JOIN settlement_items si ON t.id = si.transaction_id
 			WHERE 1=1
 		`
 	}
@@ -201,11 +214,11 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	if payTo != "" {
 		search := "%" + payTo + "%"
 		if hasUsersTable {
-			query += fmt.Sprintf(" AND (payto_user.name LIKE $%d OR t.pay_to LIKE $%d)", paramCounter, paramCounter+1)
+			query += fmt.Sprintf(" AND (owedby_user.name LIKE $%d OR t.owed_by LIKE $%d)", paramCounter, paramCounter+1)
 			args = append(args, search, search)
 			paramCounter += 2
 		} else {
-			query += fmt.Sprintf(" AND pay_to LIKE $%d", paramCounter)
+			query += fmt.Sprintf(" AND owed_by LIKE $%d", paramCounter)
 			args = append(args, search)
 			paramCounter++
 		}
@@ -227,6 +240,38 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Added EnteredBy LIKE filter: '%s' (as %s)", enteredBy, search)
 	}
 
+	// Add owedBy filter
+	owedBy := r.URL.Query().Get("owedBy")
+	if owedBy != "" {
+		search := "%" + owedBy + "%"
+		if hasUsersTable {
+			query += fmt.Sprintf(" AND (owedby_user.name LIKE $%d OR t.owed_by LIKE $%d)", paramCounter, paramCounter+1)
+			args = append(args, search, search)
+			paramCounter += 2
+		} else {
+			query += fmt.Sprintf(" AND owed_by LIKE $%d", paramCounter)
+			args = append(args, search)
+			paramCounter++
+		}
+		log.Printf("Added owedBy LIKE filter: '%s' (as %s)", owedBy, search)
+	}
+
+	// Add paidBy filter
+	paidBy := r.URL.Query().Get("paidBy")
+	if paidBy != "" {
+		search := "%" + paidBy + "%"
+		if hasUsersTable {
+			query += fmt.Sprintf(" AND (paidby_user.name LIKE $%d OR t.paid_by LIKE $%d)", paramCounter, paramCounter+1)
+			args = append(args, search, search)
+			paramCounter += 2
+		} else {
+			query += fmt.Sprintf(" AND paid_by LIKE $%d", paramCounter)
+			args = append(args, search)
+			paramCounter++
+		}
+		log.Printf("Added paidBy LIKE filter: '%s' (as %s)", paidBy, search)
+	}
+
 	paid := r.URL.Query().Get("paid")
 	if paid != "" {
 		if hasUsersTable {
@@ -236,6 +281,56 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, paid == "true")
 		paramCounter++
+	}
+
+	// Date filters for entry date
+	startDate := r.URL.Query().Get("startDate")
+	if startDate != "" {
+		if hasUsersTable {
+			query += fmt.Sprintf(" AND t.date >= $%d", paramCounter)
+		} else {
+			query += fmt.Sprintf(" AND date >= $%d", paramCounter)
+		}
+		args = append(args, startDate)
+		paramCounter++
+		log.Printf("Added start date filter: %s", startDate)
+	}
+
+	endDate := r.URL.Query().Get("endDate")
+	if endDate != "" {
+		if hasUsersTable {
+			query += fmt.Sprintf(" AND t.date <= $%d", paramCounter)
+		} else {
+			query += fmt.Sprintf(" AND date <= $%d", paramCounter)
+		}
+		args = append(args, endDate)
+		paramCounter++
+		log.Printf("Added end date filter: %s", endDate)
+	}
+
+	// Date filters for transaction date
+	txStartDate := r.URL.Query().Get("txStartDate")
+	if txStartDate != "" {
+		if hasUsersTable {
+			query += fmt.Sprintf(" AND t.transaction_date >= $%d", paramCounter)
+		} else {
+			query += fmt.Sprintf(" AND transaction_date >= $%d", paramCounter)
+		}
+		args = append(args, txStartDate)
+		paramCounter++
+		log.Printf("Added transaction start date filter: %s", txStartDate)
+	}
+
+	txEndDate := r.URL.Query().Get("txEndDate")
+	if txEndDate != "" {
+		if hasUsersTable {
+			query += fmt.Sprintf(" AND t.transaction_date <= $%d", paramCounter)
+		} else {
+			query += fmt.Sprintf(" AND transaction_date <= $%d", paramCounter)
+		}
+		args = append(args, txEndDate)
+		paramCounter++
+		log.Printf("Added transaction end date filter: %s", txEndDate)
 	}
 
 	// Add ORDER BY date DESC
@@ -260,14 +355,16 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		var dateStr string
 		var userId sql.NullString
 		var note sql.NullString
+		var owedBy sql.NullString
+		var inSettlement bool
 
-		err = rows.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &note, &userId)
+		err = rows.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PaidBy, &owedBy, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &note, &userId, &inSettlement)
 		if err != nil {
 			log.Printf("Error scanning transaction row: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
 		// Debug logging to trace the date values
 		log.Printf("Transaction %s - Raw dateStr from DB (date column): %s", t.ID, dateStr)
 		if transactionDate.Valid {
@@ -279,12 +376,12 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		// Convert date strings to time.Time
 		// Try multiple date formats since production might have timestamps
 		var dateFormats = []string{
-			"2006-01-02",                    // Date only format
-			"2006-01-02 15:04:05",          // Timestamp without microseconds
-			"2006-01-02 15:04:05.999999",   // Timestamp with microseconds
-			time.RFC3339,                    // ISO 8601
+			"2006-01-02",                 // Date only format
+			"2006-01-02 15:04:05",        // Timestamp without microseconds
+			"2006-01-02 15:04:05.999999", // Timestamp with microseconds
+			time.RFC3339,                 // ISO 8601
 		}
-		
+
 		var parsed bool
 		for _, format := range dateFormats {
 			t.Date, err = time.Parse(format, dateStr)
@@ -293,7 +390,7 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		
+
 		if !parsed {
 			log.Printf("Error parsing date %s with any format: %v", dateStr, err)
 			// Use current time as fallback
@@ -315,20 +412,20 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-			
+
 			if !txParsed {
 				log.Printf("Error parsing transaction_date %s with any format: %v", transactionDate.String, err)
 				t.TransactionDate = t.Date // Fallback to entered date
 			} else {
 				// Log when dates are different to help debug production issue
 				if t.TransactionDate.Format("2006-01-02") != t.Date.Format("2006-01-02") {
-					log.Printf("Transaction %s has different dates - entered: %s, transaction: %s", 
+					log.Printf("Transaction %s has different dates - entered: %s, transaction: %s",
 						t.ID, t.Date.Format("2006-01-02"), t.TransactionDate.Format("2006-01-02"))
 				}
 			}
 		} else {
 			// Log when transaction_date is NULL/empty
-			log.Printf("Transaction %s has NULL/empty transaction_date, using entered date %s as fallback", 
+			log.Printf("Transaction %s has NULL/empty transaction_date, using entered date %s as fallback",
 				t.ID, t.Date.Format("2006-01-02"))
 			t.TransactionDate = t.Date // Fall back to entered date if transaction date not available
 		}
@@ -340,7 +437,14 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		if note.Valid {
 			t.Note = note.String
 		}
-		
+
+		if owedBy.Valid {
+			t.OwedBy = owedBy.String
+		}
+
+		// Set settlement status
+		t.InSettlement = inSettlement
+
 		// Debug final assigned values
 		log.Printf("Transaction %s - Final t.Date: %s", t.ID, t.Date.Format("2006-01-02 15:04:05"))
 		log.Printf("Transaction %s - Final t.TransactionDate: %s", t.ID, t.TransactionDate.Format("2006-01-02 15:04:05"))
@@ -474,6 +578,7 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 	var transactionDate sql.NullString
 	var userId sql.NullString
 	var dateStr string
+	var owedBy sql.NullString
 
 	var query string
 	if hasUsersTable {
@@ -481,36 +586,42 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 		if hasOptionalColumn && hasUserIdColumn {
 			query = `
 				SELECT t.id, t.amount, t.description, t.date, t.transaction_date, t.type, 
-				COALESCE(payto_user.name, t.pay_to) as pay_to, 
+				COALESCE(paidby_user.name, t.paid_by) as paid_by,
+				COALESCE(owedby_user.name, t.owed_by) as owed_by, 
 				t.paid, t.paid_date, 
 				COALESCE(entered_user.name, t.entered_by) as entered_by, 
 				t.optional, t.user_id, t.note 
 				FROM transactions t
-				LEFT JOIN users payto_user ON t.pay_to = payto_user.id
+				LEFT JOIN users paidby_user ON t.paid_by = paidby_user.id
+				LEFT JOIN users owedby_user ON t.owed_by = owedby_user.id
 				LEFT JOIN users entered_user ON t.entered_by = entered_user.id
 				WHERE t.id = $1
 			`
 		} else if hasOptionalColumn {
 			query = `
 				SELECT t.id, t.amount, t.description, t.date, t.transaction_date, t.type, 
-				COALESCE(payto_user.name, t.pay_to) as pay_to, 
+				COALESCE(paidby_user.name, t.paid_by) as paid_by,
+				COALESCE(owedby_user.name, t.owed_by) as owed_by, 
 				t.paid, t.paid_date, 
 				COALESCE(entered_user.name, t.entered_by) as entered_by, 
 				t.optional, t.note 
 				FROM transactions t
-				LEFT JOIN users payto_user ON t.pay_to = payto_user.id
+				LEFT JOIN users paidby_user ON t.paid_by = paidby_user.id
+				LEFT JOIN users owedby_user ON t.owed_by = owedby_user.id
 				LEFT JOIN users entered_user ON t.entered_by = entered_user.id
 				WHERE t.id = $1
 			`
 		} else {
 			query = `
 				SELECT t.id, t.amount, t.description, t.date, t.transaction_date, t.type, 
-				COALESCE(payto_user.name, t.pay_to) as pay_to, 
+				COALESCE(paidby_user.name, t.paid_by) as paid_by,
+				COALESCE(owedby_user.name, t.owed_by) as owed_by, 
 				t.paid, t.paid_date, 
 				COALESCE(entered_user.name, t.entered_by) as entered_by, 
 				t.optional, t.note 
 				FROM transactions t
-				LEFT JOIN users payto_user ON t.pay_to = payto_user.id
+				LEFT JOIN users paidby_user ON t.paid_by = paidby_user.id
+				LEFT JOIN users owedby_user ON t.owed_by = owedby_user.id
 				LEFT JOIN users entered_user ON t.entered_by = entered_user.id
 				WHERE t.id = $1
 			`
@@ -519,19 +630,19 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 		// Standard query without joins
 		if hasOptionalColumn && hasUserIdColumn {
 			query = `
-				SELECT id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by, optional, user_id, note 
+				SELECT id, amount, description, date, transaction_date, type, paid_by, owed_by, paid, paid_date, entered_by, optional, user_id, note 
 				FROM transactions 
 				WHERE id = $1
 			`
 		} else if hasOptionalColumn {
 			query = `
-				SELECT id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by, optional, note 
+				SELECT id, amount, description, date, transaction_date, type, paid_by, owed_by, paid, paid_date, entered_by, optional, note 
 				FROM transactions 
 				WHERE id = $1
 			`
 		} else {
 			query = `
-				SELECT id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by, note 
+				SELECT id, amount, description, date, transaction_date, type, paid_by, owed_by, paid, paid_date, entered_by, note 
 				FROM transactions 
 				WHERE id = $1
 			`
@@ -542,11 +653,11 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 	row = database.DB.QueryRow(query, id)
 
 	if hasOptionalColumn && hasUserIdColumn {
-		err = row.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &t.Note, &userId)
+		err = row.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PaidBy, &owedBy, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId, &t.Note)
 	} else if hasOptionalColumn {
-		err = row.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &t.Note)
+		err = row.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PaidBy, &owedBy, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &t.Note)
 	} else {
-		err = row.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PayTo, &t.Paid, &paidDate, &t.EnteredBy, &t.Note)
+		err = row.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PaidBy, &owedBy, &t.Paid, &paidDate, &t.EnteredBy, &t.Note)
 	}
 
 	if err != nil {
@@ -585,6 +696,10 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 
 	if hasUserIdColumn && userId.Valid {
 		t.UserID = userId.String
+	}
+
+	if owedBy.Valid {
+		t.OwedBy = owedBy.String
 	}
 
 	// Check if the current user has permission to access this transaction
@@ -799,13 +914,59 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Check if the new columns exist
+	var hasPaidByColumn bool
+	err = database.DB.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'paid_by'
+		)
+	`).Scan(&hasPaidByColumn)
+	if err != nil {
+		log.Printf("Error checking for paid_by column: %v", err)
+		hasPaidByColumn = false
+	}
+
+	var hasOwedByColumn bool
+	err = database.DB.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'transactions' AND column_name = 'owed_by'
+		)
+	`).Scan(&hasOwedByColumn)
+	if err != nil {
+		log.Printf("Error checking for owed_by column: %v", err)
+		hasOwedByColumn = false
+	}
+
+	// Default PaidBy to EnteredBy if not provided
+	if t.PaidBy == "" {
+		t.PaidBy = t.EnteredBy
+	}
+
 	// Build query based on available columns
 	insertQuery := `
-		INSERT INTO transactions (id, amount, description, date, transaction_date, type, pay_to, paid, paid_date, entered_by, note`
+		INSERT INTO transactions (id, amount, description, date, transaction_date, type, paid, paid_date, entered_by, note`
 
-	paramCount := 11
-	insertValues := fmt.Sprintf("$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11")
-	insertArgs := []interface{}{t.ID, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.PayTo, t.Paid, t.PaidDate, t.EnteredBy, t.Note}
+	paramCount := 10
+	insertValues := fmt.Sprintf("$1, $2, $3, $4, $5, $6, $7, $8, $9, $10")
+	insertArgs := []interface{}{t.ID, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.Paid, t.PaidDate, t.EnteredBy, t.Note}
+
+	// Add paid_by column
+	if hasPaidByColumn {
+		insertQuery += `, paid_by`
+		paramCount++
+		insertValues += fmt.Sprintf(", $%d", paramCount)
+		insertArgs = append(insertArgs, t.PaidBy)
+	}
+
+	// Add owed_by column if it exists
+	if hasOwedByColumn && t.OwedBy != "" {
+		insertQuery += `, owed_by`
+		paramCount++
+		insertValues += fmt.Sprintf(", $%d", paramCount)
+		insertArgs = append(insertArgs, t.OwedBy)
+	}
 
 	if hasOptionalColumn {
 		insertQuery += `, optional`
@@ -1025,12 +1186,13 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 
 	// Get the original transaction's owner to check permissions
 	var originalOwnerID sql.NullString
-	var originalPayTo string
+	var originalPaidBy string
+	var originalOwedBy sql.NullString
 	var originalEnteredBy string
 	var originalNote string
 	err = database.DB.QueryRow(
-		"SELECT user_id, pay_to, entered_by, note FROM transactions WHERE id = $1", id,
-	).Scan(&originalOwnerID, &originalPayTo, &originalEnteredBy, &originalNote)
+		"SELECT user_id, paid_by, owed_by, entered_by, note FROM transactions WHERE id = $1", id,
+	).Scan(&originalOwnerID, &originalPaidBy, &originalOwedBy, &originalEnteredBy, &originalNote)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -1042,13 +1204,18 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Original transaction values - PayTo: %s, EnteredBy: %s, Note: %s",
-		originalPayTo, originalEnteredBy, originalNote)
+	log.Printf("Original transaction values - PaidBy: %s, OwedBy: %v, EnteredBy: %s, Note: %s",
+		originalPaidBy, originalOwedBy, originalEnteredBy, originalNote)
 
 	// Make sure we're not losing the original values if not specified in the update
-	if t.PayTo == "" {
-		t.PayTo = originalPayTo
-		log.Printf("Using original PayTo value: %s", t.PayTo)
+	if t.PaidBy == "" {
+		t.PaidBy = originalPaidBy
+		log.Printf("Using original PaidBy value: %s", t.PaidBy)
+	}
+
+	if t.OwedBy == "" && originalOwedBy.Valid {
+		t.OwedBy = originalOwedBy.String
+		log.Printf("Using original OwedBy value: %s", t.OwedBy)
 	}
 
 	if t.EnteredBy == "" {
@@ -1122,10 +1289,17 @@ func UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		paramCount++
 	}
 
-	// Add pay_to if provided
-	if t.PayTo != "" {
-		updateParts = append(updateParts, fmt.Sprintf("pay_to = $%d", paramCount+1))
-		updateArgs = append(updateArgs, t.PayTo)
+	// Add paid_by if provided
+	if t.PaidBy != "" {
+		updateParts = append(updateParts, fmt.Sprintf("paid_by = $%d", paramCount+1))
+		updateArgs = append(updateArgs, t.PaidBy)
+		paramCount++
+	}
+
+	// Add owed_by if provided
+	if t.OwedBy != "" {
+		updateParts = append(updateParts, fmt.Sprintf("owed_by = $%d", paramCount+1))
+		updateArgs = append(updateArgs, t.OwedBy)
 		paramCount++
 	}
 
