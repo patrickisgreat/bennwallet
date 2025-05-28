@@ -105,6 +105,22 @@ function TransactionsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, user?.name]);
 
+  // Apply viewMode filtering to existing transactions when viewMode changes
+  useEffect(() => {
+    if (transactions.length > 0 && user?.name) {
+      let filtered = [...transactions];
+
+      // Apply viewMode filtering
+      if (viewMode === 'othersOwe') {
+        filtered = transactions.filter(tx => tx.owedBy !== user.name);
+      }
+
+      // Apply sorting
+      const sorted = sortTransactions(filtered, sortColumn, sortDirection);
+      setFilteredTransactions(sorted);
+    }
+  }, [viewMode, user?.name, transactions, sortColumn, sortDirection]);
+
   // Load unique fields for dropdowns and update default filter if needed
   const loadUniqueFields = async () => {
     try {
@@ -148,7 +164,7 @@ function TransactionsPage() {
     loadTransactions();
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, viewMode]);
+  }, [filter, viewMode, user?.name]);
 
   const loadTransactions = async () => {
     if (!currentUser) return;
