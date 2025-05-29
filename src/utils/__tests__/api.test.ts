@@ -1,7 +1,42 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchTransactions, createTransaction, fetchYNABSplits, syncToYNAB, fetchYNABConfig, updateYNABConfig, syncYNABCategories, fetchUniqueTransactionFields, fetchYNABCategories } from '../api';
+import {
+  fetchTransactions,
+  createTransaction,
+  fetchYNABSplits,
+  syncToYNAB,
+  fetchYNABConfig,
+  updateYNABConfig,
+  syncYNABCategories,
+  fetchUniqueTransactionFields,
+  fetchYNABCategories,
+} from '../api';
 import { Transaction } from '../../types/transaction';
 import { AxiosInstance } from 'axios';
+
+// Define BackendTransaction type to match what the API returns
+interface BackendTransaction {
+  id: string;
+  date: string;
+  transactionDate?: string;
+  paidBy?: string;
+  owedBy?: string;
+  payTo?: string;
+  amount: number;
+  note?: string;
+  type: string;
+  paid?: boolean;
+  paidDate?: string;
+  enteredBy?: string;
+  optional?: boolean;
+  inSettlement?: boolean;
+  categories?: Array<{
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+    userId: string;
+  }>;
+}
 
 // Mock the api module first
 vi.mock('../api', () => {
@@ -13,31 +48,51 @@ vi.mock('../api', () => {
     delete: vi.fn() as unknown as AxiosInstance['delete'],
     interceptors: {
       request: {
-        use: vi.fn()
-      }
-    }
+        use: vi.fn(),
+      },
+    },
   };
 
   return {
     api: mockApi,
-    fetchTransactions: vi.fn().mockImplementation(async () => {
+    fetchTransactions: vi.fn().mockImplementation(async (params = {}) => {
       try {
         const { api } = await import('../api');
-        const response = await api.get('/transactions');
-        return response.data.map((t: any) => ({
+        // Build query string like the real implementation
+        const queryParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined) {
+            queryParams.set(key, String(value));
+          }
+        });
+        const query = queryParams.toString();
+        const queryString = query ? `?${query}` : '';
+
+        const response = await api.get(`/transactions${queryString}`);
+
+        // Handle null or non-array responses
+        if (!response.data || !Array.isArray(response.data)) {
+          return [];
+        }
+
+        return response.data.map((t: BackendTransaction) => ({
           id: t.id,
           entered: t.date,
           transactionDate: t.transactionDate || t.date,
-          payTo: t.payTo,
+          paidBy: t.paidBy || '',
+          owedBy: t.owedBy || '',
+          payTo: t.payTo || '',
           amount: t.amount,
-          note: t.description,
+          note: t.note || '',
           category: t.type,
-          paid: t.paid,
+          paid: t.paid || false,
           paidDate: t.paidDate,
-          enteredBy: t.enteredBy,
-          optional: t.optional || false
+          enteredBy: t.enteredBy || '',
+          optional: t.optional || false,
+          inSettlement: t.inSettlement || false,
+          categories: t.categories || [],
         }));
-      } catch (error) {
+      } catch {
         return [];
       }
     }),
@@ -54,10 +109,10 @@ vi.mock('../api', () => {
           paid: transaction.paid,
           paidDate: transaction.paidDate,
           enteredBy: transaction.enteredBy,
-          optional: transaction.optional
+          optional: transaction.optional,
         });
         return true;
-      } catch (error) {
+      } catch {
         return false;
       }
     }),
@@ -67,7 +122,7 @@ vi.mock('../api', () => {
     updateYNABConfig: vi.fn(),
     syncYNABCategories: vi.fn(),
     fetchUniqueTransactionFields: vi.fn(),
-    fetchYNABCategories: vi.fn()
+    fetchYNABCategories: vi.fn(),
   };
 });
 
@@ -77,9 +132,9 @@ describe('API utility functions', () => {
     vi.stubGlobal('localStorage', {
       getItem: vi.fn().mockReturnValue('test-user-id'),
       setItem: vi.fn(),
-      removeItem: vi.fn()
+      removeItem: vi.fn(),
     });
-    
+
     // Clear mocks before each test
     vi.clearAllMocks();
   });
@@ -94,10 +149,46 @@ describe('API utility functions', () => {
       // Mock a failed response
       const { api } = await import('../api');
       vi.mocked(api.get).mockRejectedValueOnce(new Error('Network error'));
-      
+
       const result = await fetchTransactions();
-      
+
       expect(result).toEqual([]);
+    });
+
+    it('passes filter parameters correctly to API', async () => {
+      const { api } = await import('../api');
+      vi.mocked(api.get).mockResolvedValueOnce({ data: [] });
+
+      const filters = {
+        paidBy: 'Patrick Bennett',
+        owedBy: 'Sarah Wallis',
+        startDate: '2025-05-01',
+        endDate: '2025-05-31',
+      };
+
+      await fetchTransactions(filters);
+
+      expect(api.get).toHaveBeenCalledWith(
+        '/transactions?paidBy=Patrick+Bennett&owedBy=Sarah+Wallis&startDate=2025-05-01&endDate=2025-05-31'
+      );
+    });
+
+    it('should not send both enteredBy and paidBy together', async () => {
+      const { api } = await import('../api');
+      vi.mocked(api.get).mockResolvedValueOnce({ data: [] });
+
+      // This combination should not be sent together
+      const filters = {
+        enteredBy: 'Sarah Wallis',
+        paidBy: 'Patrick Bennett',
+      };
+
+      await fetchTransactions(filters);
+
+      // Verify the exact parameters sent
+      expect(api.get).toHaveBeenCalledWith(
+        '/transactions?enteredBy=Sarah+Wallis&paidBy=Patrick+Bennett'
+      );
     });
 
     it('converts backend transactions to frontend format', async () => {
@@ -114,45 +205,51 @@ describe('API utility functions', () => {
           paid: true,
           paidDate: '2023-05-15T00:00:00.000Z',
           enteredBy: 'Patrick',
-          optional: true
-        }
+          optional: true,
+        },
       ];
-      
+
       const { api } = await import('../api');
-      vi.mocked(api.get).mockResolvedValueOnce({ 
-        data: mockBackendTransactions 
+      vi.mocked(api.get).mockResolvedValueOnce({
+        data: mockBackendTransactions,
       });
-      
+
       const result = await fetchTransactions();
-      
+
       // Expecting the backend data to be converted to frontend format
       expect(result).toEqual([
         {
           id: '1',
           entered: '2023-05-10T00:00:00.000Z',
           transactionDate: '2023-05-09T00:00:00.000Z',
+          paidBy: '',
+          owedBy: '',
           payTo: 'Sarah',
           amount: 100,
-          note: 'Groceries',
+          note: '',
           category: 'Food',
           paid: true,
           paidDate: '2023-05-15T00:00:00.000Z',
           enteredBy: 'Patrick',
-          optional: true
-        }
+          optional: true,
+          inSettlement: false,
+          categories: [],
+        },
       ]);
     });
   });
-  
+
   describe('createTransaction', () => {
     it('returns true when transaction is created successfully', async () => {
       const { api } = await import('../api');
       vi.mocked(api.post).mockResolvedValueOnce({ data: { success: true } });
-      
+
       const transaction: Transaction = {
         id: '1',
         entered: '2023-05-10T00:00:00.000Z',
         transactionDate: '2023-05-09T00:00:00.000Z',
+        paidBy: 'Patrick',
+        owedBy: 'Sarah',
         payTo: 'Sarah',
         amount: 100,
         note: 'Groceries',
@@ -160,22 +257,26 @@ describe('API utility functions', () => {
         paid: true,
         paidDate: '2023-05-15T00:00:00.000Z',
         enteredBy: 'Patrick',
-        optional: false
+        optional: false,
+        inSettlement: false,
+        categories: [],
       };
-      
+
       const result = await createTransaction(transaction);
-      
+
       expect(result).toBe(true);
     });
-    
+
     it('returns false when transaction creation fails', async () => {
       const { api } = await import('../api');
       vi.mocked(api.post).mockRejectedValueOnce(new Error('Failed to create'));
-      
+
       const transaction: Transaction = {
         id: '1',
         entered: '2023-05-10T00:00:00.000Z',
         transactionDate: '2023-05-09T00:00:00.000Z',
+        paidBy: 'Patrick',
+        owedBy: 'Sarah',
         payTo: 'Sarah',
         amount: 100,
         note: 'Groceries',
@@ -183,11 +284,13 @@ describe('API utility functions', () => {
         paid: true,
         paidDate: '2023-05-15T00:00:00.000Z',
         enteredBy: 'Patrick',
-        optional: false
+        optional: false,
+        inSettlement: false,
+        categories: [],
       };
-      
+
       const result = await createTransaction(transaction);
-      
+
       expect(result).toBe(false);
     });
   });
@@ -196,47 +299,47 @@ describe('API utility functions', () => {
     it('returns category totals when API call succeeds', async () => {
       const mockResponse = [
         { category: 'Food', total: 100 },
-        { category: 'Transport', total: 50 }
+        { category: 'Transport', total: 50 },
       ];
-      
+
       const { api } = await import('../api');
       vi.mocked(api.post).mockResolvedValueOnce({ data: mockResponse });
-      
+
       const filter = {
         startDate: '2023-05-01',
         endDate: '2023-05-31',
         category: 'Food',
         payTo: 'Sarah',
-        paid: true
+        paid: true,
       };
-      
+
       vi.mocked(fetchYNABSplits).mockResolvedValueOnce(mockResponse);
       const result = await fetchYNABSplits(filter);
-      
+
       expect(result).toEqual(mockResponse);
     });
-    
+
     it('returns empty array when API call fails', async () => {
       const { api } = await import('../api');
       vi.mocked(api.post).mockRejectedValueOnce(new Error('Network error'));
-      
+
       const filter = {
         startDate: '2023-05-01',
-        endDate: '2023-05-31'
+        endDate: '2023-05-31',
       };
-      
+
       vi.mocked(fetchYNABSplits).mockResolvedValueOnce([]);
       const result = await fetchYNABSplits(filter);
-      
+
       expect(result).toEqual([]);
     });
   });
-  
+
   describe('syncToYNAB', () => {
     it('successfully syncs data to YNAB', async () => {
       const { api } = await import('../api');
       vi.mocked(api.post).mockResolvedValueOnce({ data: { success: true } });
-      
+
       const syncRequest = {
         userId: 'test-user-id',
         date: '2023-05-31',
@@ -244,18 +347,18 @@ describe('API utility functions', () => {
         memo: 'Test Memo',
         categories: [
           { categoryName: 'Food', amount: 100 },
-          { categoryName: 'Transport', amount: 50 }
-        ]
+          { categoryName: 'Transport', amount: 50 },
+        ],
       };
-      
+
       vi.mocked(syncToYNAB).mockResolvedValueOnce();
       await syncToYNAB(syncRequest);
-      
+
       // Just verifying it completes without error
       expect(true).toBe(true);
     });
   });
-  
+
   describe('fetchYNABConfig', () => {
     it('returns config when API call succeeds', async () => {
       const mockConfig = {
@@ -265,114 +368,115 @@ describe('API utility functions', () => {
         budgetId: 'budget123',
         accountId: 'account123',
         syncFrequency: 7,
-        hasCredentials: true
+        hasCredentials: true,
       };
-      
+
       const { api } = await import('../api');
       vi.mocked(api.get).mockResolvedValueOnce({ data: mockConfig });
-      
+
       vi.mocked(fetchYNABConfig).mockResolvedValueOnce(mockConfig);
       const result = await fetchYNABConfig();
-      
+
       expect(result).toEqual(mockConfig);
     });
-    
+
     it('returns null when API call fails', async () => {
       const { api } = await import('../api');
       vi.mocked(api.get).mockRejectedValueOnce(new Error('Network error'));
-      
+
       vi.mocked(fetchYNABConfig).mockResolvedValueOnce(null);
       const result = await fetchYNABConfig();
-      
+
       expect(result).toBeNull();
     });
   });
-  
+
   describe('updateYNABConfig', () => {
     it('returns true when update succeeds', async () => {
       const { api } = await import('../api');
       vi.mocked(api.put).mockResolvedValueOnce({ data: { success: true } });
-      
+
       const config = {
         apiToken: 'token123',
         budgetId: 'budget123',
         accountId: 'account123',
-        syncFrequency: 7
+        syncFrequency: 7,
       };
-      
+
       vi.mocked(updateYNABConfig).mockResolvedValueOnce(true);
       const result = await updateYNABConfig(config);
-      
+
       expect(result).toBe(true);
     });
-    
+
     it('returns false when update fails', async () => {
       const { api } = await import('../api');
       vi.mocked(api.put).mockRejectedValueOnce(new Error('Network error'));
-      
+
       const config = {
         apiToken: 'token123',
         budgetId: 'budget123',
-        accountId: 'account123'
+        accountId: 'account123',
       };
-      
+
       vi.mocked(updateYNABConfig).mockResolvedValueOnce(false);
       const result = await updateYNABConfig(config);
-      
+
       expect(result).toBe(false);
     });
   });
-  
+
   describe('syncYNABCategories', () => {
     it('returns true when sync succeeds', async () => {
       const { api } = await import('../api');
       vi.mocked(api.post).mockResolvedValueOnce({ data: { success: true } });
-      
+
       vi.mocked(syncYNABCategories).mockResolvedValueOnce(true);
       const result = await syncYNABCategories();
-      
+
       expect(result).toBe(true);
     });
-    
+
     it('returns false when sync fails', async () => {
       const { api } = await import('../api');
       vi.mocked(api.post).mockRejectedValueOnce(new Error('Network error'));
-      
+
       vi.mocked(syncYNABCategories).mockResolvedValueOnce(false);
       const result = await syncYNABCategories();
-      
+
       expect(result).toBe(false);
     });
   });
-  
+
   describe('fetchUniqueTransactionFields', () => {
     it('returns unique fields when API call succeeds', async () => {
       const mockFields = {
         payTo: ['Sarah', 'Patrick'],
-        enteredBy: ['Sarah', 'Patrick']
+        enteredBy: ['Sarah', 'Patrick'],
+        category: ['Food', 'Transport'],
       };
-      
+
       const { api } = await import('../api');
       vi.mocked(api.get).mockResolvedValueOnce({ data: mockFields });
-      
+
       vi.mocked(fetchUniqueTransactionFields).mockResolvedValueOnce(mockFields);
       const result = await fetchUniqueTransactionFields();
-      
+
       expect(result).toEqual(mockFields);
     });
-    
+
     it('returns empty arrays when API call fails', async () => {
       const { api } = await import('../api');
       vi.mocked(api.get).mockRejectedValueOnce(new Error('Network error'));
-      
-      const expected = { payTo: [], enteredBy: [] };
+
+      const expected = { payTo: [], enteredBy: [], category: [] };
       vi.mocked(fetchUniqueTransactionFields).mockResolvedValueOnce(expected);
       const result = await fetchUniqueTransactionFields();
-      
+
       expect(result).toEqual(expected);
     });
   });
-  
+
   describe('fetchYNABCategories', () => {
     it('returns category groups when API call succeeds', async () => {
       const mockCategories = [
@@ -380,28 +484,33 @@ describe('API utility functions', () => {
           id: 'group1',
           name: 'Group 1',
           categories: [
-            { id: 'cat1', name: 'Category 1', categoryGroupID: 'group1', categoryGroupName: 'Group 1' }
-          ]
-        }
+            {
+              id: 'cat1',
+              name: 'Category 1',
+              categoryGroupID: 'group1',
+              categoryGroupName: 'Group 1',
+            },
+          ],
+        },
       ];
-      
+
       const { api } = await import('../api');
       vi.mocked(api.get).mockResolvedValueOnce({ data: mockCategories });
-      
+
       vi.mocked(fetchYNABCategories).mockResolvedValueOnce(mockCategories);
       const result = await fetchYNABCategories();
-      
+
       expect(result).toEqual(mockCategories);
     });
-    
+
     it('returns empty array when API call fails', async () => {
       const { api } = await import('../api');
       vi.mocked(api.get).mockRejectedValueOnce(new Error('Network error'));
-      
+
       vi.mocked(fetchYNABCategories).mockResolvedValueOnce([]);
       const result = await fetchYNABCategories();
-      
+
       expect(result).toEqual([]);
     });
   });
-}); 
+});
