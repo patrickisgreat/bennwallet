@@ -179,7 +179,6 @@ function TransactionsPage() {
         endDate: filter.endDate || undefined,
         txStartDate: filter.txStartDate || undefined,
         txEndDate: filter.txEndDate || undefined,
-        enteredBy: filter.enteredBy || undefined,
         paid:
           filter.paidStatus === 'paid' ? true : filter.paidStatus === 'unpaid' ? false : undefined,
       };
@@ -187,12 +186,18 @@ function TransactionsPage() {
       // Apply view mode filtering
       if (viewMode === 'iOwe' && user?.name) {
         filterParams.owedBy = user.name;
+        filterParams.enteredBy = filter.enteredBy || undefined;
       } else if (viewMode === 'othersOwe' && user?.name) {
         filterParams.paidBy = user.name;
+        // Don't include enteredBy filter in othersOwe mode to avoid conflicts
         // We'll filter out transactions where owedBy = current user in the frontend
-      } else if (filter.payTo) {
-        // For backward compatibility and the filter dropdown
-        filterParams.payTo = filter.payTo;
+      } else {
+        // For 'all' mode or when not in specific debt view modes
+        filterParams.enteredBy = filter.enteredBy || undefined;
+        if (filter.payTo) {
+          // For backward compatibility and the filter dropdown
+          filterParams.payTo = filter.payTo;
+        }
       }
 
       // Only include parameters with values
