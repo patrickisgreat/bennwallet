@@ -44,15 +44,33 @@ function TransactionsPage() {
   const [viewMode, setViewMode] = useState<'iOwe' | 'othersOwe' | 'all'>('iOwe');
 
   // Initialize filter with appropriate defaults based on user
-  const [filter, setFilter] = useState<TransactionFilter>({
-    startDate: '',
-    endDate: '',
-    txStartDate: '',
-    txEndDate: '',
-    payTo: '',
-    enteredBy: '',
-    paid: undefined,
-    paidStatus: 'all',
+  const [filter, setFilter] = useState<TransactionFilter>(() => {
+    // Try to restore filter from localStorage
+    const savedFilter = localStorage.getItem('transactionFilter');
+    if (savedFilter) {
+      try {
+        return JSON.parse(savedFilter);
+      } catch (error) {
+        console.error('Error parsing saved filter:', error);
+      }
+    }
+
+    // Get current month date range for default filter
+    const now = new Date();
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+    // Return default filter with current month transaction dates
+    return {
+      startDate: '',
+      endDate: '',
+      txStartDate: firstDayOfMonth.toISOString().split('T')[0],
+      txEndDate: lastDayOfMonth.toISOString().split('T')[0],
+      payTo: '', // Will be set to current user when user data loads
+      enteredBy: '',
+      paid: undefined,
+      paidStatus: 'all',
+    };
   });
 
   // Sorting state
@@ -130,24 +148,14 @@ function TransactionsPage() {
       setPayToOptions(fields.payTo);
       setEnteredByOptions(fields.enteredBy);
 
-      // If we have the user's name and filter fields are empty, set default filters
-      if (user?.name && (!filter.payTo || !filter.enteredBy)) {
-        // Update filter with user-specific defaults if we have user info
-        // If the current user's name is in the list, use it
+      // If we have the user's name and payTo filter is empty, set to current user for default view
+      if (user?.name && !filter.payTo) {
         const userName = user.name;
-        let otherUsers: string[] = [];
 
-        if (fields.payTo.includes(userName)) {
-          // Find other users - prefer to show transactions from others
-          otherUsers = fields.payTo.filter(name => name !== userName);
-        }
-
-        // Set default filters based on user context
+        // Set default filter to show transactions owed to the current user
         setFilter(prev => ({
           ...prev,
-          payTo: prev.payTo || userName, // Default to current user if not set
-          // Default enteredBy to another user if available, otherwise empty
-          enteredBy: prev.enteredBy || (otherUsers.length > 0 ? otherUsers[0] : ''),
+          payTo: userName, // Default to current user (transactions owed to them)
         }));
       }
     } catch (err) {
