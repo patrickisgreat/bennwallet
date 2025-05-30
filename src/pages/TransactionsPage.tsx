@@ -349,7 +349,21 @@ function TransactionsPage() {
       }));
     } else {
       console.log(`Changing filter ${name} to ${value}`);
-      setFilter(prev => ({ ...prev, [name]: value }));
+      setFilter(prev => {
+        const newFilter = { ...prev, [name]: value };
+
+        // If both payTo and enteredBy are set to "All" (empty string), reset view mode
+        if (name === 'payTo' || name === 'enteredBy') {
+          const payToValue = name === 'payTo' ? value : prev.payTo;
+          const enteredByValue = name === 'enteredBy' ? value : prev.enteredBy;
+
+          if (payToValue === '' && enteredByValue === '') {
+            setViewMode('all');
+          }
+        }
+
+        return newFilter;
+      });
     }
   };
 
@@ -364,6 +378,7 @@ function TransactionsPage() {
       paid: undefined,
       paidStatus: 'all',
     });
+    setViewMode('all');
   };
 
   const handleBulkDelete = async (ids: string[]) => {
