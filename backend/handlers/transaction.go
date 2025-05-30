@@ -1698,27 +1698,47 @@ func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Remove duplicates from enteredByValues
+	// Remove duplicates from both payToValues and enteredByValues
+	uniquePayTo := make(map[string]bool)
+	var uniquePayToValues []string
+
+	for _, val := range payToValues {
+		// Normalize whitespace and newlines
+		normalized := strings.TrimSpace(strings.ReplaceAll(val, "\n", " "))
+		// Replace multiple spaces with single space
+		normalized = strings.Join(strings.Fields(normalized), " ")
+
+		if !uniquePayTo[normalized] {
+			uniquePayTo[normalized] = true
+			uniquePayToValues = append(uniquePayToValues, normalized)
+		}
+	}
+
 	uniqueEnteredBy := make(map[string]bool)
 	var uniqueEnteredByValues []string
 
 	for _, val := range enteredByValues {
-		if !uniqueEnteredBy[val] {
-			uniqueEnteredBy[val] = true
-			uniqueEnteredByValues = append(uniqueEnteredByValues, val)
+		// Normalize whitespace and newlines
+		normalized := strings.TrimSpace(strings.ReplaceAll(val, "\n", " "))
+		// Replace multiple spaces with single space
+		normalized = strings.Join(strings.Fields(normalized), " ")
+
+		if !uniqueEnteredBy[normalized] {
+			uniqueEnteredBy[normalized] = true
+			uniqueEnteredByValues = append(uniqueEnteredByValues, normalized)
 		}
 	}
 
 	// If we have no values, use hardcoded defaults
-	if len(payToValues) == 0 {
-		payToValues = []string{"Sarah", "Patrick"}
+	if len(uniquePayToValues) == 0 {
+		uniquePayToValues = []string{"Sarah", "Patrick"}
 	}
 
 	if len(uniqueEnteredByValues) == 0 {
 		uniqueEnteredByValues = []string{"Sarah", "Patrick"}
 	}
 
-	log.Printf("Final payTo values (%d): %v", len(payToValues), payToValues)
+	log.Printf("Final payTo values (%d): %v", len(uniquePayToValues), uniquePayToValues)
 	log.Printf("Final enteredBy values (%d): %v", len(uniqueEnteredByValues), uniqueEnteredByValues)
 
 	// Create response with the unique values
@@ -1727,7 +1747,7 @@ func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
 		EnteredBy []string `json:"enteredBy"`
 		Category  []string `json:"category"`
 	}{
-		PayTo:     payToValues,
+		PayTo:     uniquePayToValues,
 		EnteredBy: uniqueEnteredByValues,
 		Category:  []string{},
 	}
