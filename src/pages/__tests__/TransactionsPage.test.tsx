@@ -239,4 +239,141 @@ describe('TransactionsPage', () => {
       });
     });
   });
+
+  describe('Filter Controls', () => {
+    it('should reset view mode when Clear All is clicked', async () => {
+      renderTransactionsPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('What Others Owe Me')).toBeInTheDocument();
+      });
+
+      // Click "What Others Owe Me" to change view mode
+      fireEvent.click(screen.getByText('What Others Owe Me'));
+
+      // Verify we're in "othersOwe" mode
+      await waitFor(() => {
+        const calls = vi.mocked(api.fetchTransactions).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        expect(lastCall[0]).toHaveProperty('paidBy', 'Patrick Bennett');
+      });
+
+      // Click "Clear All"
+      fireEvent.click(screen.getByText('Clear All'));
+
+      // Should reset to showing all transactions (no specific filters)
+      await waitFor(() => {
+        const calls = vi.mocked(api.fetchTransactions).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        const params = lastCall[0];
+
+        // Should not have specific user filters
+        expect(params).not.toHaveProperty('owedBy');
+        expect(params).not.toHaveProperty('paidBy');
+      });
+    });
+
+    it('should reset view mode when both dropdowns are set to All', async () => {
+      renderTransactionsPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('What Others Owe Me')).toBeInTheDocument();
+      });
+
+      // Click "What Others Owe Me" to change view mode
+      fireEvent.click(screen.getByText('What Others Owe Me'));
+
+      // Set "Owed By" dropdown to a specific user
+      const owedBySelect = document.querySelector('select[name="payTo"]');
+      if (!owedBySelect) throw new Error('Could not find payTo select');
+      fireEvent.change(owedBySelect, { target: { value: 'Sarah Wallis' } });
+
+      // Set "Owed To" dropdown to a specific user
+      const owedToSelect = document.querySelector('select[name="enteredBy"]');
+      if (!owedToSelect) throw new Error('Could not find enteredBy select');
+      fireEvent.change(owedToSelect, { target: { value: 'Kim Donaldson' } });
+
+      // Now set both to "All"
+      fireEvent.change(owedBySelect, { target: { value: '' } });
+      fireEvent.change(owedToSelect, { target: { value: '' } });
+
+      // Should reset to showing all transactions
+      await waitFor(() => {
+        const calls = vi.mocked(api.fetchTransactions).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        const params = lastCall[0];
+
+        // Should not have specific user filters
+        expect(params).not.toHaveProperty('owedBy');
+        expect(params).not.toHaveProperty('paidBy');
+        expect(params).not.toHaveProperty('payTo');
+        expect(params).not.toHaveProperty('enteredBy');
+      });
+    });
+
+    it('should filter unpaid transactions when checkbox is checked', async () => {
+      renderTransactionsPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('Only Show Unpaid')).toBeInTheDocument();
+      });
+
+      // Find and check the "Only Show Unpaid" checkbox
+      const checkbox = screen.getByRole('checkbox', { name: /only show unpaid/i });
+      fireEvent.click(checkbox);
+
+      // Should add paid: false filter
+      await waitFor(() => {
+        const calls = vi.mocked(api.fetchTransactions).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        expect(lastCall[0]).toHaveProperty('paid', false);
+      });
+
+      // Uncheck the checkbox
+      fireEvent.click(checkbox);
+
+      // Should remove the paid filter
+      await waitFor(() => {
+        const calls = vi.mocked(api.fetchTransactions).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        expect(lastCall[0]).not.toHaveProperty('paid');
+      });
+    });
+
+    it('should include unpaid filter when clearing filters if checkbox was checked', async () => {
+      renderTransactionsPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('Only Show Unpaid')).toBeInTheDocument();
+      });
+
+      // Check the "Only Show Unpaid" checkbox
+      const checkbox = screen.getByRole('checkbox', { name: /only show unpaid/i });
+      fireEvent.click(checkbox);
+
+      // Set some other filters
+      const owedBySelect = document.querySelector('select[name="payTo"]');
+      if (!owedBySelect) throw new Error('Could not find payTo select');
+      fireEvent.change(owedBySelect, { target: { value: 'Sarah Wallis' } });
+
+      // Click "Clear All"
+      fireEvent.click(screen.getByText('Clear All'));
+
+      // Should clear all filters including the paid checkbox
+      await waitFor(() => {
+        const calls = vi.mocked(api.fetchTransactions).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        const params = lastCall[0];
+
+        // Should not have any filters
+        expect(params).not.toHaveProperty('paid');
+        expect(params).not.toHaveProperty('payTo');
+        expect(params).not.toHaveProperty('owedBy');
+        expect(params).not.toHaveProperty('paidBy');
+      });
+
+      // Checkbox should be unchecked
+      expect(checkbox).not.toBeChecked();
+    });
+  });
 });
