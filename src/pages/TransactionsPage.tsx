@@ -343,9 +343,11 @@ function TransactionsPage() {
 
     if (name === 'paid') {
       // Handle checkbox for paid status
+      const isChecked = (e.target as HTMLInputElement).checked;
       setFilter(prev => ({
         ...prev,
-        [name]: (e.target as HTMLInputElement).checked,
+        paid: isChecked,
+        paidStatus: isChecked ? 'unpaid' : 'all',
       }));
     } else {
       console.log(`Changing filter ${name} to ${value}`);
