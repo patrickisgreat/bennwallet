@@ -143,17 +143,17 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		args = append(args, request.Category)
 	}
 
-	// Add PayTo filter with proper SQL query structuring
+	// Add PayTo filter (actually filtering by owed_by since that's what the dropdown represents)
 	if request.PayTo != "" {
 		query += fmt.Sprintf(` AND (
-			t.pay_to ILIKE $%d OR 
-			t.pay_to ILIKE $%d OR
-			t.pay_to = $%d
+			t.owed_by ILIKE $%d OR 
+			t.owed_by ILIKE $%d OR
+			t.owed_by = $%d
 		)`, len(args)+1, len(args)+2, len(args)+3)
 		args = append(args, request.PayTo, "%"+request.PayTo+"%", request.PayTo)
 	}
 
-	// Add EnteredBy filter with proper SQL query structuring
+	// Add EnteredBy filter (actually filtering by paid_by since that represents "Owed To")
 	if request.EnteredBy != "" {
 		// First query users table to find both ID and name matching the filter
 		rows, err := database.DB.Query(`
@@ -184,17 +184,17 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 			}
 		}
 
-		// Build the entered_by filter
-		enteredByConditions := make([]string, 0)
+		// Build the paid_by filter (since "Owed To" means who paid and is owed)
+		paidByConditions := make([]string, 0)
 		for _, id := range matchedUserIds {
-			enteredByConditions = append(enteredByConditions, fmt.Sprintf("t.entered_by = $%d", len(args)+1))
+			paidByConditions = append(paidByConditions, fmt.Sprintf("t.paid_by = $%d", len(args)+1))
 			args = append(args, id)
 		}
 		for _, name := range matchedUserNames {
-			enteredByConditions = append(enteredByConditions, fmt.Sprintf("t.entered_by ILIKE $%d", len(args)+1))
+			paidByConditions = append(paidByConditions, fmt.Sprintf("t.paid_by ILIKE $%d", len(args)+1))
 			args = append(args, "%"+name+"%")
 		}
-		query += fmt.Sprintf(" AND (%s)", strings.Join(enteredByConditions, " OR "))
+		query += fmt.Sprintf(" AND (%s)", strings.Join(paidByConditions, " OR "))
 	}
 
 	// Add paid filter - filter by paid status if specified
