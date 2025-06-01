@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchYNABSplits, syncToYNAB, ReportFilter, CategoryTotal, fetchUniqueTransactionFields } from '../utils/api';
+import {
+  fetchYNABSplits,
+  syncToYNAB,
+  ReportFilter,
+  CategoryTotal,
+  fetchUniqueTransactionFields,
+} from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 function ReportsPage() {
@@ -141,13 +147,13 @@ function ReportsPage() {
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    
+
     // Add detailed logging for EnteredBy changes
     if (name === 'enteredBy') {
       console.log('EnteredBy changed to:', value);
       console.log('EnteredBy value type:', typeof value);
     }
-    
+
     setFilter(prev => ({ ...prev, [name]: value }));
   };
 
@@ -272,7 +278,7 @@ function ReportsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Pay To</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Owed By</label>
             <select
               name="payTo"
               value={filter.payTo}
@@ -289,7 +295,7 @@ function ReportsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Entered By</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Owed To</label>
             <select
               name="enteredBy"
               value={filter.enteredBy}
