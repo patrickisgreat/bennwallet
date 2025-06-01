@@ -1662,63 +1662,114 @@ func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
 				var id, name string
 				if err := usersRows.Scan(&id, &name); err == nil {
 					userIDToName[id] = name
-					// Add all user names to PayTo dropdown
-					payToValues = append(payToValues, name)
 				}
 			}
 		}
 	}
 
-	// Get unique entered_by values from transactions
-	enteredByRows, err := database.DB.Query(`
-		SELECT DISTINCT entered_by FROM transactions 
-		WHERE entered_by IS NOT NULL AND entered_by != ''
+	// Get unique owed_by values from transactions for "Owed By" dropdown
+	owedByRows, err := database.DB.Query(`
+		SELECT DISTINCT owed_by FROM transactions 
+		WHERE owed_by IS NOT NULL AND owed_by != ''
 	`)
 
 	if err != nil {
-		log.Printf("Error querying entered_by values: %v", err)
+		log.Printf("Error querying owed_by values: %v", err)
 	} else {
-		defer enteredByRows.Close()
+		defer owedByRows.Close()
 
-		// Process each entered_by value
-		for enteredByRows.Next() {
-			var enteredByID string
-			if err := enteredByRows.Scan(&enteredByID); err == nil {
+		// Process each owed_by value
+		for owedByRows.Next() {
+			var owedByID string
+			if err := owedByRows.Scan(&owedByID); err == nil {
 				// Look up the user name for this ID
-				if name, exists := userIDToName[enteredByID]; exists {
-					// Add the user name to the enteredBy dropdown
-					enteredByValues = append(enteredByValues, name)
-					log.Printf("Mapped entered_by ID %s to name %s", enteredByID, name)
+				if name, exists := userIDToName[owedByID]; exists {
+					// Add the user name to the payTo dropdown
+					payToValues = append(payToValues, name)
+					log.Printf("Mapped owed_by ID %s to name %s", owedByID, name)
 				} else {
 					// ID doesn't map to a known user, use it directly
-					enteredByValues = append(enteredByValues, enteredByID)
-					log.Printf("Using raw entered_by ID as name: %s", enteredByID)
+					payToValues = append(payToValues, owedByID)
+					log.Printf("Using raw owed_by ID as name: %s", owedByID)
 				}
 			}
 		}
 	}
 
-	// Remove duplicates from enteredByValues
+	// Get unique paid_by values from transactions for "Owed To" dropdown
+	paidByRows, err := database.DB.Query(`
+		SELECT DISTINCT paid_by FROM transactions 
+		WHERE paid_by IS NOT NULL AND paid_by != ''
+	`)
+
+	if err != nil {
+		log.Printf("Error querying paid_by values: %v", err)
+	} else {
+		defer paidByRows.Close()
+
+		// Process each paid_by value
+		for paidByRows.Next() {
+			var paidByID string
+			if err := paidByRows.Scan(&paidByID); err == nil {
+				// Look up the user name for this ID
+				if name, exists := userIDToName[paidByID]; exists {
+					// Add the user name to the enteredBy dropdown (keeping variable name for compatibility)
+					enteredByValues = append(enteredByValues, name)
+					log.Printf("Mapped paid_by ID %s to name %s", paidByID, name)
+				} else {
+					// ID doesn't map to a known user, use it directly
+					enteredByValues = append(enteredByValues, paidByID)
+					log.Printf("Using raw paid_by ID as name: %s", paidByID)
+				}
+			}
+		}
+	}
+
+	// Remove duplicates from both payToValues and enteredByValues
+	uniquePayTo := make(map[string]bool)
+	var uniquePayToValues []string
+
+	for _, val := range payToValues {
+		// Normalize whitespace and newlines
+		normalized := strings.TrimSpace(strings.ReplaceAll(val, "\n", " "))
+		// Replace multiple spaces with single space
+		normalized = strings.Join(strings.Fields(normalized), " ")
+
+		if !uniquePayTo[normalized] {
+			uniquePayTo[normalized] = true
+			uniquePayToValues = append(uniquePayToValues, normalized)
+		}
+	}
+
 	uniqueEnteredBy := make(map[string]bool)
 	var uniqueEnteredByValues []string
 
 	for _, val := range enteredByValues {
-		if !uniqueEnteredBy[val] {
-			uniqueEnteredBy[val] = true
-			uniqueEnteredByValues = append(uniqueEnteredByValues, val)
+		// Normalize whitespace and newlines
+		normalized := strings.TrimSpace(strings.ReplaceAll(val, "\n", " "))
+		// Replace multiple spaces with single space
+		normalized = strings.Join(strings.Fields(normalized), " ")
+
+		if !uniqueEnteredBy[normalized] {
+			uniqueEnteredBy[normalized] = true
+			uniqueEnteredByValues = append(uniqueEnteredByValues, normalized)
 		}
 	}
 
-	// If we have no values, use hardcoded defaults
-	if len(payToValues) == 0 {
-		payToValues = []string{"Sarah", "Patrick"}
+	// If we have no values, use all users as fallback
+	if len(uniquePayToValues) == 0 {
+		for _, name := range userIDToName {
+			uniquePayToValues = append(uniquePayToValues, name)
+		}
 	}
 
 	if len(uniqueEnteredByValues) == 0 {
-		uniqueEnteredByValues = []string{"Sarah", "Patrick"}
+		for _, name := range userIDToName {
+			uniqueEnteredByValues = append(uniqueEnteredByValues, name)
+		}
 	}
 
-	log.Printf("Final payTo values (%d): %v", len(payToValues), payToValues)
+	log.Printf("Final payTo values (%d): %v", len(uniquePayToValues), uniquePayToValues)
 	log.Printf("Final enteredBy values (%d): %v", len(uniqueEnteredByValues), uniqueEnteredByValues)
 
 	// Create response with the unique values
@@ -1727,7 +1778,7 @@ func GetUniqueTransactionFields(w http.ResponseWriter, r *http.Request) {
 		EnteredBy []string `json:"enteredBy"`
 		Category  []string `json:"category"`
 	}{
-		PayTo:     payToValues,
+		PayTo:     uniquePayToValues,
 		EnteredBy: uniqueEnteredByValues,
 		Category:  []string{},
 	}
