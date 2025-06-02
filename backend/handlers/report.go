@@ -39,20 +39,7 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 		hasOptionalColumn = false
 	}
 
-	// Check if transaction_date column exists
-	var hasTransactionDateColumn bool
-	err = database.DB.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 
-			FROM information_schema.columns 
-			WHERE table_name = 'transactions' 
-			AND column_name = 'transaction_date'
-		)
-	`).Scan(&hasTransactionDateColumn)
-	if err != nil {
-		log.Printf("Error checking for transaction_date column: %v", err)
-		hasTransactionDateColumn = false
-	}
+	// transaction_date column is required for date filtering
 
 	// Check if user_id column exists
 	var hasUserIdColumn bool
@@ -71,7 +58,7 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 
 	// Process categories from the relationship table
 	var results []models.CategoryTotal
-	processCategoryRelationships(w, r, request, userID, hasOptionalColumn, hasTransactionDateColumn, hasUserIdColumn, &results)
+	processCategoryRelationships(w, r, request, userID, hasOptionalColumn, hasUserIdColumn, &results)
 
 	// Return results
 	w.Header().Set("Content-Type", "application/json")
@@ -80,7 +67,7 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 
 // Handle categories from the transaction_categories relationship table
 func processCategoryRelationships(w http.ResponseWriter, r *http.Request, request models.ReportFilter,
-	userID string, hasOptionalColumn, hasTransactionDateColumn, hasUserIdColumn bool, results *[]models.CategoryTotal) {
+	userID string, hasOptionalColumn, hasUserIdColumn bool, results *[]models.CategoryTotal) {
 
 	// Build the base query
 	var query string
@@ -109,26 +96,18 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		args = append(args, userID)
 	}
 
-	// Add date filters - use transaction_date if available, otherwise fall back to date
+	// Add date filters - use transaction_date only
 	if request.StartDate != "" {
-		if hasTransactionDateColumn {
-			query += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", len(args)+1)
-		} else {
-			query += fmt.Sprintf(" AND t.date::date >= $%d::date", len(args)+1)
-		}
+		query += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", len(args)+1)
 		args = append(args, request.StartDate)
 	}
 	if request.EndDate != "" {
-		if hasTransactionDateColumn {
-			query += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", len(args)+1)
-		} else {
-			query += fmt.Sprintf(" AND t.date::date <= $%d::date", len(args)+1)
-		}
+		query += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", len(args)+1)
 		args = append(args, request.EndDate)
 	}
 
-	// Add transaction date filters if column exists and filters are provided
-	if hasTransactionDateColumn && request.TransactionDateMonth != nil && request.TransactionDateYear != nil {
+	// Add transaction date filters if filters are provided
+	if request.TransactionDateMonth != nil && request.TransactionDateYear != nil {
 		// Create start and end dates for the month
 		startDate := fmt.Sprintf("%d-%02d-01", *request.TransactionDateYear, *request.TransactionDateMonth)
 		endDate := fmt.Sprintf("%d-%02d-31", *request.TransactionDateYear, *request.TransactionDateMonth)
@@ -294,20 +273,12 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		argCount := 1
 
 		if request.StartDate != "" {
-			if hasTransactionDateColumn {
-				debugQuery += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", argCount)
-			} else {
-				debugQuery += fmt.Sprintf(" AND t.date::date >= $%d::date", argCount)
-			}
+			debugQuery += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", argCount)
 			debugArgs = append(debugArgs, request.StartDate)
 			argCount++
 		}
 		if request.EndDate != "" {
-			if hasTransactionDateColumn {
-				debugQuery += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", argCount)
-			} else {
-				debugQuery += fmt.Sprintf(" AND t.date::date <= $%d::date", argCount)
-			}
+			debugQuery += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", argCount)
 			debugArgs = append(debugArgs, request.EndDate)
 			argCount++
 		}
