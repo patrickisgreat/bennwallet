@@ -97,14 +97,14 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		args = append(args, userID)
 	}
 
-	// Add date filters - use transaction_date, handle it as timestamp
+	// Add date filters - use transaction_date which is the actual transaction date
 	if request.StartDate != "" {
-		// Use COALESCE to handle NULL transaction_date, cast to timestamp then to date
-		query += fmt.Sprintf(" AND COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date) >= $%d::date", len(args)+1)
+		// Use transaction_date for filtering
+		query += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", len(args)+1)
 		args = append(args, request.StartDate)
 	}
 	if request.EndDate != "" {
-		query += fmt.Sprintf(" AND COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date) <= $%d::date", len(args)+1)
+		query += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", len(args)+1)
 		args = append(args, request.EndDate)
 	}
 
@@ -230,7 +230,7 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 			SELECT DISTINCT 
 				t.transaction_date,
 				t.date,
-				COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date)::text as parsed_date
+				t.transaction_date::date::text as parsed_date
 			FROM transactions t
 			LIMIT 5
 		`
@@ -273,6 +273,9 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 
 	// Log the results
 	log.Printf("Found %d categories with totals", len(*results))
+	if len(*results) == 0 && (request.StartDate != "" || request.EndDate != "") {
+		log.Printf("No results found - this may be due to date filters. Check if transactions exist in the requested date range.")
+	}
 	for _, result := range *results {
 		log.Printf("Category: %s, Total: %.2f", result.Category, result.Total)
 	}
@@ -288,6 +291,21 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 			log.Printf("Total transactions in database: %d", txCount)
 		}
 
+		// Check the date range of existing transactions
+		var minDate, maxDate sql.NullString
+		err = database.DB.QueryRow(`
+			SELECT 
+				MIN(transaction_date::date)::text,
+				MAX(transaction_date::date)::text
+			FROM transactions
+		`).Scan(&minDate, &maxDate)
+		if err != nil {
+			log.Printf("Error getting date range: %v", err)
+		} else {
+			log.Printf("Transaction date range in database: %s to %s", minDate.String, maxDate.String)
+			log.Printf("Filter date range requested: %s to %s", request.StartDate, request.EndDate)
+		}
+
 		// Let's check what transactions would match our filters
 		debugQuery := `
 			SELECT t.id, t.amount, t.description, t.date, t.paid, t.optional, c.name as category, t.user_id, t.entered_by
@@ -300,12 +318,12 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		argCount := 1
 
 		if request.StartDate != "" {
-			debugQuery += fmt.Sprintf(" AND COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date) >= $%d::date", argCount)
+			debugQuery += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", argCount)
 			debugArgs = append(debugArgs, request.StartDate)
 			argCount++
 		}
 		if request.EndDate != "" {
-			debugQuery += fmt.Sprintf(" AND COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date) <= $%d::date", argCount)
+			debugQuery += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", argCount)
 			debugArgs = append(debugArgs, request.EndDate)
 			argCount++
 		}
