@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -96,13 +97,14 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		args = append(args, userID)
 	}
 
-	// Add date filters - use transaction_date only
+	// Add date filters - use transaction_date, handle it as timestamp
 	if request.StartDate != "" {
-		query += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", len(args)+1)
+		// Use COALESCE to handle NULL transaction_date, cast to timestamp then to date
+		query += fmt.Sprintf(" AND COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date) >= $%d::date", len(args)+1)
 		args = append(args, request.StartDate)
 	}
 	if request.EndDate != "" {
-		query += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", len(args)+1)
+		query += fmt.Sprintf(" AND COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date) <= $%d::date", len(args)+1)
 		args = append(args, request.EndDate)
 	}
 
@@ -222,6 +224,31 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 	log.Printf("Paid: %v", request.Paid)
 	log.Printf("Optional: %v", request.Optional)
 
+	// Add a test query to see what dates we're actually comparing
+	if request.StartDate != "" || request.EndDate != "" {
+		testQuery := `
+			SELECT DISTINCT 
+				t.transaction_date,
+				t.date,
+				COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date)::text as parsed_date
+			FROM transactions t
+			LIMIT 5
+		`
+		rows, err := database.DB.Query(testQuery)
+		if err != nil {
+			log.Printf("Error running date test query: %v", err)
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var txDate, date, parsedDate sql.NullString
+				if err := rows.Scan(&txDate, &date, &parsedDate); err == nil {
+					log.Printf("Sample transaction - transaction_date: %s, date: %s, parsed: %s",
+						txDate.String, date.String, parsedDate.String)
+				}
+			}
+		}
+	}
+
 	// Execute the query
 	rows, err := database.DB.Query(query, args...)
 	if err != nil {
@@ -273,12 +300,12 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 		argCount := 1
 
 		if request.StartDate != "" {
-			debugQuery += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", argCount)
+			debugQuery += fmt.Sprintf(" AND COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date) >= $%d::date", argCount)
 			debugArgs = append(debugArgs, request.StartDate)
 			argCount++
 		}
 		if request.EndDate != "" {
-			debugQuery += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", argCount)
+			debugQuery += fmt.Sprintf(" AND COALESCE(t.transaction_date::timestamp::date, t.date::timestamp::date) <= $%d::date", argCount)
 			debugArgs = append(debugArgs, request.EndDate)
 			argCount++
 		}
