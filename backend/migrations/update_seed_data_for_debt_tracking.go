@@ -7,6 +7,12 @@ import (
 
 // UpdateSeedDataForDebtTracking updates the seed data to use the new debt tracking structure
 func UpdateSeedDataForDebtTracking(db *sql.DB) error {
+	// Check if we're in production - never run seed data in production
+	if isProduction() {
+		log.Println("Skipping seed data update in production environment")
+		return nil
+	}
+
 	log.Println("Updating seed data for new debt tracking structure...")
 
 	// Clear ALL test transactions for a fresh start
