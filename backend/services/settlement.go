@@ -299,8 +299,8 @@ func (s *SettlementService) GetSettlement(settlementID string) (*models.Settleme
 	return &settlement, nil
 }
 
-// GetUserSettlements retrieves all settlements for a user
-func (s *SettlementService) GetUserSettlements(userID string, status string) ([]models.SettlementSummary, error) {
+// GetUserSettlements retrieves all settlements for a user, optionally filtered by month/year
+func (s *SettlementService) GetUserSettlements(userID string, status string, month int, year int) ([]models.SettlementSummary, error) {
 	query := `
 		SELECT 
 			s.id,
@@ -319,10 +319,25 @@ func (s *SettlementService) GetUserSettlements(userID string, status string) ([]
 		WHERE (s.creator_id = $1 OR s.recipient_id = $1)
 	`
 	args := []interface{}{userID}
+	argCount := 1
 
 	if status != "" {
-		query += " AND s.status = $2"
+		argCount++
+		query += fmt.Sprintf(" AND s.status = $%d", argCount)
 		args = append(args, status)
+	}
+
+	// Add month/year filtering if specified
+	if year > 0 {
+		argCount++
+		query += fmt.Sprintf(" AND EXTRACT(YEAR FROM s.created_at) = $%d", argCount)
+		args = append(args, year)
+
+		if month > 0 && month <= 12 {
+			argCount++
+			query += fmt.Sprintf(" AND EXTRACT(MONTH FROM s.created_at) = $%d", argCount)
+			args = append(args, month)
+		}
 	}
 
 	query += " GROUP BY s.id, creator.name, recipient.name ORDER BY s.created_at DESC"
@@ -354,6 +369,43 @@ func (s *SettlementService) GetUserSettlements(userID string, status string) ([]
 	}
 
 	return settlements, nil
+}
+
+// GetAvailableSettlementMonths returns distinct month/year combinations that have settlements for a user
+func (s *SettlementService) GetAvailableSettlementMonths(userID string) ([]map[string]interface{}, error) {
+	query := `
+		SELECT DISTINCT 
+			EXTRACT(YEAR FROM s.created_at) as year,
+			EXTRACT(MONTH FROM s.created_at) as month,
+			COUNT(*) as settlement_count
+		FROM settlements s
+		WHERE (s.creator_id = $1 OR s.recipient_id = $1)
+		GROUP BY EXTRACT(YEAR FROM s.created_at), EXTRACT(MONTH FROM s.created_at)
+		ORDER BY year DESC, month DESC
+	`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get settlement months: %w", err)
+	}
+	defer rows.Close()
+
+	var months []map[string]interface{}
+	for rows.Next() {
+		var year, month, count int
+		err := rows.Scan(&year, &month, &count)
+		if err != nil {
+			continue
+		}
+
+		months = append(months, map[string]interface{}{
+			"year":             year,
+			"month":            month,
+			"settlement_count": count,
+		})
+	}
+
+	return months, nil
 }
 
 // UpdateSettlementStatus updates the status of a settlement (e.g., complete, cancel)

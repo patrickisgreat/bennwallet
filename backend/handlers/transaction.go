@@ -210,6 +210,8 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse query parameters
+	log.Printf("DEBUG: All query parameters: %v", r.URL.Query())
+
 	payTo := r.URL.Query().Get("payTo")
 	if payTo != "" {
 		search := "%" + payTo + "%"
@@ -340,14 +342,21 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		query += " ORDER BY date DESC"
 	}
 
+	log.Printf("DEBUG: Final query: %s", query)
+	log.Printf("DEBUG: Query args: %v", args)
+
 	rows, err := database.DB.Query(query, args...)
 	if err != nil {
+		log.Printf("DEBUG: Query execution failed: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
 	var transactions []models.Transaction
+	var totalAmount float64
+	transactionCount := 0
+
 	for rows.Next() {
 		var t models.Transaction
 		var paidDate sql.NullString
@@ -364,6 +373,9 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		transactionCount++
+		totalAmount += t.Amount
 
 		// Debug logging to trace the date values
 		log.Printf("Transaction %s - Raw dateStr from DB (date column): %s", t.ID, dateStr)
@@ -484,6 +496,15 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		transactions = append(transactions, t)
+	}
+
+	// Debug logging for transaction filtering results
+	log.Printf("DEBUG: Transaction filtering results - Count: %d, Total Amount: %.2f", transactionCount, totalAmount)
+	if len(transactions) > 0 && len(transactions) <= 10 {
+		for _, tx := range transactions {
+			log.Printf("DEBUG: Transaction ID: %s, Amount: %.2f, PaidBy: %s, OwedBy: %s, TransactionDate: %s",
+				tx.ID, tx.Amount, tx.PaidBy, tx.OwedBy, tx.TransactionDate.Format("2006-01-02"))
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
