@@ -410,7 +410,7 @@ func TestSettlementService_GetUserSettlements(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settlements, err := service.GetUserSettlements(tt.userID, tt.status)
+			settlements, err := service.GetUserSettlements(tt.userID, tt.status, 0, 0)
 
 			if tt.expectError {
 				if err == nil {

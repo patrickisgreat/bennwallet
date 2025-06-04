@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -24,6 +25,15 @@ func NewSettlementHandler(db *sql.DB) *SettlementHandler {
 		settlementService: services.NewSettlementService(db),
 		db:                db,
 	}
+}
+
+// parseInt safely parses a string to int, returning 0 if invalid
+func parseInt(s string) int {
+	val, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return val
 }
 
 // CreateSettlement creates a new settlement for a transaction
@@ -241,7 +251,20 @@ func (h *SettlementHandler) GetUserSettlements(w http.ResponseWriter, r *http.Re
 	userID := userIDValue.(string)
 	status := r.URL.Query().Get("status") // optional filter by status
 
-	settlements, err := h.settlementService.GetUserSettlements(userID, status)
+	// Parse optional month and year parameters
+	var month, year int
+	if monthStr := r.URL.Query().Get("month"); monthStr != "" {
+		if parsedMonth := parseInt(monthStr); parsedMonth >= 1 && parsedMonth <= 12 {
+			month = parsedMonth
+		}
+	}
+	if yearStr := r.URL.Query().Get("year"); yearStr != "" {
+		if parsedYear := parseInt(yearStr); parsedYear > 0 {
+			year = parsedYear
+		}
+	}
+
+	settlements, err := h.settlementService.GetUserSettlements(userID, status, month, year)
 	if err != nil {
 		log.Printf("Error getting user settlements: %v", err)
 		http.Error(w, "Failed to get settlements", http.StatusInternalServerError)
@@ -250,6 +273,26 @@ func (h *SettlementHandler) GetUserSettlements(w http.ResponseWriter, r *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(settlements)
+}
+
+// GetAvailableSettlementMonths retrieves available month/year combinations for user settlements
+func (h *SettlementHandler) GetAvailableSettlementMonths(w http.ResponseWriter, r *http.Request) {
+	userIDValue := r.Context().Value(middleware.UserIDKey)
+	if userIDValue == nil {
+		http.Error(w, "No user ID in context", http.StatusUnauthorized)
+		return
+	}
+	userID := userIDValue.(string)
+
+	months, err := h.settlementService.GetAvailableSettlementMonths(userID)
+	if err != nil {
+		log.Printf("Error getting settlement months: %v", err)
+		http.Error(w, "Failed to get settlement months", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(months)
 }
 
 // GetTransactionSettlements retrieves all settlements that include a specific transaction

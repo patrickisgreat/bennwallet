@@ -298,6 +298,7 @@ func registerRoutes(r *mux.Router) {
 	settlementHandler := handlers.NewSettlementHandler(database.DB)
 	protectedRouter.HandleFunc("/settlements", settlementHandler.CreateSettlement).Methods("POST")
 	protectedRouter.HandleFunc("/settlements", settlementHandler.GetUserSettlements).Methods("GET")
+	protectedRouter.HandleFunc("/settlements/months", settlementHandler.GetAvailableSettlementMonths).Methods("GET")
 	protectedRouter.HandleFunc("/settlements/{id}", settlementHandler.GetSettlement).Methods("GET")
 	protectedRouter.HandleFunc("/settlements/{id}/status", settlementHandler.UpdateSettlementStatus).Methods("PUT")
 	protectedRouter.HandleFunc("/settlements/{id}/apply", settlementHandler.ApplyTransaction).Methods("POST")
