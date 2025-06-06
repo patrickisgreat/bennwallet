@@ -22,8 +22,8 @@ export interface TransactionFilter {
   // Transaction date filters
   txStartDate: string;
   txEndDate: string;
-  payTo: string;
-  enteredBy: string;
+  owedBy: string; // Who owes money (replaces payTo)
+  paidBy: string; // Who paid money (replaces enteredBy)
   paid?: boolean;
   paidStatus: string; // 'all', 'paid', 'unpaid'
 }
@@ -38,8 +38,8 @@ function TransactionsPage() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [payToOptions, setPayToOptions] = useState<string[]>([]);
-  const [enteredByOptions, setEnteredByOptions] = useState<string[]>([]);
+  const [owedByOptions, setOwedByOptions] = useState<string[]>([]);
+  const [paidByOptions, setPaidByOptions] = useState<string[]>([]);
   const [apiError, setApiError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'iOwe' | 'othersOwe' | 'all'>('iOwe');
 
@@ -66,8 +66,8 @@ function TransactionsPage() {
       endDate: '',
       txStartDate: firstDayOfMonth.toISOString().split('T')[0],
       txEndDate: lastDayOfMonth.toISOString().split('T')[0],
-      payTo: '', // Will be set to current user when user data loads
-      enteredBy: '',
+      owedBy: '', // Will be set to current user when user data loads
+      paidBy: '',
       paid: undefined,
       paidStatus: 'all',
     };
@@ -129,7 +129,8 @@ function TransactionsPage() {
       let filtered = [...transactions];
 
       // Apply viewMode filtering
-      if (viewMode === 'othersOwe') {
+      // Only filter out self-owed transactions if no manual owedBy filter is set
+      if (viewMode === 'othersOwe' && !filter.owedBy) {
         filtered = transactions.filter(tx => tx.owedBy !== user.name);
       }
 
@@ -145,17 +146,17 @@ function TransactionsPage() {
       setApiError(null);
       const fields = await fetchUniqueTransactionFields();
       console.log('Loaded unique transaction fields:', fields);
-      setPayToOptions(fields.payTo);
-      setEnteredByOptions(fields.enteredBy);
+      setOwedByOptions(fields.payTo);
+      setPaidByOptions(fields.enteredBy);
 
-      // If we have the user's name and payTo filter is empty, set to current user for default view
-      if (user?.name && !filter.payTo) {
+      // If we have the user's name and owedBy filter is empty, set to current user for default view
+      if (user?.name && !filter.owedBy) {
         const userName = user.name;
 
         // Set default filter to show transactions owed to the current user
         setFilter(prev => ({
           ...prev,
-          payTo: userName, // Default to current user (transactions owed to them)
+          owedBy: userName, // Default to current user (transactions owed to them)
         }));
       }
     } catch (err) {
@@ -193,18 +194,26 @@ function TransactionsPage() {
 
       // Apply view mode filtering
       if (viewMode === 'iOwe' && user?.name) {
+        // "What I Owe" mode: show transactions where current user owes money
         filterParams.owedBy = user.name;
-        filterParams.enteredBy = filter.enteredBy || undefined;
+        // Also allow manual paidBy filter
+        if (filter.paidBy) {
+          filterParams.paidBy = filter.paidBy;
+        }
       } else if (viewMode === 'othersOwe' && user?.name) {
+        // "What Others Owe Me" mode: show transactions where current user paid
         filterParams.paidBy = user.name;
-        // Don't include enteredBy filter in othersOwe mode to avoid conflicts
-        // We'll filter out transactions where owedBy = current user in the frontend
+        // Also allow manual owedBy filter (this is the key fix!)
+        if (filter.owedBy) {
+          filterParams.owedBy = filter.owedBy;
+        }
       } else {
-        // For 'all' mode or when not in specific debt view modes
-        filterParams.enteredBy = filter.enteredBy || undefined;
-        if (filter.payTo) {
-          // For backward compatibility and the filter dropdown
-          filterParams.payTo = filter.payTo;
+        // For 'all' mode: apply both filters if set
+        if (filter.paidBy) {
+          filterParams.paidBy = filter.paidBy;
+        }
+        if (filter.owedBy) {
+          filterParams.owedBy = filter.owedBy;
         }
       }
 
@@ -240,7 +249,8 @@ function TransactionsPage() {
       let finalData = data;
 
       // Additional frontend filtering for 'othersOwe' mode
-      if (viewMode === 'othersOwe' && user?.name) {
+      // Only filter out self-owed transactions if no manual owedBy filter is set
+      if (viewMode === 'othersOwe' && user?.name && !filter.owedBy) {
         finalData = data.filter(tx => tx.owedBy !== user.name);
       }
 
@@ -362,12 +372,12 @@ function TransactionsPage() {
       setFilter(prev => {
         const newFilter = { ...prev, [name]: value };
 
-        // If both payTo and enteredBy are set to "All" (empty string), reset view mode
-        if (name === 'payTo' || name === 'enteredBy') {
-          const payToValue = name === 'payTo' ? value : prev.payTo;
-          const enteredByValue = name === 'enteredBy' ? value : prev.enteredBy;
+        // If both owedBy and paidBy are set to "All" (empty string), reset view mode
+        if (name === 'owedBy' || name === 'paidBy') {
+          const owedByValue = name === 'owedBy' ? value : prev.owedBy;
+          const paidByValue = name === 'paidBy' ? value : prev.paidBy;
 
-          if (payToValue === '' && enteredByValue === '') {
+          if (owedByValue === '' && paidByValue === '') {
             setViewMode('all');
           }
         }
@@ -383,8 +393,8 @@ function TransactionsPage() {
       endDate: '',
       txStartDate: '',
       txEndDate: '',
-      payTo: '',
-      enteredBy: '',
+      owedBy: '',
+      paidBy: '',
       paid: undefined,
       paidStatus: 'all',
     });
@@ -791,13 +801,13 @@ function TransactionsPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Owed By</label>
                 <select
-                  name="payTo"
-                  value={filter.payTo}
+                  name="owedBy"
+                  value={filter.owedBy}
                   onChange={handleFilterChange}
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 >
                   <option value="">All</option>
-                  {payToOptions.map(name => (
+                  {owedByOptions.map(name => (
                     <option key={name} value={name}>
                       {name}
                     </option>
@@ -808,13 +818,13 @@ function TransactionsPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Owed To</label>
                 <select
-                  name="enteredBy"
-                  value={filter.enteredBy}
+                  name="paidBy"
+                  value={filter.paidBy}
                   onChange={handleFilterChange}
                   className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-2"
                 >
                   <option value="">All</option>
-                  {enteredByOptions.map(name => (
+                  {paidByOptions.map(name => (
                     <option key={name} value={name}>
                       {name}
                     </option>
@@ -850,7 +860,7 @@ function TransactionsPage() {
       )}
 
       {/* Empty state message when no options are available */}
-      {payToOptions.length === 0 && enteredByOptions.length === 0 && !apiError && (
+      {owedByOptions.length === 0 && paidByOptions.length === 0 && !apiError && (
         <div
           className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-6"
           role="alert"

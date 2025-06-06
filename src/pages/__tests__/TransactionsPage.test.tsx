@@ -193,11 +193,11 @@ describe('TransactionsPage', () => {
         expect(screen.getByText('What Others Owe Me')).toBeInTheDocument();
       });
 
-      // Set enteredBy filter first (labeled as "Owed To" in UI)
-      // Find by looking for the select element with name="enteredBy"
-      const enteredBySelect = document.querySelector('select[name="enteredBy"]');
-      if (!enteredBySelect) throw new Error('Could not find enteredBy select');
-      fireEvent.change(enteredBySelect, { target: { value: 'Sarah Wallis' } });
+      // Set paidBy filter first (labeled as "Owed To" in UI)
+      // Find by looking for the select element with name="paidBy"
+      const paidBySelect = document.querySelector('select[name="paidBy"]');
+      if (!paidBySelect) throw new Error('Could not find paidBy select');
+      fireEvent.change(paidBySelect, { target: { value: 'Sarah Wallis' } });
 
       // Then click "What Others Owe Me"
       fireEvent.click(screen.getByText('What Others Owe Me'));
@@ -284,13 +284,13 @@ describe('TransactionsPage', () => {
       fireEvent.click(screen.getByText('What Others Owe Me'));
 
       // Set "Owed By" dropdown to a specific user
-      const owedBySelect = document.querySelector('select[name="payTo"]');
-      if (!owedBySelect) throw new Error('Could not find payTo select');
+      const owedBySelect = document.querySelector('select[name="owedBy"]');
+      if (!owedBySelect) throw new Error('Could not find owedBy select');
       fireEvent.change(owedBySelect, { target: { value: 'Sarah Wallis' } });
 
       // Set "Owed To" dropdown to a specific user
-      const owedToSelect = document.querySelector('select[name="enteredBy"]');
-      if (!owedToSelect) throw new Error('Could not find enteredBy select');
+      const owedToSelect = document.querySelector('select[name="paidBy"]');
+      if (!owedToSelect) throw new Error('Could not find paidBy select');
       fireEvent.change(owedToSelect, { target: { value: 'Kim Donaldson' } });
 
       // Now set both to "All"
@@ -352,8 +352,8 @@ describe('TransactionsPage', () => {
       fireEvent.click(checkbox);
 
       // Set some other filters
-      const owedBySelect = document.querySelector('select[name="payTo"]');
-      if (!owedBySelect) throw new Error('Could not find payTo select');
+      const owedBySelect = document.querySelector('select[name="owedBy"]');
+      if (!owedBySelect) throw new Error('Could not find owedBy select');
       fireEvent.change(owedBySelect, { target: { value: 'Sarah Wallis' } });
 
       // Click "Clear All"

@@ -210,20 +210,7 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse query parameters
-	payTo := r.URL.Query().Get("payTo")
-	if payTo != "" {
-		search := "%" + payTo + "%"
-		if hasUsersTable {
-			query += fmt.Sprintf(" AND (owedby_user.name LIKE $%d OR t.owed_by LIKE $%d)", paramCounter, paramCounter+1)
-			args = append(args, search, search)
-			paramCounter += 2
-		} else {
-			query += fmt.Sprintf(" AND owed_by LIKE $%d", paramCounter)
-			args = append(args, search)
-			paramCounter++
-		}
-		log.Printf("Added PayTo LIKE filter: '%s' (as %s)", payTo, search)
-	}
+	// Note: Removed deprecated payTo parameter to avoid confusion with owedBy
 
 	enteredBy := r.URL.Query().Get("enteredBy")
 	if enteredBy != "" {
@@ -240,8 +227,11 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Added EnteredBy LIKE filter: '%s' (as %s)", enteredBy, search)
 	}
 
-	// Add owedBy filter
+	// Add owedBy filter (also support legacy payTo parameter for backwards compatibility)
 	owedBy := r.URL.Query().Get("owedBy")
+	if owedBy == "" {
+		owedBy = r.URL.Query().Get("payTo") // Backwards compatibility
+	}
 	if owedBy != "" {
 		search := "%" + owedBy + "%"
 		if hasUsersTable {
