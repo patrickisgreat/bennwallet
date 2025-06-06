@@ -288,14 +288,28 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 
 	endDate := r.URL.Query().Get("endDate")
 	if endDate != "" {
-		if hasUsersTable {
-			query += fmt.Sprintf(" AND t.date <= $%d", paramCounter)
+		// Parse the end date and add 1 day to make it truly inclusive
+		parsedEndDate, err := time.Parse("2006-01-02", endDate)
+		if err != nil {
+			log.Printf("Error parsing end date %s: %v, using as-is", endDate, err)
+			if hasUsersTable {
+				query += fmt.Sprintf(" AND t.date <= $%d", paramCounter)
+			} else {
+				query += fmt.Sprintf(" AND date <= $%d", paramCounter)
+			}
+			args = append(args, endDate)
 		} else {
-			query += fmt.Sprintf(" AND date <= $%d", paramCounter)
+			// Add 1 day and use < to include all of the end date
+			nextDay := parsedEndDate.AddDate(0, 0, 1).Format("2006-01-02")
+			if hasUsersTable {
+				query += fmt.Sprintf(" AND t.date < $%d", paramCounter)
+			} else {
+				query += fmt.Sprintf(" AND date < $%d", paramCounter)
+			}
+			args = append(args, nextDay)
 		}
-		args = append(args, endDate)
 		paramCounter++
-		log.Printf("Added end date filter: %s", endDate)
+		log.Printf("Added end date filter: %s (inclusive)", endDate)
 	}
 
 	// Date filters for transaction date
@@ -313,14 +327,28 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 
 	txEndDate := r.URL.Query().Get("txEndDate")
 	if txEndDate != "" {
-		if hasUsersTable {
-			query += fmt.Sprintf(" AND t.transaction_date <= $%d", paramCounter)
+		// Parse the transaction end date and add 1 day to make it truly inclusive
+		parsedTxEndDate, err := time.Parse("2006-01-02", txEndDate)
+		if err != nil {
+			log.Printf("Error parsing transaction end date %s: %v, using as-is", txEndDate, err)
+			if hasUsersTable {
+				query += fmt.Sprintf(" AND t.transaction_date <= $%d", paramCounter)
+			} else {
+				query += fmt.Sprintf(" AND transaction_date <= $%d", paramCounter)
+			}
+			args = append(args, txEndDate)
 		} else {
-			query += fmt.Sprintf(" AND transaction_date <= $%d", paramCounter)
+			// Add 1 day and use < to include all of the end date
+			nextDay := parsedTxEndDate.AddDate(0, 0, 1).Format("2006-01-02")
+			if hasUsersTable {
+				query += fmt.Sprintf(" AND t.transaction_date < $%d", paramCounter)
+			} else {
+				query += fmt.Sprintf(" AND transaction_date < $%d", paramCounter)
+			}
+			args = append(args, nextDay)
 		}
-		args = append(args, txEndDate)
 		paramCounter++
-		log.Printf("Added transaction end date filter: %s", txEndDate)
+		log.Printf("Added transaction end date filter: %s (inclusive)", txEndDate)
 	}
 
 	// Add ORDER BY date DESC
