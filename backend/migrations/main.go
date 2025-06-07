@@ -66,6 +66,10 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 		{"update_seed_data_for_debt_tracking", UpdateSeedDataForDebtTracking},
 		// Fix settlement foreign keys to allow transaction deletion
 		{"fix_settlement_foreign_keys", FixSettlementForeignKeys},
+		// Fix transaction user references from names to IDs
+		{"fix_transaction_user_references", func(db *sql.DB) error {
+			return FixTransactionUserReferences(db)
+		}},
 	}
 
 	// Check if we're in production

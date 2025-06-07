@@ -126,24 +126,35 @@ func processCategoryRelationships(w http.ResponseWriter, r *http.Request, reques
 	}
 
 	// Add date filters - use transaction_date which is the actual transaction date
-	if request.StartDate != "" {
-		// Use transaction_date for filtering
-		query += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", len(args)+1)
-		args = append(args, request.StartDate)
-	}
-	if request.EndDate != "" {
-		query += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", len(args)+1)
-		args = append(args, request.EndDate)
-	}
-
-	// Add transaction date filters if filters are provided
+	// Prioritize TransactionDateMonth/Year if provided, otherwise use StartDate/EndDate
 	if request.TransactionDateMonth != nil && request.TransactionDateYear != nil {
 		// Create start and end dates for the month
 		startDate := fmt.Sprintf("%d-%02d-01", *request.TransactionDateYear, *request.TransactionDateMonth)
-		endDate := fmt.Sprintf("%d-%02d-31", *request.TransactionDateYear, *request.TransactionDateMonth)
+
+		// Calculate the last day of the month properly
+		// Create a date for the first day of the next month, then subtract one day
+		nextMonth := *request.TransactionDateMonth + 1
+		year := *request.TransactionDateYear
+		if nextMonth > 12 {
+			nextMonth = 1
+			year++
+		}
+		endOfMonth := time.Date(year, time.Month(nextMonth), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
+		endDate := endOfMonth.Format("2006-01-02")
 
 		query += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date AND t.transaction_date::date <= $%d::date", len(args)+1, len(args)+2)
 		args = append(args, startDate, endDate)
+	} else {
+		// Only use StartDate/EndDate if month/year filters are not provided
+		if request.StartDate != "" {
+			// Use transaction_date for filtering
+			query += fmt.Sprintf(" AND t.transaction_date::date >= $%d::date", len(args)+1)
+			args = append(args, request.StartDate)
+		}
+		if request.EndDate != "" {
+			query += fmt.Sprintf(" AND t.transaction_date::date <= $%d::date", len(args)+1)
+			args = append(args, request.EndDate)
+		}
 	}
 
 	// Add category filter
