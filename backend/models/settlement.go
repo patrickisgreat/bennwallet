@@ -82,3 +82,33 @@ type SettlementSummary struct {
 	CreatedAt       time.Time `json:"createdAt"`
 	ItemCount       int       `json:"itemCount"`
 }
+
+// MonthlySettlementGroup represents settlements grouped by month
+type MonthlySettlementGroup struct {
+	Month       string              `json:"month"` // YYYY-MM format
+	Year        int                 `json:"year"`
+	MonthName   string              `json:"monthName"` // e.g., "January"
+	Settlements []SettlementSummary `json:"settlements"`
+	TotalAmount float64             `json:"totalAmount"`
+	ItemCount   int                 `json:"itemCount"`
+}
+
+// SettlementCategoryTotal represents category totals for settlement reporting
+type SettlementCategoryTotal struct {
+	CategoryID   string  `json:"categoryId"`
+	CategoryName string  `json:"categoryName"`
+	Amount       float64 `json:"amount"`
+	Count        int     `json:"count"`
+}
+
+// SettlementReport represents settlement data for reports
+type SettlementReport struct {
+	Month                string                    `json:"month"` // YYYY-MM format
+	Year                 int                       `json:"year"`
+	MonthName            string                    `json:"monthName"`
+	TotalOwed            float64                   `json:"totalOwed"`
+	TotalPaid            float64                   `json:"totalPaid"`
+	NetAmount            float64                   `json:"netAmount"`
+	CategoryTotals       []SettlementCategoryTotal `json:"categoryTotals"`
+	SettlementDeductions []SettlementCategoryTotal `json:"settlementDeductions"`
+}

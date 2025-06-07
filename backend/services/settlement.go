@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -713,4 +715,208 @@ func (s *SettlementService) ApplyTransactionAsPayment(userID string, transaction
 	}
 
 	return s.GetSettlement(settlementID)
+}
+
+// GetSettlementsGroupedByMonth returns settlements grouped by month
+func (s *SettlementService) GetSettlementsGroupedByMonth(userID string, status string) ([]models.MonthlySettlementGroup, error) {
+	settlements, err := s.GetUserSettlements(userID, status)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group settlements by month
+	monthGroups := make(map[string][]models.SettlementSummary)
+	monthInfo := make(map[string]models.MonthlySettlementGroup)
+
+	for _, settlement := range settlements {
+		monthKey := settlement.CreatedAt.Format("2006-01")
+
+		if _, exists := monthGroups[monthKey]; !exists {
+			monthGroups[monthKey] = []models.SettlementSummary{}
+			monthInfo[monthKey] = models.MonthlySettlementGroup{
+				Month:     monthKey,
+				Year:      settlement.CreatedAt.Year(),
+				MonthName: settlement.CreatedAt.Format("January"),
+			}
+		}
+
+		monthGroups[monthKey] = append(monthGroups[monthKey], settlement)
+	}
+
+	// Convert map to slice and calculate totals
+	var result []models.MonthlySettlementGroup
+	for monthKey, settlements := range monthGroups {
+		group := monthInfo[monthKey]
+		group.Settlements = settlements
+
+		// Calculate totals
+		totalAmount := 0.0
+		totalItems := 0
+		for _, settlement := range settlements {
+			totalAmount += settlement.TotalAmount
+			totalItems += settlement.ItemCount
+		}
+
+		group.TotalAmount = totalAmount
+		group.ItemCount = totalItems
+
+		result = append(result, group)
+	}
+
+	// Sort by month (newest first)
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].Month < result[j].Month {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// GetSettlementReportData returns settlement report data for a specific month
+func (s *SettlementService) GetSettlementReportData(userID string, month string, showPaid bool) (*models.SettlementReport, error) {
+	// Parse month (YYYY-MM format)
+	parts := strings.Split(month, "-")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid month format, expected YYYY-MM")
+	}
+
+	year, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid year: %w", err)
+	}
+
+	monthInt, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("invalid month: %w", err)
+	}
+
+	startDate := time.Date(year, time.Month(monthInt), 1, 0, 0, 0, 0, time.UTC)
+	endDate := startDate.AddDate(0, 1, 0)
+	monthName := startDate.Format("January")
+
+	// Get settlements for the month
+	query := `
+		SELECT 
+			s.id, s.creator_id, s.recipient_id, s.total_amount, s.status,
+			si.applied_amount,
+			t.amount as transaction_amount, t.paid_by, t.owed_by,
+			c.id as category_id, c.name as category_name
+		FROM settlements s
+		JOIN settlement_items si ON s.id = si.settlement_id
+		JOIN transactions t ON si.transaction_id = t.id
+		LEFT JOIN transaction_categories tc ON t.id = tc.transaction_id
+		LEFT JOIN ynab_categories c ON tc.category_id = c.id
+		WHERE (s.creator_id = $1 OR s.recipient_id = $1)
+		AND s.created_at >= $2 AND s.created_at < $3
+	`
+
+	if !showPaid {
+		query += " AND s.status != 'completed'"
+	}
+
+	query += " ORDER BY s.created_at DESC"
+
+	rows, err := s.db.Query(query, userID, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get settlement data: %w", err)
+	}
+	defer rows.Close()
+
+	categoryTotals := make(map[string]*models.SettlementCategoryTotal)
+	settlementDeductions := make(map[string]*models.SettlementCategoryTotal)
+	totalOwed := 0.0
+	totalPaid := 0.0
+
+	for rows.Next() {
+		var settlementID, creatorID, recipientID, status string
+		var settlementAmount, appliedAmount, transactionAmount float64
+		var paidBy, owedBy sql.NullString
+		var categoryID, categoryName sql.NullString
+
+		err := rows.Scan(
+			&settlementID, &creatorID, &recipientID, &settlementAmount, &status,
+			&appliedAmount,
+			&transactionAmount, &paidBy, &owedBy,
+			&categoryID, &categoryName,
+		)
+		if err != nil {
+			continue
+		}
+
+		// Determine if this is owed or paid by the current user
+		isOwedByUser := owedBy.Valid && owedBy.String == userID
+		isPaidByUser := paidBy.Valid && paidBy.String == userID
+
+		if showPaid {
+			if isPaidByUser {
+				totalPaid += appliedAmount
+			}
+			if isOwedByUser {
+				totalOwed += appliedAmount
+			}
+		} else {
+			// For unpaid items, we want to show what's still owed
+			if isOwedByUser {
+				totalOwed += appliedAmount
+			}
+		}
+
+		// Track category totals
+		if categoryID.Valid && categoryName.Valid {
+			catKey := categoryID.String
+
+			if _, exists := categoryTotals[catKey]; !exists {
+				categoryTotals[catKey] = &models.SettlementCategoryTotal{
+					CategoryID:   categoryID.String,
+					CategoryName: categoryName.String,
+					Amount:       0,
+					Count:        0,
+				}
+			}
+
+			categoryTotals[catKey].Amount += appliedAmount
+			categoryTotals[catKey].Count++
+
+			// Settlement deductions (amounts being settled)
+			if status == "completed" || showPaid {
+				if _, exists := settlementDeductions[catKey]; !exists {
+					settlementDeductions[catKey] = &models.SettlementCategoryTotal{
+						CategoryID:   categoryID.String,
+						CategoryName: categoryName.String,
+						Amount:       0,
+						Count:        0,
+					}
+				}
+				settlementDeductions[catKey].Amount += appliedAmount
+				settlementDeductions[catKey].Count++
+			}
+		}
+	}
+
+	// Convert maps to slices
+	var categoryTotalSlice []models.SettlementCategoryTotal
+	for _, ct := range categoryTotals {
+		categoryTotalSlice = append(categoryTotalSlice, *ct)
+	}
+
+	var settlementDeductionSlice []models.SettlementCategoryTotal
+	for _, sd := range settlementDeductions {
+		settlementDeductionSlice = append(settlementDeductionSlice, *sd)
+	}
+
+	report := &models.SettlementReport{
+		Month:                month,
+		Year:                 year,
+		MonthName:            monthName,
+		TotalOwed:            totalOwed,
+		TotalPaid:            totalPaid,
+		NetAmount:            totalPaid - totalOwed,
+		CategoryTotals:       categoryTotalSlice,
+		SettlementDeductions: settlementDeductionSlice,
+	}
+
+	return report, nil
 }

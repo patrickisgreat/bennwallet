@@ -228,9 +228,23 @@ function TransactionsPage() {
       console.log('Fetching transactions with API params:', apiParams);
       const data = await fetchTransactions(apiParams);
 
-      // Log categories for debugging
+      // Log transactions for debugging filter issues
       if (data && data.length > 0) {
         console.log(`Received ${data.length} transactions from API`);
+
+        // Log first few transactions to debug filter issue
+        data.slice(0, 5).forEach(tx => {
+          console.log(`Transaction ${tx.id}:`, {
+            owedBy: tx.owedBy,
+            paidBy: tx.paidBy,
+            payTo: tx.payTo,
+            enteredBy: tx.enteredBy,
+            amount: tx.amount,
+            description: tx.description || tx.note,
+          });
+        });
+
+        // Log categories for debugging
         data.forEach(tx => {
           if (tx.categories && tx.categories.length > 0) {
             console.log(
@@ -368,9 +382,12 @@ function TransactionsPage() {
         paidStatus: isChecked ? 'unpaid' : 'all',
       }));
     } else {
-      console.log(`Changing filter ${name} to ${value}`);
+      console.log(`Filter change - ${name}: "${value}"`);
+      console.log(`Current filter state:`, filter);
+
       setFilter(prev => {
         const newFilter = { ...prev, [name]: value };
+        console.log(`New filter state will be:`, newFilter);
 
         // If both owedBy and paidBy are set to "All" (empty string), reset view mode
         if (name === 'owedBy' || name === 'paidBy') {
@@ -697,7 +714,17 @@ function TransactionsPage() {
       <div className="bg-white p-4 rounded shadow mb-4">
         <div className="flex justify-center gap-4">
           <button
-            onClick={() => setViewMode('iOwe')}
+            onClick={() => {
+              setViewMode('iOwe');
+              // Set filter: Owed By = current user, Owed To = All
+              if (user?.name) {
+                setFilter(prev => ({
+                  ...prev,
+                  owedBy: user.name,
+                  paidBy: '', // All
+                }));
+              }
+            }}
             className={`px-4 py-2 rounded ${
               viewMode === 'iOwe'
                 ? 'bg-indigo-600 text-white'
@@ -707,7 +734,17 @@ function TransactionsPage() {
             What I Owe
           </button>
           <button
-            onClick={() => setViewMode('othersOwe')}
+            onClick={() => {
+              setViewMode('othersOwe');
+              // Set filter: Owed To = current user, Owed By = All
+              if (user?.name) {
+                setFilter(prev => ({
+                  ...prev,
+                  paidBy: user.name,
+                  owedBy: '', // All
+                }));
+              }
+            }}
             className={`px-4 py-2 rounded ${
               viewMode === 'othersOwe'
                 ? 'bg-indigo-600 text-white'
