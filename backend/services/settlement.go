@@ -22,6 +22,40 @@ func NewSettlementService(db *sql.DB) *SettlementService {
 	return &SettlementService{db: db}
 }
 
+// resolveUserReference takes a user reference (ID or name) and returns the actual user ID
+func (s *SettlementService) resolveUserReference(userRef string) (string, error) {
+	var userID string
+	err := s.db.QueryRow(`
+		SELECT id FROM users 
+		WHERE id = $1 
+		   OR LOWER(name) = LOWER($2)
+		   OR LOWER(username) = LOWER($2)
+		LIMIT 1
+	`, userRef, userRef).Scan(&userID)
+
+	if err != nil {
+		return "", fmt.Errorf("user not found: %s", userRef)
+	}
+	return userID, nil
+}
+
+// isUserInvolved checks if a user is involved in a transaction (as payer or ower)
+func (s *SettlementService) isUserInvolved(userID string, paidBy string, owedBy string) (bool, string) {
+	// Try to resolve the paid_by reference
+	paidByID, _ := s.resolveUserReference(paidBy)
+	if paidByID == userID {
+		return true, "paid"
+	}
+
+	// Try to resolve the owed_by reference
+	owedByID, _ := s.resolveUserReference(owedBy)
+	if owedByID == userID {
+		return true, "owed"
+	}
+
+	return false, ""
+}
+
 // CreateSettlement creates a new settlement for applying transactions against debt
 // This is used when someone wants to apply their transactions to offset debt
 func (s *SettlementService) CreateSettlement(userID string, transactionID string, notes string) (*models.Settlement, error) {
@@ -48,21 +82,27 @@ func (s *SettlementService) CreateSettlement(userID string, transactionID string
 	var createdBy, createdFor string
 	createdBy = userID
 
-	if transaction.OwedBy == userID {
-		// Current user owes money, settlement is with the person who paid
-		createdFor = transaction.PaidBy
-	} else if transaction.PaidBy == userID {
-		// Current user paid, settlement is with the person who owes
-		createdFor = transaction.OwedBy
-	} else {
+	// Check if the user is involved in this transaction
+	isInvolved, role := s.isUserInvolved(userID, transaction.PaidBy, transaction.OwedBy)
+	if !isInvolved {
 		return nil, fmt.Errorf("you can only create settlements for transactions where you paid or owe money")
 	}
 
-	// Verify the other user exists
-	var otherUserID string
-	err = s.db.QueryRow(`
-		SELECT id FROM users WHERE id = $1
-	`, createdFor).Scan(&otherUserID)
+	// Determine who the settlement is with based on the user's role
+	if role == "owed" {
+		// Current user owes money, settlement is with the person who paid
+		createdFor = transaction.PaidBy
+	} else {
+		// Current user paid, settlement is with the person who owes
+		createdFor = transaction.OwedBy
+	}
+
+	// Resolve the other user's ID
+	otherUserID, err := s.resolveUserReference(createdFor)
+	if err != nil {
+		return nil, fmt.Errorf("cannot find user to create settlement with: %w", err)
+	}
+	createdFor = otherUserID
 
 	if err != nil {
 		// If we can't find the user, we can't create a settlement

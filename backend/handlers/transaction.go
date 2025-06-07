@@ -17,6 +17,27 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// getUserNameMap creates a map of user IDs to names for efficient lookups
+func getUserNameMap(db *sql.DB) map[string]string {
+	nameMap := make(map[string]string)
+
+	rows, err := db.Query("SELECT id, name FROM users")
+	if err != nil {
+		log.Printf("Error fetching user names: %v", err)
+		return nameMap
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err == nil {
+			nameMap[id] = name
+		}
+	}
+
+	return nameMap
+}
+
 // EnsureTransactionDateColumn checks if the transaction_date column exists in the transactions table
 // and creates it if it doesn't exist. This helps handle database schema migrations gracefully.
 func EnsureTransactionDateColumn() error {
@@ -502,6 +523,22 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		transactions = append(transactions, t)
+	}
+
+	// Resolve user IDs to names for display
+	if hasUsersTable {
+		userNameMap := getUserNameMap(database.DB)
+		for i := range transactions {
+			if name, ok := userNameMap[transactions[i].PaidBy]; ok {
+				transactions[i].PaidByName = name
+			}
+			if name, ok := userNameMap[transactions[i].OwedBy]; ok {
+				transactions[i].OwedByName = name
+			}
+			if name, ok := userNameMap[transactions[i].EnteredBy]; ok {
+				transactions[i].EnteredByName = name
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
