@@ -19,10 +19,20 @@ interface DebtSummary {
   yourTransactionsToApply: Transaction[]; // Your transactions that others can apply
 }
 
+interface MonthlyDebtSummary {
+  month: string; // YYYY-MM format
+  monthName: string; // e.g., "January 2024"
+  debts: DebtSummary[];
+  totalYouOwe: number;
+  totalTheyOwe: number;
+  netTotal: number;
+}
+
 export default function DebtSummary() {
-  const [debts, setDebts] = useState<DebtSummary[]>([]);
+  const [monthlyDebts, setMonthlyDebts] = useState<MonthlyDebtSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDebtor, setSelectedDebtor] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [selectedTransactions, setSelectedTransactions] = useState<string[]>([]);
   const [settlementNotes, setSettlementNotes] = useState('');
   const currentUserId = localStorage.getItem('userId') || '';
@@ -32,92 +42,135 @@ export default function DebtSummary() {
       setLoading(true);
       const [transactions, allUsers] = await Promise.all([fetchTransactions(), fetchUsers()]);
 
-      // Calculate debts by user
-      const debtMap = new Map<string, DebtSummary>();
+      // Group transactions by month first
+      const monthlyTransactionMap = new Map<string, Transaction[]>();
 
       transactions.forEach(tx => {
         // Skip paid transactions unless they are settlement adjustments
         if (tx.paid && tx.category !== 'settlement') return;
 
-        // With new debt tracking: paidBy and owedBy fields
-        if (tx.paidBy && tx.owedBy) {
-          const paidByUser = allUsers.find(
-            u => u.name === tx.paidBy || u.username === tx.paidBy || u.id === tx.paidBy
-          );
-          const owedByUser = allUsers.find(
-            u => u.name === tx.owedBy || u.username === tx.owedBy || u.id === tx.owedBy
-          );
+        // Use transaction date to determine month
+        const transactionDate = new Date(tx.transactionDate);
+        const monthKey = `${transactionDate.getFullYear()}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}`;
 
-          // Current user paid, someone else owes them
-          if (paidByUser && paidByUser.id === currentUserId && owedByUser) {
-            if (!debtMap.has(owedByUser.id)) {
-              debtMap.set(owedByUser.id, {
-                userId: owedByUser.id,
-                userName: owedByUser.name,
-                youOwe: 0,
-                theyOwe: 0,
-                net: 0,
-                transactionsYouOwe: [],
-                transactionsTheyOwe: [],
-                yourTransactionsToApply: [],
-              });
-            }
-            const debt = debtMap.get(owedByUser.id)!;
-            debt.theyOwe += tx.amount;
-            debt.transactionsTheyOwe.push(tx);
-          }
-          // Someone else paid, current user owes them
-          else if (owedByUser && owedByUser.id === currentUserId && paidByUser) {
-            if (!debtMap.has(paidByUser.id)) {
-              debtMap.set(paidByUser.id, {
-                userId: paidByUser.id,
-                userName: paidByUser.name,
-                youOwe: 0,
-                theyOwe: 0,
-                net: 0,
-                transactionsYouOwe: [],
-                transactionsTheyOwe: [],
-                yourTransactionsToApply: [],
-              });
-            }
-            const debt = debtMap.get(paidByUser.id)!;
-            debt.youOwe += tx.amount;
-            debt.transactionsYouOwe.push(tx);
-          }
+        if (!monthlyTransactionMap.has(monthKey)) {
+          monthlyTransactionMap.set(monthKey, []);
         }
+        monthlyTransactionMap.get(monthKey)!.push(tx);
       });
 
-      // Now find transactions where current user paid and others owe (can be applied to settlements)
-      transactions.forEach(tx => {
-        if (tx.paid && tx.category !== 'settlement') return;
+      // Process each month's transactions
+      const monthlyDebtArray: MonthlyDebtSummary[] = [];
 
-        if (tx.paidBy && tx.owedBy) {
-          const paidByUser = allUsers.find(
-            u => u.name === tx.paidBy || u.username === tx.paidBy || u.id === tx.paidBy
-          );
+      for (const [monthKey, monthTransactions] of monthlyTransactionMap.entries()) {
+        const debtMap = new Map<string, DebtSummary>();
 
-          // If current user paid, this transaction can be applied by whoever owes
-          if (paidByUser && paidByUser.id === currentUserId) {
+        // Process transactions for this month
+        monthTransactions.forEach(tx => {
+          // With new debt tracking: paidBy and owedBy fields
+          if (tx.paidBy && tx.owedBy) {
+            const paidByUser = allUsers.find(
+              u => u.name === tx.paidBy || u.username === tx.paidBy || u.id === tx.paidBy
+            );
             const owedByUser = allUsers.find(
               u => u.name === tx.owedBy || u.username === tx.owedBy || u.id === tx.owedBy
             );
 
-            if (owedByUser && debtMap.has(owedByUser.id)) {
-              debtMap.get(owedByUser.id)!.yourTransactionsToApply.push(tx);
+            // Current user paid, someone else owes them
+            if (paidByUser && paidByUser.id === currentUserId && owedByUser) {
+              if (!debtMap.has(owedByUser.id)) {
+                debtMap.set(owedByUser.id, {
+                  userId: owedByUser.id,
+                  userName: owedByUser.name,
+                  youOwe: 0,
+                  theyOwe: 0,
+                  net: 0,
+                  transactionsYouOwe: [],
+                  transactionsTheyOwe: [],
+                  yourTransactionsToApply: [],
+                });
+              }
+              const debt = debtMap.get(owedByUser.id)!;
+              debt.theyOwe += tx.amount;
+              debt.transactionsTheyOwe.push(tx);
+            }
+            // Someone else paid, current user owes them
+            else if (owedByUser && owedByUser.id === currentUserId && paidByUser) {
+              if (!debtMap.has(paidByUser.id)) {
+                debtMap.set(paidByUser.id, {
+                  userId: paidByUser.id,
+                  userName: paidByUser.name,
+                  youOwe: 0,
+                  theyOwe: 0,
+                  net: 0,
+                  transactionsYouOwe: [],
+                  transactionsTheyOwe: [],
+                  yourTransactionsToApply: [],
+                });
+              }
+              const debt = debtMap.get(paidByUser.id)!;
+              debt.youOwe += tx.amount;
+              debt.transactionsYouOwe.push(tx);
             }
           }
+        });
+
+        // Find transactions where current user paid and others owe (can be applied to settlements)
+        monthTransactions.forEach(tx => {
+          if (tx.paidBy && tx.owedBy) {
+            const paidByUser = allUsers.find(
+              u => u.name === tx.paidBy || u.username === tx.paidBy || u.id === tx.paidBy
+            );
+
+            // If current user paid, this transaction can be applied by whoever owes
+            if (paidByUser && paidByUser.id === currentUserId) {
+              const owedByUser = allUsers.find(
+                u => u.name === tx.owedBy || u.username === tx.owedBy || u.id === tx.owedBy
+              );
+
+              if (owedByUser && debtMap.has(owedByUser.id)) {
+                debtMap.get(owedByUser.id)!.yourTransactionsToApply.push(tx);
+              }
+            }
+          }
+        });
+
+        // Calculate net amounts and convert to array for this month
+        const monthDebts = Array.from(debtMap.values())
+          .map(debt => ({
+            ...debt,
+            net: debt.youOwe - debt.theyOwe,
+          }))
+          .filter(debt => debt.youOwe > 0 || debt.theyOwe > 0);
+
+        if (monthDebts.length > 0) {
+          const [year, month] = monthKey.split('-');
+          const monthDate = new Date(parseInt(year), parseInt(month) - 1);
+          const monthName = monthDate.toLocaleDateString('en-US', {
+            month: 'long',
+            year: 'numeric',
+          });
+
+          // Calculate totals for the month
+          const totalYouOwe = monthDebts.reduce((sum, debt) => sum + debt.youOwe, 0);
+          const totalTheyOwe = monthDebts.reduce((sum, debt) => sum + debt.theyOwe, 0);
+          const netTotal = totalYouOwe - totalTheyOwe;
+
+          monthlyDebtArray.push({
+            month: monthKey,
+            monthName,
+            debts: monthDebts,
+            totalYouOwe,
+            totalTheyOwe,
+            netTotal,
+          });
         }
-      });
+      }
 
-      // Calculate net amounts and convert to array
-      const debtArray = Array.from(debtMap.values())
-        .map(debt => ({
-          ...debt,
-          net: debt.youOwe - debt.theyOwe,
-        }))
-        .filter(debt => debt.youOwe > 0 || debt.theyOwe > 0);
+      // Sort by month (newest first)
+      monthlyDebtArray.sort((a, b) => b.month.localeCompare(a.month));
 
-      setDebts(debtArray);
+      setMonthlyDebts(monthlyDebtArray);
     } catch (error) {
       console.error('Error loading debt summary:', error);
     } finally {
@@ -155,6 +208,7 @@ export default function DebtSummary() {
 
       // Reset and reload
       setSelectedDebtor(null);
+      setSelectedMonth(null);
       setSelectedTransactions([]);
       setSettlementNotes('');
 
@@ -171,7 +225,8 @@ export default function DebtSummary() {
     }
   };
 
-  const selectedDebt = debts.find(d => d.userId === selectedDebtor);
+  const selectedMonthData = monthlyDebts.find(m => m.month === selectedMonth);
+  const selectedDebt = selectedMonthData?.debts.find(d => d.userId === selectedDebtor);
   const totalSelected = selectedTransactions.reduce((sum, txId) => {
     const tx = selectedDebt?.yourTransactionsToApply.find(t => t.id === txId);
     return sum + (tx?.amount || 0);
@@ -185,46 +240,85 @@ export default function DebtSummary() {
     <div className="p-4">
       <h2 className="text-2xl font-bold mb-6">Debt Summary</h2>
 
-      {debts.length === 0 ? (
+      {monthlyDebts.length === 0 ? (
         <p className="text-gray-500">No outstanding debts</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Debt List */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold mb-3">Outstanding Balances</h3>
-            {debts.map(debt => (
-              <div
-                key={debt.userId}
-                onClick={() => setSelectedDebtor(debt.userId)}
-                className={`border rounded-lg p-4 cursor-pointer transition ${
-                  selectedDebtor === debt.userId ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'
-                }`}
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="font-medium">{debt.userName}</h4>
-                    <div className="text-sm text-gray-600 mt-1">
-                      {debt.youOwe > 0 && <p>You owe: {formatMoney(debt.youOwe)}</p>}
-                      {debt.theyOwe > 0 && <p>They owe: {formatMoney(debt.theyOwe)}</p>}
+          {/* Monthly Debt List */}
+          <div className="space-y-6">
+            <h3 className="text-lg font-semibold mb-3">Outstanding Balances by Month</h3>
+            {monthlyDebts.map(monthData => (
+              <div key={monthData.month} className="border rounded-lg p-4">
+                {/* Month Header */}
+                <div className="mb-4 pb-3 border-b">
+                  <h4 className="text-lg font-semibold text-gray-800">{monthData.monthName}</h4>
+                  <div className="text-sm text-gray-600 mt-1 flex justify-between">
+                    <div>
+                      {monthData.totalYouOwe > 0 && (
+                        <span>You owe: {formatMoney(monthData.totalYouOwe)}</span>
+                      )}
+                      {monthData.totalYouOwe > 0 && monthData.totalTheyOwe > 0 && <span> • </span>}
+                      {monthData.totalTheyOwe > 0 && (
+                        <span>They owe: {formatMoney(monthData.totalTheyOwe)}</span>
+                      )}
+                    </div>
+                    <div
+                      className={`font-bold ${monthData.netTotal > 0 ? 'text-red-600' : 'text-green-600'}`}
+                    >
+                      Net: {formatMoney(Math.abs(monthData.netTotal))}{' '}
+                      {monthData.netTotal > 0 ? '(you owe)' : '(they owe)'}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`font-bold ${debt.net > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {debt.net > 0 ? 'You owe' : 'They owe'}
-                    </p>
-                    <p className="text-lg font-bold">{formatMoney(Math.abs(debt.net))}</p>
-                  </div>
+                </div>
+
+                {/* Individual Debts for this Month */}
+                <div className="space-y-2">
+                  {monthData.debts.map(debt => (
+                    <div
+                      key={`${monthData.month}-${debt.userId}`}
+                      onClick={() => {
+                        setSelectedDebtor(debt.userId);
+                        setSelectedMonth(monthData.month);
+                      }}
+                      className={`border rounded-lg p-3 cursor-pointer transition ${
+                        selectedDebtor === debt.userId && selectedMonth === monthData.month
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h5 className="font-medium">{debt.userName}</h5>
+                          <div className="text-sm text-gray-600 mt-1">
+                            {debt.youOwe > 0 && <p>You owe: {formatMoney(debt.youOwe)}</p>}
+                            {debt.theyOwe > 0 && <p>They owe: {formatMoney(debt.theyOwe)}</p>}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p
+                            className={`font-bold text-sm ${debt.net > 0 ? 'text-red-600' : 'text-green-600'}`}
+                          >
+                            {debt.net > 0 ? 'You owe' : 'They owe'}
+                          </p>
+                          <p className="text-lg font-bold">{formatMoney(Math.abs(debt.net))}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
           </div>
 
           {/* Settlement Creator */}
-          {selectedDebtor && selectedDebt && (
+          {selectedDebtor && selectedDebt && selectedMonthData && (
             <div className="border rounded-lg p-4">
               <h3 className="text-lg font-semibold mb-3">
                 Create Settlement with {selectedDebt.userName}
               </h3>
+              <div className="text-sm text-gray-600 mb-3">
+                For transactions from {selectedMonthData.monthName}
+              </div>
 
               {selectedDebt.youOwe > 0 ? (
                 <>
@@ -308,6 +402,7 @@ export default function DebtSummary() {
                 <button
                   onClick={() => {
                     setSelectedDebtor(null);
+                    setSelectedMonth(null);
                     setSelectedTransactions([]);
                     setSettlementNotes('');
                   }}

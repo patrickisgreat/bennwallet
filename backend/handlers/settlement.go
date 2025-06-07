@@ -445,3 +445,53 @@ func (h *SettlementHandler) UpdateSettlementStatus(w http.ResponseWriter, r *htt
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(updatedSettlement)
 }
+
+// GetSettlementsGroupedByMonth returns settlements grouped by month
+func (h *SettlementHandler) GetSettlementsGroupedByMonth(w http.ResponseWriter, r *http.Request) {
+	userIDValue := r.Context().Value(middleware.UserIDKey)
+	if userIDValue == nil {
+		http.Error(w, "No user ID in context", http.StatusUnauthorized)
+		return
+	}
+	userID := userIDValue.(string)
+	status := r.URL.Query().Get("status") // optional filter by status
+
+	monthlyGroups, err := h.settlementService.GetSettlementsGroupedByMonth(userID, status)
+	if err != nil {
+		log.Printf("Error getting settlements grouped by month: %v", err)
+		http.Error(w, "Failed to get settlements", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(monthlyGroups)
+}
+
+// GetSettlementReportData returns settlement report data for a specific month
+func (h *SettlementHandler) GetSettlementReportData(w http.ResponseWriter, r *http.Request) {
+	userIDValue := r.Context().Value(middleware.UserIDKey)
+	if userIDValue == nil {
+		http.Error(w, "No user ID in context", http.StatusUnauthorized)
+		return
+	}
+	userID := userIDValue.(string)
+
+	month := r.URL.Query().Get("month") // YYYY-MM format
+	if month == "" {
+		http.Error(w, "Month parameter is required (YYYY-MM format)", http.StatusBadRequest)
+		return
+	}
+
+	showPaidParam := r.URL.Query().Get("paid")
+	showPaid := showPaidParam == "true"
+
+	report, err := h.settlementService.GetSettlementReportData(userID, month, showPaid)
+	if err != nil {
+		log.Printf("Error getting settlement report data: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to get settlement report: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}

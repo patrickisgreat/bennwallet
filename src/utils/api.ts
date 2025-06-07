@@ -273,8 +273,28 @@ export interface ReportFilter {
 }
 
 export interface CategoryTotal {
-  category: string;
-  total: number;
+  category?: string;
+  categoryId?: string;
+  categoryName?: string;
+  total?: number;
+  amount?: number;
+  count?: number;
+}
+
+export interface SettlementReport {
+  month: string;
+  year: number;
+  monthName: string;
+  totalOwed: number;
+  totalPaid: number;
+  netAmount: number;
+  categoryTotals: CategoryTotal[];
+  settlementDeductions: CategoryTotal[];
+}
+
+export interface ReportResponse {
+  categoryTotals?: CategoryTotal[];
+  settlementData?: SettlementReport;
 }
 
 export interface YNABSyncRequest {
@@ -301,7 +321,10 @@ export interface YNABConfig {
   updatedAt?: string;
 }
 
-export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTotal[]> {
+export async function fetchYNABSplits(
+  filter: ReportFilter,
+  includeSettlements = false
+): Promise<CategoryTotal[] | ReportResponse> {
   try {
     console.log('Raw filter sent to API:', filter);
     console.log('Filter values: ', {
@@ -356,8 +379,13 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
 
     console.log('Final request body sent to API:', JSON.stringify(requestBody, null, 2));
 
+    // Add query parameter for settlements if requested
+    const url = includeSettlements
+      ? '/reports/ynab-splits?includeSettlements=true'
+      : '/reports/ynab-splits';
+
     // Use POST method with explicit headers and body
-    const response = await api.post('/reports/ynab-splits', requestBody, {
+    const response = await api.post(url, requestBody, {
       headers: {
         'Content-Type': 'application/json',
       },
@@ -367,10 +395,15 @@ export async function fetchYNABSplits(filter: ReportFilter): Promise<CategoryTot
 
     if (!response.data) {
       console.log('API returned null or undefined');
-      return [];
+      return includeSettlements ? { categoryTotals: [] } : [];
     }
 
-    // Ensure we're returning an array
+    // Handle new response format when settlements are included
+    if (includeSettlements && response.data.categoryTotals) {
+      return response.data as ReportResponse;
+    }
+
+    // Ensure we're returning an array for backward compatibility
     return Array.isArray(response.data) ? response.data : [];
   } catch (error: Error | unknown) {
     console.error('Error fetching YNAB splits from API:', error);

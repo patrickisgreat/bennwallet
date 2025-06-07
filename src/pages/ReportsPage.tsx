@@ -4,6 +4,8 @@ import {
   syncToYNAB,
   ReportFilter,
   CategoryTotal,
+  ReportResponse,
+  SettlementReport,
   fetchUniqueTransactionFields,
 } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -11,6 +13,8 @@ import { useAuth } from '../context/AuthContext';
 function ReportsPage() {
   const { currentUser } = useAuth();
   const [splits, setSplits] = useState<CategoryTotal[]>([]);
+  const [settlementData, setSettlementData] = useState<SettlementReport | null>(null);
+  const [showSettlements, setShowSettlements] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -86,6 +90,7 @@ function ReportsPage() {
 
     setLoading(true);
     setSplits([]);
+    setSettlementData(null);
     setTotal(0);
     setError(null);
     setSyncSuccess(null);
@@ -94,15 +99,22 @@ function ReportsPage() {
       console.log('Sending filter to YNAB splits API:', filter);
 
       // Make sure filter is properly formatted
-      const filterToSend = {
+      const filterToSend: ReportFilter = {
         startDate: filter.startDate,
         endDate: filter.endDate,
-        category: filter.category || undefined,
-        payTo: filter.payTo || undefined,
-        enteredBy: filter.enteredBy || undefined,
-        paid: filter.paid ? true : undefined, // Only send if checkbox is checked
-        optional: filter.optional ? true : undefined, // Only send if checkbox is checked
+        category: filter.category || '',
+        payTo: filter.payTo || '',
+        enteredBy: filter.enteredBy || '',
+        paid: filter.paid ? true : false,
+        optional: filter.optional ? true : false,
       };
+
+      // Add month/year for settlement data if we have date filters
+      if (filterToSend.startDate && filterToSend.endDate) {
+        const startDate = new Date(filterToSend.startDate);
+        filterToSend.transactionDateMonth = startDate.getMonth() + 1;
+        filterToSend.transactionDateYear = startDate.getFullYear();
+      }
 
       // Add more detailed logging for debugging
       console.log('Filter values being sent:');
@@ -113,29 +125,51 @@ function ReportsPage() {
       console.log('- paid:', filterToSend.paid, typeof filterToSend.paid);
       console.log('- optional:', filterToSend.optional, typeof filterToSend.optional);
 
-      const data = await fetchYNABSplits(filterToSend);
+      const data = await fetchYNABSplits(filterToSend, showSettlements);
       console.log('Received YNAB splits data:', data);
 
-      if (Array.isArray(data) && data.length) {
-        setSplits(data);
+      // Handle new response format
+      if (showSettlements && data && typeof data === 'object' && 'categoryTotals' in data) {
+        const reportResponse = data as ReportResponse;
+        setSplits(reportResponse.categoryTotals || []);
+        setSettlementData(reportResponse.settlementData || null);
 
         // Calculate total for percentage
-        const sum = data.reduce((acc, item) => acc + item.total, 0);
+        const categoryTotals = reportResponse.categoryTotals || [];
+        const sum = categoryTotals.reduce((acc, item) => acc + (item.total || item.amount || 0), 0);
+        setTotal(sum);
+      } else if (Array.isArray(data) && data.length) {
+        setSplits(data);
+        setSettlementData(null);
+
+        // Calculate total for percentage
+        const sum = data.reduce((acc, item) => acc + (item.total || item.amount || 0), 0);
         setTotal(sum);
       } else {
         console.warn('No data or empty array returned from report API');
         setSplits([]);
+        setSettlementData(null);
         setTotal(0);
       }
     } catch (err) {
       console.error('Error loading report data:', err);
       setError('Failed to load report data. Please try again.');
       setSplits([]);
+      setSettlementData(null);
       setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [currentUser, filter, setError, setLoading, setSplits, setTotal, setSyncSuccess]);
+  }, [
+    currentUser,
+    filter,
+    showSettlements,
+    setError,
+    setLoading,
+    setSplits,
+    setTotal,
+    setSyncSuccess,
+  ]);
 
   // Only load data after authentication is confirmed
   useEffect(() => {
@@ -191,8 +225,8 @@ function ReportsPage() {
         payeeName: 'BennWallet Split Expenses',
         memo: `Expenses from ${filter.startDate || 'account start'} to ${filter.endDate || 'today'}`,
         categories: splits.map(item => ({
-          categoryName: item.category,
-          amount: item.total,
+          categoryName: item.category || item.categoryName || 'Unknown',
+          amount: item.total || item.amount || 0,
         })),
       });
 
@@ -341,6 +375,19 @@ function ReportsPage() {
               Exclude optional transactions
             </label>
           </div>
+
+          <div className="flex items-center mt-6">
+            <input
+              id="show-settlements"
+              type="checkbox"
+              checked={showSettlements}
+              onChange={e => setShowSettlements(e.target.checked)}
+              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+            />
+            <label htmlFor="show-settlements" className="ml-2 block text-sm text-gray-900">
+              Include settlement data
+            </label>
+          </div>
         </div>
 
         <div className="mt-4">
@@ -395,18 +442,20 @@ function ReportsPage() {
               ) : (
                 <div className="h-64 flex items-end space-x-1" style={{ minHeight: '200px' }}>
                   {splits.map((item, index) => {
-                    const percentage = (item.total / total) * 100;
+                    const amount = item.total || item.amount || 0;
+                    const categoryName = item.category || item.categoryName || 'Unknown';
+                    const percentage = (amount / total) * 100;
                     // Calculate height in pixels (max height would be the container's height - some space for labels)
                     const maxBarHeight = 180; // px
                     const barHeight = Math.max((percentage / 100) * maxBarHeight, 10); // min 10px
 
                     console.log(
-                      `Bar ${item.category}: ${percentage.toFixed(1)}% => ${barHeight}px height`
+                      `Bar ${categoryName}: ${percentage.toFixed(1)}% => ${barHeight}px height`
                     );
 
                     return (
                       <div
-                        key={item.category}
+                        key={categoryName}
                         className="flex flex-col items-center"
                         style={{ flex: '1 1 0%', minWidth: '30px' }}
                       >
@@ -421,12 +470,12 @@ function ReportsPage() {
                         ></div>
                         <div
                           className="text-xs mt-2 w-full text-center truncate font-medium"
-                          title={item.category}
+                          title={categoryName}
                         >
-                          {item.category}
+                          {categoryName}
                         </div>
                         <div className="text-xs font-semibold">
-                          ${item.total.toFixed(2)} ({percentage.toFixed(1)}%)
+                          ${amount.toFixed(2)} ({percentage.toFixed(1)}%)
                         </div>
                       </div>
                     );
@@ -448,23 +497,25 @@ function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {splits.map((item, index) => (
-                      <tr key={item.category} className="border-t">
-                        <td className="p-2">
-                          <div className="flex items-center">
-                            <span
-                              className="w-3 h-3 rounded-full mr-2"
-                              style={{ backgroundColor: getColorForIndex(index) }}
-                            />
-                            {item.category}
-                          </div>
-                        </td>
-                        <td className="p-2 text-right">${item.total.toFixed(2)}</td>
-                        <td className="p-2 text-right">
-                          {((item.total / total) * 100).toFixed(1)}%
-                        </td>
-                      </tr>
-                    ))}
+                    {splits.map((item, index) => {
+                      const amount = item.total || item.amount || 0;
+                      const categoryName = item.category || item.categoryName || 'Unknown';
+                      return (
+                        <tr key={`${categoryName}-${index}`} className="border-t">
+                          <td className="p-2">
+                            <div className="flex items-center">
+                              <span
+                                className="w-3 h-3 rounded-full mr-2"
+                                style={{ backgroundColor: getColorForIndex(index) }}
+                              />
+                              {categoryName}
+                            </div>
+                          </td>
+                          <td className="p-2 text-right">${amount.toFixed(2)}</td>
+                          <td className="p-2 text-right">{((amount / total) * 100).toFixed(1)}%</td>
+                        </tr>
+                      );
+                    })}
                     <tr className="font-bold border-t-2 border-gray-300">
                       <td className="p-2">Total</td>
                       <td className="p-2 text-right">${total.toFixed(2)}</td>
@@ -480,6 +531,71 @@ function ReportsPage() {
         <div className="bg-white p-4 rounded shadow text-center">
           No data available for the selected filters. Try adjusting your filters or adding more
           transactions.
+        </div>
+      )}
+
+      {/* Settlement Data Section */}
+      {settlementData && (
+        <div className="mt-6">
+          <div className="bg-white p-4 rounded shadow">
+            <h2 className="text-xl font-semibold mb-4">
+              Settlement Data - {settlementData.monthName} {settlementData.year}
+            </h2>
+
+            {/* Settlement Summary */}
+            <div className="mb-4 grid grid-cols-3 gap-4">
+              <div className="bg-red-50 p-4 rounded-lg">
+                <div className="text-sm font-medium text-red-700">Total Owed</div>
+                <div className="text-xl font-bold text-red-900">
+                  ${settlementData.totalOwed.toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-green-50 p-4 rounded-lg">
+                <div className="text-sm font-medium text-green-700">Total Paid</div>
+                <div className="text-xl font-bold text-green-900">
+                  ${settlementData.totalPaid.toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <div className="text-sm font-medium text-blue-700">Net Amount</div>
+                <div
+                  className={`text-xl font-bold ${
+                    settlementData.netAmount >= 0 ? 'text-green-900' : 'text-red-900'
+                  }`}
+                >
+                  ${settlementData.netAmount.toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            {/* Settlement Deductions by Category */}
+            {settlementData.settlementDeductions &&
+              settlementData.settlementDeductions.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium mb-3">Settlement Deductions by Category</h3>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full table-auto">
+                      <thead>
+                        <tr className="bg-gray-100">
+                          <th className="p-2 text-left">Category</th>
+                          <th className="p-2 text-right">Amount</th>
+                          <th className="p-2 text-right">Count</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {settlementData.settlementDeductions.map((item, index) => (
+                          <tr key={index} className="border-t">
+                            <td className="p-2">{item.categoryName || item.category}</td>
+                            <td className="p-2 text-right">${(item.amount || 0).toFixed(2)}</td>
+                            <td className="p-2 text-right">{item.count || 0}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+          </div>
         </div>
       )}
     </div>

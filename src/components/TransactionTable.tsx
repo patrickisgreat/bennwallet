@@ -274,138 +274,149 @@ function TransactionTable({
                       </td>
                     </tr>
                   ) : (
-                    transactions.map(tx => (
-                      <tr key={tx.id} className={tx.inSettlement ? 'bg-blue-50' : ''}>
-                        <td className="px-1 py-2">
-                          <input
-                            type="checkbox"
-                            checked={selectedTransactions.includes(tx.id)}
-                            onChange={e => handleSelectTransaction(tx.id, e.target.checked)}
-                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                          />
-                        </td>
-                        <td className="hidden sm:table-cell px-1 py-2">
-                          <div className="text-xs text-gray-900">
-                            {tx.entered ? formatDate(tx.entered) : 'No date'}
-                          </div>
-                        </td>
-                        <td className="px-1 py-2">
-                          <div className="text-xs text-gray-900">
-                            {formatDate(tx.transactionDate)}
-                          </div>
-                        </td>
-                        <td className="px-1 py-2">
-                          <div className="text-xs text-gray-900 truncate max-w-20">
-                            {tx.paidBy || tx.payTo || tx.enteredBy}
-                          </div>
-                        </td>
-                        <td className="hidden md:table-cell px-1 py-2">
-                          <div className="text-xs text-gray-900 truncate max-w-20">
-                            {tx.owedBy || '-'}
-                          </div>
-                        </td>
-                        <td className="px-1 py-2 text-xs">
-                          <span
-                            className={`font-semibold ${
-                              tx.optional
-                                ? 'text-gray-500'
-                                : tx.inSettlement
-                                  ? 'text-red-600'
-                                  : 'text-gray-900'
-                            }`}
-                          >
-                            {tx.inSettlement
-                              ? `-${formatMoney(tx.amount)}`
-                              : formatMoney(tx.amount)}
-                          </span>
-                          {tx.optional && (
-                            <span className="ml-1 px-1 inline-flex text-xs leading-4 font-semibold rounded-full bg-purple-100 text-purple-800">
-                              Opt
-                            </span>
-                          )}
-                          {tx.inSettlement && (
-                            <span className="ml-1 px-1 inline-flex text-xs leading-4 font-semibold rounded-full bg-blue-100 text-blue-800">
-                              ⚖️ Settlement
-                            </span>
-                          )}
-                        </td>
-                        <td className="hidden lg:table-cell px-1 py-2">{renderCategoryInfo(tx)}</td>
-                        <td className="hidden xl:table-cell px-1 py-2">
-                          <div className="text-xs text-gray-900 truncate max-w-32">{tx.note}</div>
-                        </td>
-                        <td className="px-1 py-2">
-                          <div className="flex flex-col gap-1">
-                            {tx.category === 'settlement' ? (
-                              <span className="px-2 inline-flex text-xs leading-4 font-semibold rounded-full bg-purple-100 text-purple-800">
-                                Settlement
-                              </span>
-                            ) : tx.paid ? (
-                              <button
-                                onClick={() => handleMarkPaid(tx.id, false)}
-                                className="px-2 inline-flex text-xs leading-4 font-semibold rounded-full bg-green-100 text-green-800 hover:bg-green-200"
-                              >
-                                Paid
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleMarkPaid(tx.id, true)}
-                                className="px-2 inline-flex text-xs leading-4 font-semibold rounded-full bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
-                              >
-                                Unpaid
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className="hidden sm:table-cell px-1 py-2">
-                          <div className="text-xs text-gray-900 truncate max-w-16">
-                            {tx.enteredBy}
-                          </div>
-                        </td>
-                        <td className="px-1 py-2 text-right">
-                          <div className="flex flex-col gap-1">
-                            {tx.inSettlement && tx.category !== 'settlement' ? (
-                              <button
-                                onClick={() => handleUnsettleTransaction(tx.id)}
-                                className="text-xs px-1 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
-                                title="Remove from settlement"
-                              >
-                                ⚖️ Unsettle
-                              </button>
-                            ) : (
-                              !tx.paid &&
-                              tx.category !== 'settlement' && (
-                                <button
-                                  onClick={() => handleApplyToDebt(tx)}
-                                  disabled={applyingTransaction === tx.id}
-                                  className="text-xs px-1 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded disabled:opacity-50"
-                                  title={
-                                    tx.enteredBy === currentUserId
-                                      ? 'Create settlement for others to apply'
-                                      : 'Apply this to your debt'
-                                  }
-                                >
-                                  {applyingTransaction === tx.id ? '...' : '⚖️ Settle'}
-                                </button>
-                              )
-                            )}
-                            <div className="flex gap-1">
-                              <button
-                                onClick={() => onEdit(tx.id)}
-                                className="text-xs px-1 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => onDelete(tx.id)}
-                                className="text-xs px-1 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded"
-                              >
-                                Del
-                              </button>
+                    transactions.map(tx => {
+                      let rowClassName = '';
+                      if (tx.paid) {
+                        rowClassName = 'bg-green-50';
+                      } else if (tx.inSettlement) {
+                        rowClassName = 'bg-blue-50';
+                      }
+
+                      return (
+                        <tr key={tx.id} className={rowClassName}>
+                          <td className="px-1 py-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedTransactions.includes(tx.id)}
+                              onChange={e => handleSelectTransaction(tx.id, e.target.checked)}
+                              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                            />
+                          </td>
+                          <td className="hidden sm:table-cell px-1 py-2">
+                            <div className="text-xs text-gray-900">
+                              {tx.entered ? formatDate(tx.entered) : 'No date'}
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td className="px-1 py-2">
+                            <div className="text-xs text-gray-900">
+                              {formatDate(tx.transactionDate)}
+                            </div>
+                          </td>
+                          <td className="px-1 py-2">
+                            <div className="text-xs text-gray-900 truncate max-w-20">
+                              {tx.paidBy || tx.payTo || tx.enteredBy}
+                            </div>
+                          </td>
+                          <td className="hidden md:table-cell px-1 py-2">
+                            <div className="text-xs text-gray-900 truncate max-w-20">
+                              {tx.owedBy || '-'}
+                            </div>
+                          </td>
+                          <td className="px-1 py-2 text-xs">
+                            <span
+                              className={`font-semibold ${
+                                tx.optional
+                                  ? 'text-gray-500'
+                                  : tx.inSettlement
+                                    ? 'text-red-600'
+                                    : 'text-gray-900'
+                              }`}
+                            >
+                              {tx.inSettlement
+                                ? `-${formatMoney(tx.amount)}`
+                                : formatMoney(tx.amount)}
+                            </span>
+                            {tx.optional && (
+                              <span className="ml-1 px-1 inline-flex text-xs leading-4 font-semibold rounded-full bg-purple-100 text-purple-800">
+                                Opt
+                              </span>
+                            )}
+                            {tx.inSettlement && (
+                              <span className="ml-1 px-1 inline-flex text-xs leading-4 font-semibold rounded-full bg-blue-100 text-blue-800">
+                                ⚖️ Settlement
+                              </span>
+                            )}
+                          </td>
+                          <td className="hidden lg:table-cell px-1 py-2">
+                            {renderCategoryInfo(tx)}
+                          </td>
+                          <td className="hidden xl:table-cell px-1 py-2">
+                            <div className="text-xs text-gray-900 truncate max-w-32">{tx.note}</div>
+                          </td>
+                          <td className="px-1 py-2">
+                            <div className="flex flex-col gap-1">
+                              {tx.category === 'settlement' ? (
+                                <span className="px-2 inline-flex text-xs leading-4 font-semibold rounded-full bg-purple-100 text-purple-800">
+                                  Settlement
+                                </span>
+                              ) : tx.paid ? (
+                                <button
+                                  onClick={() => handleMarkPaid(tx.id, false)}
+                                  className="px-2 inline-flex text-xs leading-4 font-semibold rounded-full bg-green-500 text-white hover:bg-green-600 shadow-sm"
+                                >
+                                  Paid ✓
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleMarkPaid(tx.id, true)}
+                                  className="px-2 inline-flex text-xs leading-4 font-semibold rounded-full bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+                                >
+                                  Unpaid
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className="hidden sm:table-cell px-1 py-2">
+                            <div className="text-xs text-gray-900 truncate max-w-16">
+                              {tx.enteredBy}
+                            </div>
+                          </td>
+                          <td className="px-1 py-2 text-right">
+                            <div className="flex flex-col gap-1">
+                              {tx.inSettlement && tx.category !== 'settlement' ? (
+                                <button
+                                  onClick={() => handleUnsettleTransaction(tx.id)}
+                                  className="text-xs px-1 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
+                                  title="Remove from settlement"
+                                >
+                                  ⚖️ Unsettle
+                                </button>
+                              ) : (
+                                !tx.paid &&
+                                tx.category !== 'settlement' && (
+                                  <button
+                                    onClick={() => handleApplyToDebt(tx)}
+                                    disabled={applyingTransaction === tx.id}
+                                    className="text-xs px-1 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded disabled:opacity-50"
+                                    title={
+                                      tx.enteredBy === currentUserId
+                                        ? 'Create settlement for others to apply'
+                                        : 'Apply this to your debt'
+                                    }
+                                  >
+                                    {applyingTransaction === tx.id ? '...' : '⚖️ Settle'}
+                                  </button>
+                                )
+                              )}
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => onEdit(tx.id)}
+                                  className="text-xs px-1 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => onDelete(tx.id)}
+                                  className="text-xs px-1 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded"
+                                >
+                                  Del
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

@@ -12,6 +12,7 @@ import (
 	"bennwallet/backend/database"
 	"bennwallet/backend/middleware"
 	"bennwallet/backend/models"
+	"bennwallet/backend/services"
 )
 
 func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +61,33 @@ func GetYNABSplits(w http.ResponseWriter, r *http.Request) {
 	// Process categories from the relationship table
 	var results []models.CategoryTotal
 	processCategoryRelationships(w, r, request, userID, hasOptionalColumn, hasUserIdColumn, &results)
+
+	// Check if the request wants settlement data included
+	includeSettlements := r.URL.Query().Get("includeSettlements") == "true"
+	if includeSettlements {
+		response := struct {
+			CategoryTotals []models.CategoryTotal   `json:"categoryTotals"`
+			SettlementData *models.SettlementReport `json:"settlementData,omitempty"`
+		}{
+			CategoryTotals: results,
+		}
+
+		// Get settlement data if date filters are provided
+		if request.TransactionDateMonth != nil && request.TransactionDateYear != nil {
+			month := fmt.Sprintf("%d-%02d", *request.TransactionDateYear, *request.TransactionDateMonth)
+			settlementService := services.NewSettlementService(database.DB)
+			settlementData, err := settlementService.GetSettlementReportData(userID, month, request.Paid != nil && *request.Paid)
+			if err != nil {
+				log.Printf("Error getting settlement data: %v", err)
+			} else {
+				response.SettlementData = settlementData
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
 
 	// Return results
 	w.Header().Set("Content-Type", "application/json")
