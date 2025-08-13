@@ -7,9 +7,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -507,11 +507,36 @@ func testSettlementQueries(t *testing.T, handler *SettlementHandler, transaction
 	})
 
 	t.Run("Get Available Settlement Transactions", func(t *testing.T) {
-		// Create a settlement
-		vacation := transactions["vacation1"]
+		// First, create some additional transactions specifically for this test
+		// that haven't been consumed by previous tests
+		var additionalTxID1, additionalTxID2 string
+
+		// Create transaction where Alice paid and Bob owes
+		err := handler.db.QueryRow(`
+			INSERT INTO transactions 
+			(id, amount, description, date, transaction_date, type, entered, entered_by, user_id, paid_by, owed_by, paid)
+			VALUES (uuid_generate_v4(), $1, $2, TO_CHAR(NOW(), 'YYYY-MM-DD'), TO_CHAR(NOW(), 'YYYY-MM-DD'), 'expense', NOW(), $3, $3, $4, $5, false)
+			RETURNING id
+		`, 75.00, "Test transaction for available check", aliceID, aliceID, bobID).Scan(&additionalTxID1)
+		if err != nil {
+			t.Fatalf("Failed to create additional transaction 1: %v", err)
+		}
+
+		// Create transaction where Bob paid and Alice owes
+		err = handler.db.QueryRow(`
+			INSERT INTO transactions 
+			(id, amount, description, date, transaction_date, type, entered, entered_by, user_id, paid_by, owed_by, paid)
+			VALUES (uuid_generate_v4(), $1, $2, TO_CHAR(NOW(), 'YYYY-MM-DD'), TO_CHAR(NOW(), 'YYYY-MM-DD'), 'expense', NOW(), $3, $3, $4, $5, false)
+			RETURNING id
+		`, 42.50, "Another test transaction for available check", bobID, bobID, aliceID).Scan(&additionalTxID2)
+		if err != nil {
+			t.Fatalf("Failed to create additional transaction 2: %v", err)
+		}
+
+		// Create a settlement using one of the additional transactions
 		createReq := map[string]interface{}{
-			"transactionId": vacation.ID,
-			"notes":         "Vacation settlement",
+			"transactionId": additionalTxID1,
+			"notes":         "Settlement for available test",
 		}
 
 		settlement := makeSettlementRequest(t, handler.CreateSettlement, "POST", "/settlements", createReq, aliceID)
@@ -528,9 +553,21 @@ func testSettlementQueries(t *testing.T, handler *SettlementHandler, transaction
 			t.Fatalf("Failed to unmarshal available transactions: %v", err)
 		}
 
-		// Should have some available transactions between Alice and Bob
+		// Should have at least one available transaction (the second additional transaction)
 		if len(availableTransactions) == 0 {
-			t.Errorf("Expected some available transactions for settlement")
+			t.Errorf("Expected some available transactions for settlement, got 0")
+		} else {
+			// Verify that the second additional transaction is in the available list
+			found := false
+			for _, tx := range availableTransactions {
+				if tx["id"].(string) == additionalTxID2 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected to find additional transaction %s in available transactions", additionalTxID2)
+			}
 		}
 	})
 
@@ -621,8 +658,8 @@ func makeSettlementRequestRawWithID(t *testing.T, handlerFunc http.HandlerFunc, 
 		}
 	}
 
-	path := fmt.Sprintf(pathTemplate, settlementID)
-	path = fmt.Sprintf(path, settlementID) // Replace {id} with settlementID
+	path := strings.ReplaceAll(pathTemplate, "{id}", settlementID)
+	path = strings.ReplaceAll(path, "{transactionId}", settlementID)
 
 	req := httptest.NewRequest(method, path, bytes.NewBuffer(reqBody))
 	if body != nil {
@@ -631,7 +668,11 @@ func makeSettlementRequestRawWithID(t *testing.T, handlerFunc http.HandlerFunc, 
 
 	ctx := context.WithValue(req.Context(), middleware.UserIDKey, userID)
 	req = req.WithContext(ctx)
-	req = mux.SetURLVars(req, map[string]string{"id": settlementID})
+	vars := map[string]string{"id": settlementID}
+	if strings.Contains(pathTemplate, "{transactionId}") {
+		vars = map[string]string{"transactionId": settlementID}
+	}
+	req = mux.SetURLVars(req, vars)
 
 	w := httptest.NewRecorder()
 	handlerFunc(w, req)

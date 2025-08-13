@@ -46,8 +46,8 @@ export default function DebtSummary() {
       const monthlyTransactionMap = new Map<string, Transaction[]>();
 
       transactions.forEach(tx => {
-        // Skip paid transactions unless they are settlement adjustments
-        if (tx.paid && tx.category !== 'settlement') return;
+        // Skip all paid transactions for outstanding debt calculations
+        if (tx.paid) return;
 
         // Use transaction date to determine month
         const transactionDate = new Date(tx.transactionDate);

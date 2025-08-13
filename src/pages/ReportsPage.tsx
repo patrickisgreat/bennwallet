@@ -20,15 +20,7 @@ function ReportsPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState<boolean | null>(null);
-  const [filter, setFilter] = useState<ReportFilter>({
-    startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0],
-    category: '',
-    payTo: '',
-    enteredBy: '',
-    paid: false, // false = show all transactions (not just paid)
-    optional: false, // false = show all transactions (including optional)
-  });
+  const [filter, setFilter] = useState<Partial<ReportFilter>>({});
   const [total, setTotal] = useState(0);
   const [uniqueFields, setUniqueFields] = useState<{ payTo: string[]; enteredBy: string[] }>({
     payTo: [],
@@ -99,15 +91,14 @@ function ReportsPage() {
       console.log('Sending filter to YNAB splits API:', filter);
 
       // Make sure filter is properly formatted
-      const filterToSend: ReportFilter = {
-        startDate: filter.startDate,
-        endDate: filter.endDate,
-        category: filter.category || '',
-        payTo: filter.payTo || '',
-        enteredBy: filter.enteredBy || '',
-        paid: filter.paid ? true : false,
-        optional: filter.optional ? true : false,
-      };
+      const filterToSend: ReportFilter = {};
+      if (filter.startDate) filterToSend.startDate = filter.startDate;
+      if (filter.endDate) filterToSend.endDate = filter.endDate;
+      if (filter.category) filterToSend.category = filter.category;
+      if (filter.payTo) filterToSend.payTo = filter.payTo;
+      if (filter.enteredBy) filterToSend.enteredBy = filter.enteredBy;
+      if (typeof filter.paid === 'boolean') filterToSend.paid = filter.paid;
+      if (typeof filter.optional === 'boolean') filterToSend.optional = filter.optional;
 
       // Add month/year for settlement data if we have date filters
       if (filterToSend.startDate && filterToSend.endDate) {

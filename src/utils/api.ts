@@ -261,8 +261,8 @@ export async function deleteTransaction(id: string): Promise<boolean> {
 }
 
 export interface ReportFilter {
-  startDate: string;
-  endDate: string;
+  startDate?: string;
+  endDate?: string;
   category?: string;
   payTo?: string;
   enteredBy?: string;
@@ -322,7 +322,7 @@ export interface YNABConfig {
 }
 
 export async function fetchYNABSplits(
-  filter: ReportFilter,
+  filter: Partial<ReportFilter>,
   includeSettlements = false
 ): Promise<CategoryTotal[] | ReportResponse> {
   try {
@@ -364,18 +364,24 @@ export async function fetchYNABSplits(
     };
 
     // Send request to the API
-    const requestBody = {
-      startDate: formatDate(filter.startDate),
-      endDate: formatDate(filter.endDate),
-      category: filter.category || null,
-      payTo: filter.payTo || null,
-      enteredBy: filter.enteredBy || null,
-      paid: filter.paid,
-      optional: filter.optional,
-      transactionDateMonth: parseIntOrNull(filter.transactionDateMonth),
-      transactionDateYear: parseIntOrNull(filter.transactionDateYear),
-      userId: userId, // Add userId to the request
+    const requestBody: Record<string, string | number | boolean> = {
+      userId: userId,
     };
+    if (filter.startDate) requestBody.startDate = formatDate(filter.startDate);
+    if (filter.endDate) requestBody.endDate = formatDate(filter.endDate);
+    if (filter.category) requestBody.category = filter.category;
+    if (filter.payTo) requestBody.payTo = filter.payTo;
+    if (filter.enteredBy) requestBody.enteredBy = filter.enteredBy;
+    if (typeof filter.paid === 'boolean') requestBody.paid = filter.paid;
+    if (typeof filter.optional === 'boolean') requestBody.optional = filter.optional;
+    if (typeof filter.transactionDateMonth !== 'undefined') {
+      const parsedMonth = parseIntOrNull(filter.transactionDateMonth);
+      if (parsedMonth !== null) requestBody.transactionDateMonth = parsedMonth;
+    }
+    if (typeof filter.transactionDateYear !== 'undefined') {
+      const parsedYear = parseIntOrNull(filter.transactionDateYear);
+      if (parsedYear !== null) requestBody.transactionDateYear = parsedYear;
+    }
 
     console.log('Final request body sent to API:', JSON.stringify(requestBody, null, 2));
 
