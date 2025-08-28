@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -26,7 +27,7 @@ func NewSettlementHandler(db *sql.DB) *SettlementHandler {
 	}
 }
 
-// CreateSettlement creates a new settlement for a transaction
+// CreateSettlement creates a new settlement for one or more transactions
 func (h *SettlementHandler) CreateSettlement(w http.ResponseWriter, r *http.Request) {
 	userIDValue := r.Context().Value(middleware.UserIDKey)
 	if userIDValue == nil {
@@ -36,8 +37,9 @@ func (h *SettlementHandler) CreateSettlement(w http.ResponseWriter, r *http.Requ
 	userID := userIDValue.(string)
 
 	var req struct {
-		TransactionID string `json:"transactionId"`
-		Notes         string `json:"notes"`
+		TransactionID  string   `json:"transactionId"`
+		TransactionIDs []string `json:"transactionIds"`
+		Notes          string   `json:"notes"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -45,11 +47,81 @@ func (h *SettlementHandler) CreateSettlement(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	settlement, err := h.settlementService.CreateSettlement(userID, req.TransactionID, req.Notes)
+	// Build list of transaction IDs from either field
+	ids := make([]string, 0)
+	if req.TransactionID != "" {
+		ids = append(ids, req.TransactionID)
+	}
+	if len(req.TransactionIDs) > 0 {
+		if len(ids) == 0 {
+			ids = append(ids, req.TransactionIDs...)
+		} else {
+			ids = append(ids, req.TransactionIDs...)
+		}
+	}
+
+	if len(ids) == 0 {
+		http.Error(w, "No transactionId(s) provided", http.StatusBadRequest)
+		return
+	}
+
+	// Validate that all transactions involve only the current user and a single other user
+	var otherUserID string
+	for i, txID := range ids {
+		var paidBy, owedBy sql.NullString
+		if err := h.db.QueryRow(`SELECT paid_by, owed_by FROM transactions WHERE id = $1`, txID).Scan(&paidBy, &owedBy); err != nil {
+			log.Printf("Error validating transaction %s: %v", txID, err)
+			http.Error(w, "failed to get transaction", http.StatusBadRequest)
+			return
+		}
+
+		var thisOther string
+		if paidBy.Valid && paidBy.String == userID && owedBy.Valid {
+			thisOther = owedBy.String
+		} else if owedBy.Valid && owedBy.String == userID && paidBy.Valid {
+			thisOther = paidBy.String
+		} else {
+			http.Error(w, "user not involved in one or more transactions", http.StatusBadRequest)
+			return
+		}
+
+		if i == 0 {
+			otherUserID = thisOther
+		} else if thisOther != otherUserID {
+			http.Error(w, "all transactions must be between the same two users", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Create settlement with the first transaction
+	settlement, err := h.settlementService.CreateSettlement(userID, ids[0], req.Notes)
 	if err != nil {
 		log.Printf("Error creating settlement: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	// Apply remaining transactions, if any
+	if len(ids) > 1 {
+		for _, txID := range ids[1:] {
+			// Fetch amount for the transaction to apply
+			var amount float64
+			if err := h.db.QueryRow(`SELECT amount FROM transactions WHERE id = $1`, txID).Scan(&amount); err != nil {
+				log.Printf("Error getting transaction amount for %s: %v", txID, err)
+				http.Error(w, "failed to get transaction amount", http.StatusBadRequest)
+				return
+			}
+			if err := h.settlementService.ApplyTransactionToSettlement(settlement.ID, txID, amount, userID); err != nil {
+				log.Printf("Error applying transaction to settlement: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		// Refresh settlement after applying all items
+		updated, err := h.settlementService.GetSettlement(settlement.ID)
+		if err == nil {
+			settlement = updated
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -219,6 +291,15 @@ func (h *SettlementHandler) RemoveTransaction(w http.ResponseWriter, r *http.Req
 // GetSettlement retrieves a specific settlement
 func (h *SettlementHandler) GetSettlement(w http.ResponseWriter, r *http.Request) {
 	settlementID := mux.Vars(r)["id"]
+	if settlementID == "" {
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/settlements/") {
+			settlementID = strings.TrimPrefix(path, "/settlements/")
+			if i := strings.IndexRune(settlementID, '/'); i >= 0 {
+				settlementID = settlementID[:i]
+			}
+		}
+	}
 
 	settlement, err := h.settlementService.GetSettlement(settlementID)
 	if err != nil {
@@ -257,13 +338,13 @@ func (h *SettlementHandler) GetTransactionSettlements(w http.ResponseWriter, r *
 	transactionID := mux.Vars(r)["transactionId"]
 
 	query := `
-		SELECT DISTINCT s.id, s.created_by, s.created_for, s.total_amount, 
-		       s.remaining_amount, s.status, s.created_at
-		FROM settlements s
-		JOIN settlement_items si ON s.id = si.settlement_id
-		WHERE si.transaction_id = $1
-		ORDER BY s.created_at DESC
-	`
+        SELECT DISTINCT s.id, s.creator_id, s.recipient_id, s.total_amount, 
+               s.remaining_amount, s.status, s.created_at
+        FROM settlements s
+        JOIN settlement_items si ON s.id = si.settlement_id
+        WHERE si.transaction_id = $1
+        ORDER BY s.created_at DESC
+    `
 
 	rows, err := h.db.Query(query, transactionID)
 	if err != nil {
