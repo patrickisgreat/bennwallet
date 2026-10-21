@@ -165,12 +165,6 @@ func SeedTestData(db *sql.DB) error {
 		categoryIds[cat.name+"-"+cat.user_id] = categoryID
 	}
 
-	// First get user IDs to use for pay_to and entered_by fields
-	userIds := make([]string, 0, len(defaultUsers))
-	for _, user := range defaultUsers {
-		userIds = append(userIds, user.id)
-	}
-
 	// 3. Seed sample transaction data
 	sampleTransactions := []struct {
 		id               string

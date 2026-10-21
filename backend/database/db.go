@@ -335,8 +335,3 @@ func SeedDefaultData(db *sql.DB) error {
 	log.Println("Database setup completed. No data seeded as per application requirements.")
 	return nil
 }
-
-// GetDBType returns the type of database being used
-func GetDBType() string {
-	return "postgres"
-}

@@ -1,35 +1,106 @@
 package migrations
 
 import (
-	"bennwallet/backend/database"
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
+
+	"bennwallet/backend/database"
 )
 
-// RunMigrations executes all migrations in the correct order
-// isResetDB indicates if the database should be reset before running migrations
+// migration is a named, idempotent schema or data change applied once and recorded in the migrations table.
+type migration struct {
+	name string
+	fn   func(*sql.DB) error
+}
+
+// registry lists every migration in the order it must be applied.
+var registry = []migration{
+	{"add_transaction_notes_column", database.AddTransactionNotesColumn},
+	{"add_ynab_categories_table", AddYNABCategoriesTable},
+	{"fix_ynab_categories_column", FixYNABCategoriesColumn},
+	{"add_settlements_tables", AddSettlementsTables},
+	{"restructure_transaction_debt_tracking", RestructureTransactionDebtTracking},
+	{"seed_test_data", SeedTestData},
+	{"seed_settlement_test_data", AddSettlementTestData},
+	{"update_seed_data_for_debt_tracking", UpdateSeedDataForDebtTracking},
+	{"fix_settlement_foreign_keys", FixSettlementForeignKeys},
+	{"fix_transaction_user_references", FixTransactionUserReferences},
+}
+
+// seedMigrations are development-only data seeds that must never run in production.
+var seedMigrations = map[string]bool{
+	"seed_test_data":                     true,
+	"seed_settlement_test_data":          true,
+	"update_seed_data_for_debt_tracking": true,
+}
+
+// RunMigrations applies every unapplied migration in order.
+// When isResetDB is true, all tables are dropped and the base schema recreated first.
 func RunMigrations(db *sql.DB, isResetDB bool) error {
-	log.Println("Running migrations...")
-
-	// If isResetDB is true, handle it first before any other operations
 	if isResetDB {
-		log.Println("Database reset requested - resetting database before migrations...")
-
-		// Drop all tables
+		log.Println("Resetting database before migrations...")
 		if err := DropAllTables(db); err != nil {
 			return fmt.Errorf("failed to drop tables: %w", err)
 		}
-
-		// Create base tables
-		log.Println("Creating base tables...")
 		if err := CreateBaseSchema(db); err != nil {
 			return fmt.Errorf("failed to create base schema: %w", err)
 		}
 	}
 
-	// Create migrations table if it doesn't exist
+	if err := ensureMigrationsTable(db); err != nil {
+		return err
+	}
+
+	applied, err := appliedMigrations(db)
+	if err != nil {
+		return err
+	}
+
+	production := isProduction()
+	for _, m := range registry {
+		if production && seedMigrations[m.name] {
+			log.Printf("Skipping %s in production", m.name)
+			continue
+		}
+		if applied[m.name] {
+			continue
+		}
+
+		log.Printf("Applying migration: %s", m.name)
+		if err := m.fn(db); err != nil {
+			return fmt.Errorf("failed to apply migration %s: %w", m.name, err)
+		}
+		if _, err := db.Exec("INSERT INTO migrations (name) VALUES ($1)", m.name); err != nil {
+			return fmt.Errorf("failed to record migration %s: %w", m.name, err)
+		}
+	}
+
+	log.Println("All migrations completed successfully")
+	return nil
+}
+
+// GetPendingMigrations returns the names of registered migrations not yet applied.
+func GetPendingMigrations(db *sql.DB) ([]string, error) {
+	if err := ensureMigrationsTable(db); err != nil {
+		return nil, err
+	}
+
+	applied, err := appliedMigrations(db)
+	if err != nil {
+		return nil, err
+	}
+
+	var pending []string
+	for _, m := range registry {
+		if !applied[m.name] {
+			pending = append(pending, m.name)
+		}
+	}
+	return pending, nil
+}
+
+func ensureMigrationsTable(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS migrations (
 			id SERIAL PRIMARY KEY,
@@ -40,90 +111,23 @@ func RunMigrations(db *sql.DB, isResetDB bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
-
-	// Define migrations
-	migrations := []struct {
-		name string
-		fn   func(*sql.DB) error
-	}{
-		// Add note column to transactions table
-		{"add_transaction_notes_column", func(db *sql.DB) error {
-			return database.AddTransactionNotesColumn(db)
-		}},
-		// Add YNAB categories table with group_id column
-		{"add_ynab_categories_table", AddYNABCategoriesTable},
-		// Fix YNAB categories column inconsistency
-		{"fix_ynab_categories_column", FixYNABCategoriesColumn},
-		// Add settlements tables for transaction offsetting
-		{"add_settlements_tables", AddSettlementsTables},
-		// Restructure transactions to properly track debt
-		{"restructure_transaction_debt_tracking", RestructureTransactionDebtTracking},
-		// Test data seeding is ONLY for development and testing
-		{"seed_test_data", SeedTestData},
-		// Add settlement test data for development
-		{"seed_settlement_test_data", AddSettlementTestData},
-		// Update seed data for new debt tracking structure
-		{"update_seed_data_for_debt_tracking", UpdateSeedDataForDebtTracking},
-		// Fix settlement foreign keys to allow transaction deletion
-		{"fix_settlement_foreign_keys", FixSettlementForeignKeys},
-		// Fix transaction user references from names to IDs
-		{"fix_transaction_user_references", func(db *sql.DB) error {
-			return FixTransactionUserReferences(db)
-		}},
-	}
-
-	// Check if we're in production
-	inProduction := os.Getenv("APP_ENV") == "production" ||
-		os.Getenv("NODE_ENV") == "production" ||
-		os.Getenv("ENVIRONMENT") == "production" ||
-		os.Getenv("ENV") == "production"
-
-	if inProduction {
-		log.Println("Running in PRODUCTION mode - test data seeding will be skipped")
-	} else {
-		log.Println("Running in DEVELOPMENT/TEST mode - test data may be seeded if needed")
-	}
-
-	// Run each migration if it hasn't been applied yet
-	for _, migration := range migrations {
-		// Skip test data seeding in production
-		if inProduction && migration.name == "seed_test_data" {
-			log.Printf("Skipping test data seeding in production environment")
-			continue
-		}
-
-		var count int
-		err := db.QueryRow("SELECT COUNT(*) FROM migrations WHERE name = $1", migration.name).Scan(&count)
-		if err != nil {
-			return fmt.Errorf("failed to check migration status: %w", err)
-		}
-
-		if count == 0 {
-			log.Printf("Applying migration: %s", migration.name)
-			err := migration.fn(db)
-			if err != nil {
-				return fmt.Errorf("failed to apply migration %s: %w", migration.name, err)
-			}
-
-			_, err = db.Exec("INSERT INTO migrations (name) VALUES ($1)", migration.name)
-			if err != nil {
-				return fmt.Errorf("failed to record migration: %w", err)
-			}
-		} else {
-			log.Printf("Skipping already applied migration: %s", migration.name)
-
-			// Special case for fix_ynab_schema - we want to run this again even if it's been applied
-			// to handle any foreign key issues that might have occurred in production
-			if migration.name == "fix_ynab_schema" || migration.name == "ensure_admin_user" {
-				log.Printf("Running %s again to ensure database is properly configured...", migration.name)
-				err := migration.fn(db)
-				if err != nil {
-					return fmt.Errorf("failed to reapply migration %s: %w", migration.name, err)
-				}
-			}
-		}
-	}
-
-	log.Println("All migrations completed successfully")
 	return nil
+}
+
+func appliedMigrations(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query("SELECT name FROM migrations")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query migrations: %w", err)
+	}
+	defer rows.Close()
+
+	applied := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan migration name: %w", err)
+		}
+		applied[name] = true
+	}
+	return applied, rows.Err()
 }

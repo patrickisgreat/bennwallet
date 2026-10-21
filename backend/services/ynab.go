@@ -3,7 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -73,7 +73,7 @@ func SyncYNABCategoriesNew(userID, budgetID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		log.Printf("YNAB API error: %s", string(body))
 		return fmt.Errorf("YNAB API returned status %d", resp.StatusCode)
 	}

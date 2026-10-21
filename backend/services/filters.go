@@ -128,33 +128,6 @@ func GetSavedFilterByID(id string) (*models.SavedFilter, error) {
 	return &filter, nil
 }
 
-// GetDefaultFilter retrieves the default filter for a user and resource type
-func GetDefaultFilter(userID, resourceType string) (*models.SavedFilter, error) {
-	var filter models.SavedFilter
-	err := database.DB.QueryRow(`
-		SELECT id, name, user_id, resource_type, filter_config, is_default, created_at, updated_at
-		FROM saved_filters
-		WHERE user_id = $1 AND resource_type = $2 AND is_default = 1
-	`, userID, resourceType).Scan(
-		&filter.ID,
-		&filter.Name,
-		&filter.UserID,
-		&filter.ResourceType,
-		&filter.FilterConfig,
-		&filter.IsDefault,
-		&filter.CreatedAt,
-		&filter.UpdatedAt,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil // No default filter found
-		}
-		return nil, fmt.Errorf("failed to query default filter: %w", err)
-	}
-
-	return &filter, nil
-}
-
 // UpdateSavedFilter updates an existing saved filter
 func UpdateSavedFilter(id, name, filterConfig string, isDefault bool) (*models.SavedFilter, error) {
 	// Get the existing filter to ensure it exists and to get its user ID and resource type

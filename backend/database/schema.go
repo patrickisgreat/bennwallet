@@ -6,23 +6,6 @@ import (
 	"log"
 )
 
-// CreateSchema creates the database schema for PostgreSQL
-func CreateSchema(db *sql.DB) error {
-	log.Printf("Creating schema for PostgreSQL database")
-
-	err := createPostgresSchema(db)
-	if err != nil {
-		return fmt.Errorf("failed to create schema: %w", err)
-	}
-
-	// Record the schema creation in the migrations table
-	if err := recordMigration(db, "base_schema", "postgres"); err != nil {
-		return fmt.Errorf("failed to record migration: %w", err)
-	}
-
-	return nil
-}
-
 // AddTransactionNotesColumn adds the note column to the transactions table if it doesn't exist
 func AddTransactionNotesColumn(db *sql.DB) error {
 	log.Printf("Adding note column to transactions table if it doesn't exist")
@@ -40,33 +23,11 @@ func AddTransactionNotesColumn(db *sql.DB) error {
 			return fmt.Errorf("failed to add note column to transactions table: %w", err)
 		}
 		log.Printf("Added note column to transactions table")
-
-		// Record the migration
-		if err := recordMigration(db, "add_transaction_notes_column", "postgres"); err != nil {
-			return fmt.Errorf("failed to record migration: %w", err)
-		}
 	} else {
 		log.Printf("Note column already exists in transactions table")
 	}
 
 	return nil
-}
-
-// createPostgresSchema creates all the tables needed for PostgreSQL
-func createPostgresSchema(db *sql.DB) error {
-	// This is now available in postgres_schema.go
-	return CreatePostgresSchema(db)
-}
-
-// recordMigration records a migration in the migrations table
-func recordMigration(db *sql.DB, name string, dbType string) error {
-	query := `
-		INSERT INTO migrations (name) 
-		VALUES ($1)
-		ON CONFLICT (name) DO NOTHING
-	`
-	_, err := db.Exec(query, name)
-	return err
 }
 
 // GetColumnNames returns all column names for a given table
@@ -110,22 +71,4 @@ func CheckColumnExists(db *sql.DB, tableName, columnName string) (bool, error) {
 	}
 
 	return false, nil
-}
-
-// AddColumn adds a column to a table if it doesn't exist
-func AddColumn(db *sql.DB, tableName, columnName, columnType string) error {
-	exists, err := CheckColumnExists(db, tableName, columnName)
-	if err != nil {
-		return err
-	}
-
-	if !exists {
-		query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", tableName, columnName, columnType)
-		_, err = db.Exec(query)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

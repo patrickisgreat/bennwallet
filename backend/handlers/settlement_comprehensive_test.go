@@ -459,7 +459,7 @@ func testSettlementPermissions(t *testing.T, handler *SettlementHandler, transac
 		settlementID := settlement["id"].(string)
 
 		// Charlie (not involved) tries to access the settlement
-		w := makeSettlementRequestRaw(t, handler.GetSettlement, "GET", "/settlements/"+settlementID, nil, charlieID)
+		makeSettlementRequestRaw(t, handler.GetSettlement, "GET", "/settlements/"+settlementID, nil, charlieID)
 		// This should work as getting settlements doesn't restrict access in the current implementation
 
 		// Charlie tries to modify the settlement
@@ -468,7 +468,7 @@ func testSettlementPermissions(t *testing.T, handler *SettlementHandler, transac
 			"notes":  "Unauthorized cancellation",
 		}
 
-		w = makeSettlementRequestRawWithID(t, handler.UpdateSettlementStatus, "PUT", "/settlements/{id}/status", statusReq, charlieID, settlementID)
+		w := makeSettlementRequestRawWithID(t, handler.UpdateSettlementStatus, "PUT", "/settlements/{id}/status", statusReq, charlieID, settlementID)
 		if w.Code == http.StatusOK {
 			t.Errorf("Expected status update to fail for unauthorized user")
 		}

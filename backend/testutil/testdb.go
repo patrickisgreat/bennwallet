@@ -28,14 +28,7 @@ func (c TestDBConfig) ConnectionString() string {
 func SetupTestDB(t *testing.T) (*sql.DB, func()) {
 	// Use the shared GetTestDBConfig from testutil.go
 	postgresConfig := GetTestDBConfig()
-	config := TestDBConfig{
-		Host:     postgresConfig.Host,
-		Port:     postgresConfig.Port,
-		User:     postgresConfig.User,
-		Password: postgresConfig.Password,
-		DBName:   postgresConfig.DBName,
-		SSLMode:  postgresConfig.SSLMode,
-	}
+	config := TestDBConfig(postgresConfig)
 
 	// Connect to postgres to create/drop test database
 	mainDB, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=postgres sslmode=%s",

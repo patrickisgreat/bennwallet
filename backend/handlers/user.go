@@ -138,6 +138,10 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	// Check if user already exists by Firebase ID
 	var userID string
 	err := database.DB.QueryRow("SELECT id FROM users WHERE id = $1", request.FirebaseID).Scan(&userID)
+	if err != nil && err != sql.ErrNoRows {
+		http.Error(w, "Failed to look up user", http.StatusInternalServerError)
+		return
+	}
 
 	// Get roles from config or database, not hardcoded
 	role := "user" // Default role for new users
@@ -169,88 +173,6 @@ func SyncFirebaseUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"id":   userID,
 		"role": role,
-	})
-}
-
-// CreateOrUpdateFirebaseUser creates a new user account with the Firebase UID
-func CreateOrUpdateFirebaseUser(w http.ResponseWriter, r *http.Request) {
-	// Get the Firebase user ID from the request context
-	firebaseUID := middleware.GetUserIDFromContext(r)
-	if firebaseUID == "" {
-		http.Error(w, "Unauthorized: No Firebase UID found", http.StatusUnauthorized)
-		return
-	}
-
-	// Parse the request body to get the user details
-	var userRequest struct {
-		Email    string `json:"email"`
-		Name     string `json:"name"`
-		Username string `json:"username,omitempty"` // Optional
-	}
-
-	err := json.NewDecoder(r.Body).Decode(&userRequest)
-	if err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// If no username is provided, use the email
-	if userRequest.Username == "" {
-		userRequest.Username = userRequest.Email
-	}
-
-	log.Printf("Creating or updating user with Firebase UID %s, email %s", firebaseUID, userRequest.Email)
-
-	// Default to approved status and regular user
-	status := "approved"
-	isAdmin := false
-	role := "user"
-
-	// Check if this user already exists
-	var existingID string
-	err = database.DB.QueryRow("SELECT id FROM users WHERE id = $1", firebaseUID).Scan(&existingID)
-	if err == nil {
-		// User exists, update the record
-		_, err = database.DB.Exec(
-			"UPDATE users SET name = $1, username = $2 WHERE id = $3",
-			userRequest.Name, userRequest.Username, firebaseUID)
-
-		if err != nil {
-			http.Error(w, "Failed to update user: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Get the user's role and admin status
-		err = database.DB.QueryRow("SELECT is_admin, COALESCE(role, 'user') FROM users WHERE id = $1", firebaseUID).Scan(&isAdmin, &role)
-		if err != nil {
-			log.Printf("Error getting user role: %v", err)
-			// Continue with defaults
-		}
-
-		log.Printf("Updated existing user %s with role %s", firebaseUID, role)
-	} else {
-		// Create a new user record with this Firebase UID
-		_, err = database.DB.Exec(
-			"INSERT INTO users (id, username, name, status, is_admin, role) VALUES ($1, $2, $3, $4, $5, $6)",
-			firebaseUID, userRequest.Username, userRequest.Name, status, isAdmin, role)
-
-		if err != nil {
-			http.Error(w, "Failed to create user: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("Created new user with Firebase UID %s, role: %s", firebaseUID, role)
-	}
-
-	// Return the user info
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(models.User{
-		ID:       firebaseUID,
-		Username: userRequest.Username,
-		Name:     userRequest.Name,
-		Status:   status,
-		IsAdmin:  isAdmin,
-		Role:     role,
 	})
 }
 

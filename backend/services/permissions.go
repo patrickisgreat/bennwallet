@@ -3,7 +3,6 @@ package services
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"bennwallet/backend/database"
@@ -16,19 +15,6 @@ var RoleHierarchy = map[string]int{
 	"user":       1,
 	"admin":      2,
 	"superadmin": 3,
-}
-
-// IsRoleAtLeast checks if a role is at least at the specified level
-func IsRoleAtLeast(userRole, requiredRole string) bool {
-	userLevel, userExists := RoleHierarchy[userRole]
-	requiredLevel, requiredExists := RoleHierarchy[requiredRole]
-
-	// If the role doesn't exist in our hierarchy, default behavior
-	if !userExists || !requiredExists {
-		return userRole == requiredRole
-	}
-
-	return userLevel >= requiredLevel
 }
 
 // GetUserRole gets the role of a user
@@ -241,93 +227,6 @@ func GetUserPermissions(userID string) ([]models.Permission, error) {
 	}
 
 	return permissions, nil
-}
-
-// CheckPermission checks if a user has permission to access a resource
-func CheckPermission(userID, resourceOwnerID, resourceType, permissionType string) (bool, error) {
-	// Always allow users to access their own resources
-	if userID == resourceOwnerID {
-		return true, nil
-	}
-
-	// Check if user is an admin or superadmin
-	isUserAdmin, err := IsAdmin(userID)
-	if err != nil {
-		return false, fmt.Errorf("failed to check admin status: %w", err)
-	}
-
-	if isUserAdmin {
-		return true, nil
-	}
-
-	// Check for explicit permission
-	var exists bool
-	now := time.Now()
-
-	err = database.DB.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 FROM permissions 
-			WHERE granted_user_id = $1 
-			AND owner_user_id = $2 
-			AND resource_type IN ($3, 'all')
-			AND permission_type IN ($4, 'write', 'all')
-			AND (expires_at IS NULL OR expires_at > $5)
-		)
-	`, userID, resourceOwnerID, resourceType, permissionType, now).Scan(&exists)
-
-	if err != nil {
-		return false, fmt.Errorf("failed to check permission: %w", err)
-	}
-
-	return exists, nil
-}
-
-// GetAccessibleResources gets all resource owners that a user has access to for a given resource type
-func GetAccessibleResources(userID, resourceType, permissionType string) ([]string, error) {
-	// Get user's admin status
-	isUserAdmin, err := IsAdmin(userID)
-	if err != nil {
-		log.Printf("Error checking if user %s is admin: %v", userID, err)
-		isUserAdmin = false
-	}
-
-	var rows *sql.Rows
-	now := time.Now()
-
-	if isUserAdmin {
-		// Admins can access all resources
-		rows, err = database.DB.Query(`
-			SELECT id FROM users
-		`)
-	} else {
-		// Regular users can only access resources they own or have been granted access to
-		rows, err = database.DB.Query(`
-			SELECT DISTINCT owner_user_id 
-			FROM permissions 
-			WHERE granted_user_id = $1 
-			AND resource_type IN ($2, 'all')
-			AND permission_type IN ($3, 'write', 'all')
-			AND (expires_at IS NULL OR expires_at > $4)
-			UNION
-			SELECT $5 as owner_user_id
-		`, userID, resourceType, permissionType, now, userID)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to query accessible resources: %w", err)
-	}
-	defer rows.Close()
-
-	var ownerIDs []string
-	for rows.Next() {
-		var ownerID string
-		if err := rows.Scan(&ownerID); err != nil {
-			return nil, fmt.Errorf("failed to scan owner ID: %w", err)
-		}
-		ownerIDs = append(ownerIDs, ownerID)
-	}
-
-	return ownerIDs, nil
 }
 
 // GetAllPermissions gets all permissions in the system

@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"log"
-	"math/rand"
 	"net/http"
 
 	"bennwallet/backend/database"
@@ -183,12 +182,4 @@ func DeleteCategory(w http.ResponseWriter, r *http.Request) {
 	// Since we're switching to YNAB categories which are synced from YNAB,
 	// deleting a category directly should be discouraged
 	http.Error(w, "Deleting categories directly is disabled. Please sync categories from YNAB instead.", http.StatusNotImplemented)
-}
-
-func generateRandomColor() string {
-	colors := []string{
-		"#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEEAD",
-		"#D4A5A5", "#9B59B6", "#3498DB", "#1ABC9C", "#F1C40F",
-	}
-	return colors[rand.Intn(len(colors))]
 }

@@ -23,9 +23,9 @@ BennWallet is a full-stack web application designed to help couples or roommates
 ### Backend
 
 - Go (Golang)
-- Gorilla Mux for routings
-- SQLite for database
-- JWT for authentication
+- Gorilla Mux for routing
+- PostgreSQL for the database
+- Firebase Authentication for API tokens
 
 ## Project Structure
 
@@ -34,9 +34,10 @@ bennwallet/
 ├── backend/               # Go backend code
 │   ├── database/          # Database connection and models
 │   ├── handlers/          # API endpoint handlers
-│   ├── middleware/        # Request/response middleware
+│   ├── middleware/        # Auth, CORS and permission middleware
+│   ├── migrations/        # Ordered schema and seed migrations
 │   ├── models/            # Data models
-│   ├── utils/             # Helper functions
+│   ├── services/          # Business logic (settlements, YNAB, permissions)
 │   └── main.go            # Entry point for the backend
 ├── src/                   # React frontend code
 │   ├── components/        # Reusable React components
@@ -52,7 +53,7 @@ bennwallet/
 
 ### Prerequisites
 
-- Go 1.16+
+- Go 1.24+
 - Node.js 16+
 - npm or yarn
 

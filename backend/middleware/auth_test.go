@@ -25,10 +25,6 @@ var (
 	}
 )
 
-// mockFirebaseAuth is a simple type that allows us to set firebaseAuth to a non-nil value
-// without importing the actual firebase auth
-type mockFirebaseAuth struct{}
-
 func TestExtractToken(t *testing.T) {
 	testCases := []struct {
 		name          string

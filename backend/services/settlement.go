@@ -120,7 +120,7 @@ func (s *SettlementService) CreateSettlement(userID string, transactionID string
 	defer tx.Rollback()
 
 	// Create an empty settlement that can grow as transactions are added
-	log.Printf("DEBUG: Creating settlement %s between %s and %s", settlementID, createdBy, createdFor)
+	log.Printf("Creating settlement %s between %s and %s", settlementID, createdBy, createdFor)
 	_, err = tx.Exec(`
 		INSERT INTO settlements (id, creator_id, recipient_id, total_amount, remaining_amount, status, notes, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -130,7 +130,7 @@ func (s *SettlementService) CreateSettlement(userID string, transactionID string
 		return nil, fmt.Errorf("failed to create settlement: %w", err)
 	}
 
-	log.Printf("DEBUG: Settlement created, now applying initial transaction %s with amount %f", transactionID, transaction.Amount)
+	log.Printf("Settlement created, now applying initial transaction %s with amount %f", transactionID, transaction.Amount)
 	// Apply the initial transaction using the standard method
 	if err := s.applyTransactionToSettlementTx(tx, settlementID, transactionID, transaction.Amount, userID); err != nil {
 		return nil, fmt.Errorf("failed to apply initial transaction: %w", err)
@@ -182,7 +182,7 @@ func (s *SettlementService) applyTransactionToSettlementTx(tx *sql.Tx, settlemen
 	}
 
 	// Debug logging
-	log.Printf("DEBUG: Settlement %s status: %s, total: %f", settlementID, settlement.Status, settlement.TotalAmount)
+	log.Printf("Settlement %s status: %s, total: %f", settlementID, settlement.Status, settlement.TotalAmount)
 
 	// Validate the settlement is active
 	if settlement.Status != "active" {
@@ -543,7 +543,7 @@ func (s *SettlementService) createSettlementAdjustmentTransactions(tx *sql.Tx, s
 
 		// Create settlement adjustment transaction
 		adjID := uuid.New().String()
-		description := fmt.Sprintf("Settlement adjustment")
+		description := "Settlement adjustment"
 
 		var paidBy, owedBy string
 		if amount > 0 {

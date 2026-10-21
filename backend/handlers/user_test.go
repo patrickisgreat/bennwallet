@@ -13,42 +13,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func setupUserTestDB() {
-	// Use our shared PostgreSQL test DB setup helper
-	db, err := SetupPostgresTestDB()
-	if err != nil {
-		panic(err)
-	}
-	database.DB = db
-
-	// Insert test data including admin user
-	_, err = db.Exec(`INSERT INTO users (id, username, name, status, is_admin, role) 
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE SET 
-		  username = EXCLUDED.username,
-		  name = EXCLUDED.name,
-		  status = EXCLUDED.status,
-		  is_admin = EXCLUDED.is_admin,
-		  role = EXCLUDED.role`,
-		"test1", "testuser", "Test User", "approved", false, "user")
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = db.Exec(`INSERT INTO users (id, username, name, status, is_admin, role) 
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE SET 
-		  username = EXCLUDED.username,
-		  name = EXCLUDED.name,
-		  status = EXCLUDED.status,
-		  is_admin = EXCLUDED.is_admin,
-		  role = EXCLUDED.role`,
-		"admin1", "Sarah", "Sarah Admin", "approved", true, "admin")
-	if err != nil {
-		panic(err)
-	}
-}
-
 func TestGetUsers(t *testing.T) {
 	// Ensure the database is clean before running test
 	db, err := SetupPostgresTestDB()

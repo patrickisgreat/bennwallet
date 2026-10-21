@@ -208,7 +208,7 @@ func extractToken(authHeader string) string {
 // verifyToken verifies the Firebase JWT token
 func verifyToken(idToken string) (*auth.Token, error) {
 	if firebaseAuth == nil {
-		return nil, errors.New("Firebase auth client not initialized")
+		return nil, errors.New("firebase auth client not initialized")
 	}
 
 	ctx := context.Background()

@@ -38,67 +38,6 @@ func getUserNameMap(db *sql.DB) map[string]string {
 	return nameMap
 }
 
-// EnsureTransactionDateColumn checks if the transaction_date column exists in the transactions table
-// and creates it if it doesn't exist. This helps handle database schema migrations gracefully.
-func EnsureTransactionDateColumn() error {
-	log.Println("Checking for transaction_date column in transactions table...")
-
-	// Check if the transactions table exists
-	var hasTransactionsTable bool
-	err := database.DB.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.tables 
-			WHERE table_name = 'transactions'
-		)
-	`).Scan(&hasTransactionsTable)
-
-	if err != nil {
-		log.Printf("Error checking for transactions table: %v", err)
-		return err
-	}
-
-	if !hasTransactionsTable {
-		log.Println("Transactions table doesn't exist yet, no need to add column")
-		return nil
-	}
-
-	// Check if the transaction_date column exists
-	var hasTransactionDateColumn bool
-	err = database.DB.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns 
-			WHERE table_name = 'transactions' AND column_name = 'transaction_date'
-		)
-	`).Scan(&hasTransactionDateColumn)
-
-	if err != nil {
-		log.Printf("Error checking for transaction_date column: %v", err)
-		return err
-	}
-
-	if !hasTransactionDateColumn {
-		log.Println("Adding transaction_date column to transactions table")
-		_, err = database.DB.Exec(`ALTER TABLE transactions ADD COLUMN transaction_date TEXT`)
-		if err != nil {
-			log.Printf("Error adding transaction_date column: %v", err)
-			return err
-		}
-
-		log.Println("Setting transaction_date to match date column for existing records")
-		_, err = database.DB.Exec(`UPDATE transactions SET transaction_date = date WHERE transaction_date IS NULL`)
-		if err != nil {
-			log.Printf("Error populating transaction_date column: %v", err)
-			return err
-		}
-
-		log.Println("Successfully added and populated transaction_date column")
-	} else {
-		log.Println("transaction_date column already exists")
-	}
-
-	return nil
-}
-
 func GetTransactions(w http.ResponseWriter, r *http.Request) {
 	// Get the user ID from the authentication context
 	userID := middleware.GetUserIDFromContext(r)
@@ -368,7 +307,6 @@ func GetTransactions(w http.ResponseWriter, r *http.Request) {
 			}
 			args = append(args, nextDay)
 		}
-		paramCounter++
 		log.Printf("Added transaction end date filter: %s (inclusive)", txEndDate)
 	}
 
@@ -704,8 +642,7 @@ func GetTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var row *sql.Row
-	row = database.DB.QueryRow(query, id)
+	row := database.DB.QueryRow(query, id)
 
 	if hasOptionalColumn && hasUserIdColumn {
 		err = row.Scan(&t.ID, &t.Amount, &t.Description, &dateStr, &transactionDate, &t.Type, &t.PaidBy, &owedBy, &t.Paid, &paidDate, &t.EnteredBy, &t.Optional, &userId, &t.Note)
@@ -1004,7 +941,7 @@ func AddTransaction(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO transactions (id, amount, description, date, transaction_date, type, paid, paid_date, entered_by, note`
 
 	paramCount := 10
-	insertValues := fmt.Sprintf("$1, $2, $3, $4, $5, $6, $7, $8, $9, $10")
+	insertValues := "$1, $2, $3, $4, $5, $6, $7, $8, $9, $10"
 	insertArgs := []interface{}{t.ID, t.Amount, t.Description, t.Date, t.TransactionDate, t.Type, t.Paid, t.PaidDate, t.EnteredBy, t.Note}
 
 	// Add paid_by column

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -173,7 +173,7 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 		transaction.Subtransactions = append(transaction.Subtransactions, YNABSubtransaction{
 			Amount:     amountMilliunits,
 			CategoryID: categoryID,
-			Memo:       fmt.Sprintf("Imported from BennWallet"),
+			Memo:       "Imported from BennWallet",
 		})
 	}
 
@@ -220,7 +220,7 @@ func CreateYNABTransaction(request YNABSyncRequest) error {
 	defer resp.Body.Close()
 
 	// Check response
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		log.Printf("YNAB API error: %s (%d)", string(body), resp.StatusCode)
 
